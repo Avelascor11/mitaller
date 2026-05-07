@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Post } from '@nestjs/common';
+import { Body, Controller, Get, Headers, Param, Post } from '@nestjs/common';
 import { ShipmentsService } from './shipments.service';
 
 @Controller('shipments')
@@ -18,6 +18,16 @@ export class ShipmentsController {
   @Get()
   findAll() {
     return this.shipments.findAll();
+  }
+
+  @Get('print-queue')
+  printQueue(@Headers('x-print-agent-token') token?: string) {
+    return this.shipments.findPrintQueue(token);
+  }
+
+  @Post(':id/mark-printed')
+  markPrinted(@Param('id') id: string, @Headers('x-print-agent-token') token?: string, @Body() body?: { result?: unknown }) {
+    return this.shipments.markPrinted(id, token, body?.result);
   }
 
   @Get('shipping-methods')

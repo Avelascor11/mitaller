@@ -1,4 +1,5 @@
-import { BadRequestException, Injectable } from '@nestjs/common';
+import { BadRequestException, Injectable, UnauthorizedException } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { ActivityService } from '../activity/activity.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { SendcloudAdapter } from '../sendcloud/sendcloud.adapter';
@@ -12,7 +13,8 @@ export class ShipmentsService {
     private readonly sendcloud: SendcloudAdapter,
     private readonly activity: ActivityService,
     private readonly labelPrinter: LabelPrinterService,
-    private readonly shopify: ShopifyAdapter
+    private readonly shopify: ShopifyAdapter,
+    private readonly config: ConfigService
   ) {}
 
   findAll() {
@@ -25,6 +27,48 @@ export class ShipmentsService {
 
   async listShippingMethods() {
     return this.sendcloud.listShippingMethods();
+  }
+
+  async findPrintQueue(token?: string) {
+    this.assertPrintAgentToken(token);
+    const printedLogs = await this.prisma.activityLog.findMany({
+      where: { entityType: 'Shipment', action: 'LABEL_PRINTED' },
+      select: { entityId: true },
+      distinct: ['entityId']
+    });
+    const printedIds = printedLogs.map((log) => log.entityId);
+    const shipments = await this.prisma.shipment.findMany({
+      where: {
+        status: 'LABEL_CREATED',
+        labelUrl: { not: null },
+        id: { notIn: printedIds }
+      },
+      include: { order: { include: { items: true } } },
+      orderBy: { createdAt: 'asc' },
+      take: 25
+    });
+    return shipments.map((shipment) => ({
+      id: shipment.id,
+      orderNumber: shipment.order.orderNumber,
+      labelUrl: shipment.labelUrl,
+      trackingNumber: shipment.trackingNumber,
+      carrier: shipment.carrier,
+      createdAt: shipment.createdAt,
+      itemCount: shipment.order.items.reduce((total, item) => total + item.quantity, 0)
+    }));
+  }
+
+  async markPrinted(id: string, token?: string, result?: unknown) {
+    this.assertPrintAgentToken(token);
+    const shipment = await this.prisma.shipment.findUniqueOrThrow({ where: { id }, include: { order: true } });
+    await this.activity.log({
+      entityType: 'Shipment',
+      entityId: shipment.id,
+      action: 'LABEL_PRINTED',
+      message: `Etiqueta impresa para ${shipment.order.orderNumber}`,
+      metadataJson: result ?? {}
+    });
+    return { ok: true, shipmentId: shipment.id, orderNumber: shipment.order.orderNumber };
   }
 
   async createLabelForOrder(orderId: string) {
@@ -116,5 +160,11 @@ export class ShipmentsService {
       },
       shopifyResult
     };
+  }
+
+  private assertPrintAgentToken(token?: string) {
+    const configured = this.config.get<string>('PRINT_AGENT_TOKEN')?.trim();
+    if (!configured) return;
+    if (token !== configured) throw new UnauthorizedException('Print agent token invalido');
   }
 }
