@@ -319,7 +319,7 @@ struct PurchaseMatrixGroup: Identifiable {
 
 @Observable
 final class WorkshopStore {
-    var apiBaseURL = "http://192.168.1.247:3001"
+    var apiBaseURL = "https://mitaller-production-4755.up.railway.app"
     var isLoading = false
     var syncError: String?
     var isAPIConnected = false
