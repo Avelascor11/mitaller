@@ -28,7 +28,7 @@ services:
       - key: SHOPIFY_IMPORT_ORDER_LIMIT
         value: "100"
       - key: SHOPIFY_MIN_ORDER_NUMBER
-        value: "9341"
+        value: "9454"
       - key: SENDCLOUD_PUBLIC_KEY
         sync: false
       - key: SENDCLOUD_SECRET_KEY
