@@ -24,4 +24,4 @@ COPY --from=build /app/apps/api/dist ./apps/api/dist
 COPY --from=build /app/apps/api/prisma ./apps/api/prisma
 COPY --from=build /app/packages ./packages
 EXPOSE 3001
-CMD ["npm", "run", "start:api"]
+CMD ["sh", "-c", "npm run prisma:push && npm run start:api"]
