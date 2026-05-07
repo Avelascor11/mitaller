@@ -60,7 +60,11 @@ export class ShipmentsService {
 
   async markPrinted(id: string, token?: string, result?: unknown) {
     this.assertPrintAgentToken(token);
-    const shipment = await this.prisma.shipment.findUniqueOrThrow({ where: { id }, include: { order: true } });
+    const shipment = await this.prisma.shipment.update({
+      where: { id },
+      data: { status: 'PRINTED' },
+      include: { order: true }
+    });
     await this.activity.log({
       entityType: 'Shipment',
       entityId: shipment.id,

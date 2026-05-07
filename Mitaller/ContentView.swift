@@ -155,6 +155,34 @@ struct WorkshopOrderItem: Identifiable, Hashable {
 }
 
 struct WorkshopOrder: Identifiable, Hashable {
+    enum Source: String, Hashable {
+        case shopify = "Shopify"
+        case sheet = "Hoja"
+
+        var icon: String {
+            switch self {
+            case .shopify: "cart.fill"
+            case .sheet: "tablecells.fill"
+            }
+        }
+    }
+
+    enum PrintStatus: String, Hashable {
+        case none
+        case pending
+        case printed
+
+        init(shipments: [ShipmentDTO]) {
+            if shipments.contains(where: { $0.status == "PRINTED" }) {
+                self = .printed
+            } else if shipments.contains(where: { $0.labelUrl != nil || $0.status == "LABEL_CREATED" }) {
+                self = .pending
+            } else {
+                self = .none
+            }
+        }
+    }
+
     let id = UUID()
     let remoteID: String?
     let number: String
@@ -165,8 +193,11 @@ struct WorkshopOrder: Identifiable, Hashable {
     let deadline: String
     let items: [WorkshopOrderItem]
     var tracking: String?
+    let source: Source
+    var printStatus: PrintStatus
 
     var hasMultipleItems: Bool { items.count > 1 }
+    var totalUnits: Int { items.reduce(0) { $0 + $1.quantity } }
 
     var shippingCategory: ShippingCategory {
         let value = shippingMethod.folding(options: .diacriticInsensitive, locale: .current).lowercased()
@@ -185,7 +216,9 @@ struct WorkshopOrder: Identifiable, Hashable {
         priority: PriorityLevel,
         deadline: String,
         items: [WorkshopOrderItem],
-        tracking: String? = nil
+        tracking: String? = nil,
+        source: Source = .shopify,
+        printStatus: PrintStatus = .none
     ) {
         self.remoteID = remoteID
         self.number = number
@@ -196,6 +229,8 @@ struct WorkshopOrder: Identifiable, Hashable {
         self.deadline = deadline
         self.items = items
         self.tracking = tracking
+        self.source = source
+        self.printStatus = printStatus
     }
 }
 
@@ -232,7 +267,10 @@ enum PreparationPriorityFilter: String, CaseIterable, Identifiable {
     case all = "Todos"
     case urgent = "Críticos"
     case high = "Altos"
-    case blocked = "Bloqueados"
+    case standard = "Estándar"
+    case premium = "Premium"
+    case multiple = "Varios"
+    case blocked = "Falta stock"
 
     var id: String { rawValue }
 
@@ -241,6 +279,9 @@ enum PreparationPriorityFilter: String, CaseIterable, Identifiable {
         case .all: true
         case .urgent: order.priority == .critical
         case .high: order.priority == .high
+        case .standard: order.shippingCategory == .standard
+        case .premium: order.shippingCategory == .premium
+        case .multiple: order.items.count > 1 || order.totalUnits > 1
         case .blocked: order.priority == .blocked || order.status == .waitingStock
         }
     }
@@ -496,6 +537,7 @@ final class WorkshopStore {
             if let index = orders.firstIndex(where: { $0.id == order.id }) {
                 orders[index].tracking = shipment.trackingNumber
                 orders[index].status = .labelCreated
+                orders[index].printStatus = shipment.labelUrl == nil ? .none : .pending
             }
             await syncFromAPI()
         } catch {
@@ -514,6 +556,9 @@ final class WorkshopStore {
             if let index = orders.firstIndex(where: { $0.id == order.id }) {
                 orders[index].tracking = shipment.trackingNumber ?? barcode
                 orders[index].status = .labelCreated
+                if orders[index].printStatus == .none {
+                    orders[index].printStatus = shipment.labelUrl == nil ? .none : .pending
+                }
             }
             await syncFromAPI()
         } catch {
@@ -804,13 +849,26 @@ struct TaskDetailView: View {
 
 struct PickingView: View {
     @Environment(WorkshopStore.self) private var store
-    @State private var shippingFilter: ShippingFilter = .all
     @State private var priorityFilter: PreparationPriorityFilter = .all
+    @State private var searchText = ""
 
     var filteredOrders: [WorkshopOrder] {
         store.pendingPreparationOrders
-            .filter { shippingFilter.matches($0) }
             .filter { priorityFilter.matches($0) }
+            .filter { matchesSearch($0) }
+    }
+
+    private func matchesSearch(_ order: WorkshopOrder) -> Bool {
+        let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !query.isEmpty else { return true }
+        return order.number.localizedCaseInsensitiveContains(query) ||
+            order.customer.localizedCaseInsensitiveContains(query) ||
+            order.shippingMethod.localizedCaseInsensitiveContains(query) ||
+            order.items.contains {
+                $0.title.localizedCaseInsensitiveContains(query) ||
+                $0.sku.localizedCaseInsensitiveContains(query) ||
+                ($0.variantTitle?.localizedCaseInsensitiveContains(query) ?? false)
+            }
     }
 
     var body: some View {
@@ -821,7 +879,7 @@ struct PickingView: View {
                     VStack(alignment: .leading, spacing: 4) {
                         Text("Sin preparar")
                             .font(.system(size: 38, weight: .black))
-                        Text("Pedidos reales desde #9454, ordenados por urgencia.")
+                        Text("Shopify y hoja, ordenados por urgencia.")
                             .font(.subheadline)
                             .foregroundStyle(.secondary)
                     }
@@ -834,19 +892,29 @@ struct PickingView: View {
                     }
 
                     VStack(spacing: 10) {
-                        Picker("Criticidad", selection: $priorityFilter) {
-                            ForEach(PreparationPriorityFilter.allCases) { option in
-                                Text(option.rawValue).tag(option)
-                            }
-                        }
-                        .pickerStyle(.segmented)
+                        TextField("Buscar pedido, SKU, talla o cliente", text: $searchText)
+                            .textFieldStyle(.roundedBorder)
+                            .textInputAutocapitalization(.never)
+                            .keyboardType(.default)
 
-                        Picker("Envio", selection: $shippingFilter) {
-                            ForEach(ShippingFilter.allCases) { option in
-                                Text(option.title).tag(option)
+                        ScrollView(.horizontal, showsIndicators: false) {
+                            HStack(spacing: 8) {
+                                ForEach(PreparationPriorityFilter.allCases) { option in
+                                    Button {
+                                        priorityFilter = option
+                                    } label: {
+                                        Text(option.rawValue)
+                                            .font(.subheadline.weight(.black))
+                                            .padding(.horizontal, 12)
+                                            .padding(.vertical, 8)
+                                            .background(priorityFilter == option ? Color.accentColor : Color(.secondarySystemBackground))
+                                            .foregroundStyle(priorityFilter == option ? .white : .primary)
+                                            .clipShape(RoundedRectangle(cornerRadius: 8))
+                                    }
+                                    .buttonStyle(.plain)
+                                }
                             }
                         }
-                        .pickerStyle(.segmented)
                     }
                     .glassPanel(padding: 12)
 
@@ -912,8 +980,10 @@ struct ShippingView: View {
                             PriorityBadge(priority: order.priority)
                         }
                         HStack(spacing: 8) {
+                            SourceChip(source: order.source)
                             StatusChip(status: order.status)
                             ShippingChip(category: order.shippingCategory)
+                            PrintStatusChip(status: order.printStatus)
                             Tag(text: order.hasMultipleItems ? "\(order.items.count) artículos" : "1 artículo", systemImage: "square.stack.3d.up.fill")
                         }
                         Text(order.shippingMethod).foregroundStyle(.secondary)
@@ -934,6 +1004,18 @@ struct ShippingView: View {
                                 Label(tracking, systemImage: "barcode.viewfinder")
                                     .font(.subheadline.weight(.bold))
                                     .foregroundStyle(.teal)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                            }
+
+                            if order.printStatus == .pending {
+                                Label("Etiqueta creada, pendiente de imprimir en taller", systemImage: "printer.fill")
+                                    .font(.subheadline.weight(.bold))
+                                    .foregroundStyle(.orange)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                            } else if order.printStatus == .printed {
+                                Label("Etiqueta impresa", systemImage: "checkmark.circle.fill")
+                                    .font(.subheadline.weight(.bold))
+                                    .foregroundStyle(.green)
                                     .frame(maxWidth: .infinity, alignment: .leading)
                             }
 
@@ -969,7 +1051,7 @@ struct ShippingView: View {
                                     .frame(maxWidth: .infinity)
                             }
                             .buttonStyle(.bordered)
-                            .disabled(order.status != .readyForLabel)
+                            .disabled(order.status == .shipped)
                         }
 
                         NavigationLink(value: order) {
@@ -1412,7 +1494,7 @@ struct MatrixQuantityCell: View {
                 .font(.title3.weight(.black))
                 .foregroundStyle(value > 0 && mode == .recommended ? .red : .primary)
             if mode == .recommended && entry.pendingOrderNeed > 0 {
-                Text("ped \(entry.pendingOrderNeed) · stk \(entry.currentInternalStock)")
+                Text("ped \(entry.pendingOrderNeed) · stk \(entry.currentInternalStock) · ss \(entry.minStockTarget)")
                     .font(.caption2.weight(.semibold))
                     .foregroundStyle(.secondary)
             }
@@ -1602,9 +1684,10 @@ struct PendingOrderRow: View {
                 PriorityBadge(priority: order.priority)
             }
             HStack(spacing: 8) {
+                SourceChip(source: order.source)
                 StatusChip(status: order.status)
                 ShippingChip(category: order.shippingCategory)
-                Tag(text: order.hasMultipleItems ? "\(order.items.count) prendas/artículos" : "1 artículo", systemImage: "square.stack.3d.up.fill")
+                Tag(text: order.hasMultipleItems ? "\(order.items.count) líneas · \(order.totalUnits) uds" : "\(order.totalUnits) ud", systemImage: "square.stack.3d.up.fill")
             }
             Text(order.shippingMethod)
                 .font(.footnote)
@@ -1635,7 +1718,7 @@ struct PendingOrderRow: View {
 
 struct OrderPreparationDetailView: View {
     @Environment(WorkshopStore.self) private var store
-    @State private var showingQuantityWarning = false
+    @State private var showingPrepareConfirmation = false
     let order: WorkshopOrder
 
     var currentOrder: WorkshopOrder {
@@ -1650,6 +1733,14 @@ struct OrderPreparationDetailView: View {
         repeatedQuantityItems
             .map { "\($0.displayTitle): x\($0.quantity)" }
             .joined(separator: "\n")
+    }
+
+    var prepareConfirmationMessage: String {
+        let lines = currentOrder.items.map { "• \($0.displayTitle) · \($0.sizeText) · x\($0.quantity)" }.joined(separator: "\n")
+        if repeatedQuantityItems.isEmpty {
+            return "Confirma que el paquete contiene:\n\n\(lines)"
+        }
+        return "OJO: hay items con 2 o mas unidades:\n\(quantityWarningMessage)\n\nConfirma que el paquete contiene:\n\n\(lines)"
     }
 
     var body: some View {
@@ -1668,9 +1759,10 @@ struct OrderPreparationDetailView: View {
                         PriorityBadge(priority: currentOrder.priority)
                     }
                     HStack(spacing: 8) {
+                        SourceChip(source: currentOrder.source)
                         StatusChip(status: currentOrder.status)
                         ShippingChip(category: currentOrder.shippingCategory)
-                        Tag(text: "\(currentOrder.items.count) artículos", systemImage: "square.stack.3d.up.fill")
+                        Tag(text: "\(currentOrder.items.count) líneas · \(currentOrder.totalUnits) uds", systemImage: "square.stack.3d.up.fill")
                     }
                     Label(currentOrder.deadline, systemImage: "clock.fill")
                         .font(.subheadline.weight(.semibold))
@@ -1713,13 +1805,18 @@ struct OrderPreparationDetailView: View {
                             .foregroundStyle(.secondary)
                     }
                     .glassPanel()
+
+                    Button {
+                        Task { await store.reopenPreparationRemote(currentOrder) }
+                    } label: {
+                        Label("Deshacer preparado", systemImage: "arrow.uturn.backward.circle.fill")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.large)
                 } else {
                     Button {
-                        if repeatedQuantityItems.isEmpty {
-                            Task { await store.markPreparedRemote(currentOrder) }
-                        } else {
-                            showingQuantityWarning = true
-                        }
+                        showingPrepareConfirmation = true
                     } label: {
                         Label("Pedido preparado", systemImage: "checkmark.circle.fill")
                             .frame(maxWidth: .infinity)
@@ -1734,13 +1831,13 @@ struct OrderPreparationDetailView: View {
         .screenBackground()
         .navigationTitle(currentOrder.number)
         .navigationBarTitleDisplayMode(.inline)
-        .alert("Revisa antes de preparar", isPresented: $showingQuantityWarning) {
+        .alert("Confirmar pedido preparado", isPresented: $showingPrepareConfirmation) {
             Button("Cancelar", role: .cancel) {}
-            Button("Si, esta revisado") {
+            Button("Sí, está todo dentro") {
                 Task { await store.markPreparedRemote(currentOrder) }
             }
         } message: {
-            Text("Hay items con mas de 1 unidad:\n\n\(quantityWarningMessage)")
+            Text(prepareConfirmationMessage)
         }
     }
 }
@@ -1999,6 +2096,47 @@ struct ShippingChip: View {
             .padding(.vertical, 5)
             .background((category == .premium ? Color.orange : Color.blue).opacity(0.12))
             .clipShape(RoundedRectangle(cornerRadius: 6))
+    }
+}
+
+struct SourceChip: View {
+    let source: WorkshopOrder.Source
+
+    var body: some View {
+        Label(source.rawValue, systemImage: source.icon)
+            .font(.caption.weight(.bold))
+            .foregroundStyle(source == .shopify ? .green : .indigo)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 5)
+            .background((source == .shopify ? Color.green : Color.indigo).opacity(0.12))
+            .clipShape(RoundedRectangle(cornerRadius: 6))
+    }
+}
+
+struct PrintStatusChip: View {
+    let status: WorkshopOrder.PrintStatus
+
+    var body: some View {
+        switch status {
+        case .none:
+            EmptyView()
+        case .pending:
+            Label("Pendiente imprimir", systemImage: "printer.fill")
+                .font(.caption.weight(.bold))
+                .foregroundStyle(.orange)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 5)
+                .background(Color.orange.opacity(0.12))
+                .clipShape(RoundedRectangle(cornerRadius: 6))
+        case .printed:
+            Label("Impresa", systemImage: "checkmark.circle.fill")
+                .font(.caption.weight(.bold))
+                .foregroundStyle(.green)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 5)
+                .background(Color.green.opacity(0.12))
+                .clipShape(RoundedRectangle(cornerRadius: 6))
+        }
     }
 }
 

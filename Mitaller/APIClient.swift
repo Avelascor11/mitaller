@@ -197,10 +197,12 @@ struct ShipmentDTO: Decodable {
     let trackingNumber: String?
     let carrier: String?
     let labelUrl: String?
+    let status: String?
 }
 
 private struct OrderDTO: Decodable {
     let id: String
+    let shopifyOrderId: String?
     let orderNumber: String
     let customerName: String
     let shippingMethod: String
@@ -220,7 +222,9 @@ private struct OrderDTO: Decodable {
             priority: PriorityLevel(apiValue: priorityLevel),
             deadline: internalDeadlineAt?.formattedDeadline ?? "Sin deadline",
             items: items?.map(\.workshopItem) ?? [],
-            tracking: shipments?.compactMap(\.trackingNumber).first
+            tracking: shipments?.compactMap(\.trackingNumber).first,
+            source: (shopifyOrderId ?? "").hasPrefix("sheet:") ? .sheet : .shopify,
+            printStatus: WorkshopOrder.PrintStatus(shipments: shipments ?? [])
         )
     }
 }
