@@ -1087,17 +1087,17 @@ struct StockView: View {
                     SyncStatusView()
 
                     VStack(alignment: .leading, spacing: 4) {
-                        Text("Comprar stock")
+                        Text("Stock")
                             .font(.system(size: 38, weight: .black))
-                        Text("Unidades = pedidos sin preparar menos stock real de SUBPRODUCTOS.")
+                        Text("Stock real del taller. Toca una talla para modificar unidades.")
                             .font(.subheadline)
                             .foregroundStyle(.secondary)
                     }
 
                     LazyVGrid(columns: [GridItem(.adaptive(minimum: 104), spacing: 10)], spacing: 10) {
-                        MetricTile(title: "Comprar", value: store.purchaseMatrix.reduce(0) { $0 + $1.totalRecommended }, color: .red, icon: "cart.badge.plus")
-                        MetricTile(title: "Pedidos", value: store.purchaseMatrix.reduce(0) { $0 + $1.totalPending }, color: .blue, icon: "shippingbox.fill")
                         MetricTile(title: "Stock", value: store.purchaseMatrix.reduce(0) { $0 + $1.totalStock }, color: .green, icon: "archivebox.fill")
+                        MetricTile(title: "Con stock", value: store.purchaseMatrix.reduce(0) { $0 + $1.entries.filter { $0.currentInternalStock > 0 }.count }, color: .blue, icon: "checkmark.circle.fill")
+                        MetricTile(title: "Sin stock", value: store.purchaseMatrix.reduce(0) { $0 + $1.entries.filter { $0.currentInternalStock == 0 }.count }, color: .orange, icon: "exclamationmark.circle.fill")
                     }
 
                     VStack(spacing: 10) {
@@ -1116,7 +1116,7 @@ struct StockView: View {
                     } else {
                         LazyVGrid(columns: [GridItem(.adaptive(minimum: 330), spacing: 16)], spacing: 16) {
                             ForEach(filteredGroups) { group in
-                                StockBuyMatrixCard(group: group) { entry in
+                                StockMatrixCard(group: group) { entry in
                                     guard let sku = entry.sku else { return }
                                     stockEdit = StockEditSelection(group: group, entry: entry, sku: sku)
                                 }
@@ -1162,7 +1162,7 @@ struct StockView: View {
     }
 }
 
-struct StockBuyMatrixCard: View {
+struct StockMatrixCard: View {
     let group: PurchaseMatrixGroup
     var onEditStock: (PurchaseMatrixEntry) -> Void
 
@@ -1196,9 +1196,9 @@ struct StockBuyMatrixCard: View {
                     Button {
                         onEditStock(entry)
                     } label: {
-                        Text("\(entry.recommendedPurchaseQuantity)")
+                        Text("\(entry.currentInternalStock)")
                             .font(.system(size: 32, weight: .black))
-                            .foregroundStyle(entry.recommendedPurchaseQuantity > 0 ? .red : .primary)
+                            .foregroundStyle(entry.currentInternalStock > 0 ? .green : .primary)
                             .frame(maxWidth: .infinity, minHeight: 64)
                             .background(.background)
                     }
@@ -1258,7 +1258,7 @@ struct StockEditSheet: View {
                 }
                 .glassPanel()
 
-                Text("Al guardar, la tabla recalcula automaticamente lo que hay que comprar.")
+                Text("Al guardar, Compras recalcula automaticamente lo que hay que pedir.")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
 
@@ -1281,7 +1281,6 @@ struct StockEditSheet: View {
 
 struct PurchaseMatrixView: View {
     @Environment(WorkshopStore.self) private var store
-    @State private var mode: PurchaseMatrixMode = .recommended
 
     var body: some View {
         NavigationStack {
@@ -1291,7 +1290,7 @@ struct PurchaseMatrixView: View {
                     VStack(alignment: .leading, spacing: 4) {
                         Text("Comprar")
                             .font(.system(size: 38, weight: .black))
-                        Text("Lo que falta para preparar pedidos desde #9454.")
+                        Text("Unidades a comprar segun pedidos sin preparar y stock actual.")
                             .font(.subheadline)
                             .foregroundStyle(.secondary)
                     }
@@ -1302,21 +1301,8 @@ struct PurchaseMatrixView: View {
                         MetricTile(title: "Stock", value: store.purchaseMatrix.reduce(0) { $0 + $1.totalStock }, color: .green, icon: "archivebox.fill")
                     }
 
-                    Picker("Modo", selection: $mode) {
-                        ForEach(PurchaseMatrixMode.allCases) { option in
-                            Text(option.title).tag(option)
-                        }
-                    }
-                    .pickerStyle(.segmented)
-
-                    ForEach(store.purchaseMatrix.filter { group in
-                        switch mode {
-                        case .recommended: group.totalRecommended > 0
-                        case .pending: group.totalPending > 0
-                        case .stock: group.totalStock > 0 || group.totalPending > 0
-                        }
-                    }) { group in
-                        PurchaseMatrixCard(group: group, mode: mode)
+                    ForEach(store.purchaseMatrix.filter { $0.totalRecommended > 0 }) { group in
+                        PurchaseMatrixCard(group: group, mode: .recommended)
                     }
                 }
                 .padding()
