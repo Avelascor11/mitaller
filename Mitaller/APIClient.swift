@@ -97,6 +97,15 @@ struct APIClient {
         let _: StockDTO = try await perform(request)
     }
 
+    func uploadManualLabel(filename: String, pdfData: Data) async throws -> ManualPrintResponse {
+        let request = try jsonRequest(
+            path: "/manual-print",
+            method: "POST",
+            body: ManualPrintRequest(filename: filename, pdfBase64: pdfData.base64EncodedString())
+        )
+        return try await perform(request)
+    }
+
     private func patchTask(path: String) async throws {
         let request = try jsonRequest(path: path, method: "PATCH", body: EmptyBody())
         let _: EmptyResponse = try await perform(request)
@@ -176,6 +185,14 @@ private struct ScanLabelRequest: Encodable {
 }
 private struct SetStockQuantityRequest: Encodable {
     let quantity: Int
+}
+private struct ManualPrintRequest: Encodable {
+    let filename: String
+    let pdfBase64: String
+}
+struct ManualPrintResponse: Decodable {
+    let id: String
+    let filename: String
 }
 private struct APIErrorResponse: Decodable {
     let message: String?

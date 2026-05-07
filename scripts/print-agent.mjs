@@ -28,6 +28,33 @@ async function getPrintQueue() {
   return response.json();
 }
 
+async function getManualQueue() {
+  const response = await fetch(`${API_BASE_URL}/manual-print/queue`, { headers: headers() });
+  if (!response.ok) throw new Error(`manual-print/queue HTTP ${response.status}: ${await response.text()}`);
+  return response.json();
+}
+
+async function downloadManualLabel(id, filename) {
+  const response = await fetch(`${API_BASE_URL}/manual-print/${id}/file`, { headers: headers() });
+  if (!response.ok) throw new Error(`manual-print file HTTP ${response.status}: ${await response.text()}`);
+  const bytes = Buffer.from(await response.arrayBuffer());
+  const dir = join(tmpdir(), 'mitaller-print-agent');
+  await mkdir(dir, { recursive: true });
+  const safe = (filename || 'manual').replace(/[^a-zA-Z0-9._-]/g, '_');
+  const file = join(dir, `manual-${safe}-${Date.now()}.pdf`);
+  await writeFile(file, bytes);
+  return file;
+}
+
+async function markManualDone(id) {
+  const response = await fetch(`${API_BASE_URL}/manual-print/${id}/done`, {
+    method: 'POST',
+    headers: headers({ 'Content-Type': 'application/json' })
+  });
+  if (!response.ok) throw new Error(`manual-print done HTTP ${response.status}: ${await response.text()}`);
+  return response.json();
+}
+
 async function downloadLabel(labelUrl, orderNumber) {
   const response = await fetch(labelUrl, { headers: sendcloudHeaders(labelUrl) });
   if (!response.ok) throw new Error(`label HTTP ${response.status}: ${await response.text()}`);
@@ -135,9 +162,26 @@ async function processShipment(shipment) {
   console.log(`Printed ${shipment.orderNumber}`);
 }
 
+async function processManual(entry) {
+  console.log(`Printing manual ${entry.filename} (${entry.id})`);
+  const file = await downloadManualLabel(entry.id, entry.filename);
+  const printResult = await printFile(file, entry.filename);
+  await markManualDone(entry.id);
+  console.log(`Printed manual ${entry.filename}`, printResult.dryRun ? '(dry-run)' : '');
+}
+
 async function pollOnce() {
-  const queue = await getPrintQueue();
-  if (!queue.length) {
+  const [queue, manualQueue] = await Promise.all([
+    getPrintQueue().catch((error) => {
+      console.error('print-queue error:', error instanceof Error ? error.message : error);
+      return [];
+    }),
+    getManualQueue().catch((error) => {
+      console.error('manual-print/queue error:', error instanceof Error ? error.message : error);
+      return [];
+    })
+  ]);
+  if (!queue.length && !manualQueue.length) {
     console.log(`No pending labels. Next check in ${POLL_SECONDS}s.`);
     return;
   }
@@ -146,6 +190,13 @@ async function pollOnce() {
       await processShipment(shipment);
     } catch (error) {
       console.error(`Could not print ${shipment.orderNumber}:`, error instanceof Error ? error.message : error);
+    }
+  }
+  for (const entry of manualQueue) {
+    try {
+      await processManual(entry);
+    } catch (error) {
+      console.error(`Could not print manual ${entry.filename}:`, error instanceof Error ? error.message : error);
     }
   }
 }

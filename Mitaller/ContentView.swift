@@ -6,6 +6,7 @@
 //
 
 import SwiftUI
+import UniformTypeIdentifiers
 
 enum AppTheme {
     // Canvas: deep ink with subtle indigo/teal washes — dark SaaS (Linear/Vercel feel)
@@ -711,10 +712,185 @@ struct MainTabView: View {
                 .tabItem { Label("Stock", systemImage: "barcode.viewfinder") }
             PurchaseMatrixView()
                 .tabItem { Label("Compras", systemImage: "cart.badge.plus") }
+            ManualPrintView()
+                .tabItem { Label("Imprimir", systemImage: "printer.fill") }
             AdminView()
                 .tabItem { Label("Admin", systemImage: "chart.bar.xaxis") }
         }
         .tint(AppTheme.blue)
+    }
+}
+
+struct ManualPrintView: View {
+    @Environment(WorkshopStore.self) private var store
+    @State private var showingPicker = false
+    @State private var status: ManualPrintStatus = .idle
+    @State private var lastFilename: String?
+
+    enum ManualPrintStatus: Equatable {
+        case idle
+        case uploading(String)
+        case success(String)
+        case failure(String)
+    }
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 18) {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("Imprimir etiqueta")
+                            .font(.system(size: 30, weight: .heavy, design: .rounded))
+                            .foregroundStyle(AppTheme.ink)
+                        Text("Selecciona un PDF y se enviará a la PC42d del taller.")
+                            .font(.subheadline.weight(.medium))
+                            .foregroundStyle(AppTheme.muted)
+                    }
+
+                    VStack(alignment: .leading, spacing: 10) {
+                        Label("Cómo funciona", systemImage: "info.circle.fill")
+                            .font(.subheadline.weight(.bold))
+                            .foregroundStyle(AppTheme.blue)
+                        VStack(alignment: .leading, spacing: 6) {
+                            ManualPrintStep(number: "1", text: "Toca «Seleccionar PDF» y elige la etiqueta.")
+                            ManualPrintStep(number: "2", text: "Se sube a la API y queda en cola.")
+                            ManualPrintStep(number: "3", text: "El agente del taller la imprime en pocos segundos.")
+                        }
+                    }
+                    .glassPanel(padding: 16, accent: AppTheme.blue)
+
+                    Button {
+                        showingPicker = true
+                    } label: {
+                        Label("Seleccionar PDF", systemImage: "doc.fill.badge.plus")
+                            .frame(maxWidth: .infinity)
+                            .font(.headline.weight(.bold))
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(AppTheme.blue)
+                    .controlSize(.large)
+                    .disabled(isUploading)
+
+                    statusView
+                }
+                .padding()
+            }
+            .screenBackground()
+            .navigationTitle("Imprimir")
+            .fileImporter(
+                isPresented: $showingPicker,
+                allowedContentTypes: [.pdf],
+                allowsMultipleSelection: false
+            ) { result in
+                handlePicker(result: result)
+            }
+        }
+    }
+
+    private var isUploading: Bool {
+        if case .uploading = status { return true }
+        return false
+    }
+
+    @ViewBuilder
+    private var statusView: some View {
+        switch status {
+        case .idle:
+            EmptyView()
+        case .uploading(let name):
+            HStack(spacing: 12) {
+                ProgressView()
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Enviando…").font(.subheadline.weight(.bold)).foregroundStyle(AppTheme.ink)
+                    Text(name).font(.caption).foregroundStyle(AppTheme.muted).lineLimit(1)
+                }
+                Spacer()
+            }
+            .glassPanel(padding: 14, accent: AppTheme.amber)
+        case .success(let msg):
+            HStack(spacing: 12) {
+                Image(systemName: "checkmark.circle.fill")
+                    .font(.title2)
+                    .foregroundStyle(AppTheme.green)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("En cola para imprimir").font(.subheadline.weight(.bold)).foregroundStyle(AppTheme.ink)
+                    Text(msg).font(.caption).foregroundStyle(AppTheme.muted).lineLimit(2)
+                }
+                Spacer()
+            }
+            .glassPanel(padding: 14, accent: AppTheme.green)
+        case .failure(let msg):
+            HStack(spacing: 12) {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .font(.title2)
+                    .foregroundStyle(AppTheme.red)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Error al subir").font(.subheadline.weight(.bold)).foregroundStyle(AppTheme.ink)
+                    Text(msg).font(.caption).foregroundStyle(AppTheme.muted).lineLimit(4)
+                }
+                Spacer()
+            }
+            .glassPanel(padding: 14, accent: AppTheme.red)
+        }
+    }
+
+    private func handlePicker(result: Result<[URL], Error>) {
+        switch result {
+        case .failure(let error):
+            status = .failure(error.localizedDescription)
+        case .success(let urls):
+            guard let url = urls.first else { return }
+            Task { await uploadPDF(url: url) }
+        }
+    }
+
+    private func uploadPDF(url: URL) async {
+        let needsScope = url.startAccessingSecurityScopedResource()
+        defer { if needsScope { url.stopAccessingSecurityScopedResource() } }
+
+        let filename = url.lastPathComponent
+        lastFilename = filename
+        status = .uploading(filename)
+
+        guard let client = store.apiClient else {
+            status = .failure("URL de API no válida en Admin.")
+            return
+        }
+
+        do {
+            let data = try Data(contentsOf: url)
+            guard !data.isEmpty else {
+                status = .failure("El archivo está vacío.")
+                return
+            }
+            let response = try await client.uploadManualLabel(filename: filename, pdfData: data)
+            status = .success("\(response.filename) (\(formatBytes(data.count)))")
+        } catch {
+            status = .failure(error.localizedDescription)
+        }
+    }
+
+    private func formatBytes(_ count: Int) -> String {
+        ByteCountFormatter.string(fromByteCount: Int64(count), countStyle: .file)
+    }
+}
+
+struct ManualPrintStep: View {
+    let number: String
+    let text: String
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 10) {
+            Text(number)
+                .font(.caption.weight(.heavy))
+                .foregroundStyle(AppTheme.blue)
+                .frame(width: 22, height: 22)
+                .background(AppTheme.blueSoft)
+                .clipShape(Circle())
+            Text(text)
+                .font(.subheadline)
+                .foregroundStyle(AppTheme.inkSoft)
+        }
     }
 }
 
