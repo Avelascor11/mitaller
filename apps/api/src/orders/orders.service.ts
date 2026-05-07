@@ -94,6 +94,65 @@ export class OrdersService {
     return { imported: results.length, orders: results };
   }
 
+  async importSheetPendingOrders(rows: SheetPendingOrderRow[]) {
+    const grouped = new Map<string, SheetPendingOrderRow[]>();
+    for (const row of rows) {
+      const orderNumber = this.normalizeOrderNumber(row.orderNumber);
+      if (!orderNumber || !row.title?.trim()) continue;
+      const current = grouped.get(orderNumber) ?? [];
+      current.push({ ...row, orderNumber });
+      grouped.set(orderNumber, current);
+    }
+
+    const imported = [];
+    const skipped = [];
+    for (const [orderNumber, orderRows] of grouped) {
+      const existing = await this.prisma.order.findUnique({ where: { orderNumber } });
+      if (existing && !existing.shopifyOrderId.startsWith('sheet:')) {
+        skipped.push({ orderNumber, reason: 'already_exists_from_shopify' });
+        continue;
+      }
+
+      const first = orderRows[0];
+      const order = await this.upsertImportedOrder({
+        shopifyOrderId: `sheet:${orderNumber}`,
+        orderNumber,
+        customerName: 'Pedido de hoja',
+        customerEmail: undefined,
+        shippingMethod: first.shippingMethod || 'Sin envio en hoja',
+        shippingCountry: 'ES',
+        shippingAddressJson: { source: 'MEJOR PRODUCCION/PEDIDOS' },
+        financialStatus: 'paid',
+        fulfillmentStatus: 'unfulfilled',
+        operationalStatus: 'WAITING_PRODUCTION',
+        orderedAt: this.parseSheetDate(first.orderedAt),
+        items: orderRows.map((row, index) => ({
+          shopifyLineItemId: `sheet:${orderNumber}:${index + 1}`,
+          sku: this.sheetSku(row, index),
+          title: row.title.trim(),
+          variantTitle: row.size,
+          quantity: Number(row.quantity ?? 1) || 1,
+          imageUrl: row.imageUrl || undefined,
+          imageUrlsJson: row.imageUrl ? [row.imageUrl] : [],
+          color: row.color || undefined,
+          size: row.size || undefined,
+          productType: row.productType || undefined
+        }))
+      });
+
+      await this.activity.log({
+        entityType: 'Order',
+        entityId: order.id,
+        action: 'SHEET_IMPORT_UNPREPARED',
+        message: `Pedido ${orderNumber} importado desde hoja PEDIDOS`,
+        metadataJson: { rows: orderRows.length }
+      });
+      imported.push(order);
+    }
+
+    return { receivedRows: rows.length, imported: imported.length, skipped: skipped.length, skippedOrders: skipped, orders: imported };
+  }
+
   async handleShopifyOrderCreated(payload: unknown, hmac?: string, rawBody?: Buffer) {
     this.shopify.assertValidWebhook(rawBody, hmac);
     await this.activity.log({
@@ -218,6 +277,32 @@ export class OrdersService {
   private orderNumberValue(orderNumber: string) {
     return Number(orderNumber.replace(/\D/g, '')) || 0;
   }
+
+  private normalizeOrderNumber(value?: string) {
+    const cleaned = String(value ?? '').trim();
+    if (!cleaned) return '';
+    const number = this.orderNumberValue(cleaned);
+    return number ? `#${number}` : cleaned;
+  }
+
+  private parseSheetDate(value?: string) {
+    if (!value) return new Date();
+    const parsed = new Date(value);
+    return Number.isNaN(parsed.getTime()) ? new Date() : parsed;
+  }
+
+  private sheetSku(row: SheetPendingOrderRow, index: number) {
+    const sku = row.sku?.trim();
+    if (sku) return sku;
+    const slug = row.title
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .toUpperCase()
+      .replace(/[^A-Z0-9]+/g, '-')
+      .replace(/^-|-$/g, '')
+      .slice(0, 24);
+    return `SHEET-${slug || 'ITEM'}-${index + 1}`;
+  }
 }
 
 export interface ImportedOrder {
@@ -246,4 +331,17 @@ export interface ImportedOrder {
     size?: string;
     productType?: string;
   }>;
+}
+
+interface SheetPendingOrderRow {
+  orderNumber: string;
+  title: string;
+  quantity?: number;
+  shippingMethod?: string;
+  orderedAt?: string;
+  productType?: string;
+  color?: string;
+  size?: string;
+  sku?: string;
+  imageUrl?: string;
 }

@@ -36,6 +36,11 @@ export class OrdersController {
     return this.orders.importShopifyOrders();
   }
 
+  @Post('orders/import-sheet-pending')
+  importSheetPending(@Body() payload: { rows?: SheetPendingOrderRow[] }) {
+    return this.orders.importSheetPendingOrders(payload.rows ?? []);
+  }
+
   @Post('webhooks/shopify/orders-create')
   orderCreated(@Body() payload: unknown, @Headers('x-shopify-hmac-sha256') hmac: string | undefined, @Req() request: Request & { rawBody?: Buffer }) {
     return this.orders.handleShopifyOrderCreated(payload, hmac, request.rawBody);
@@ -45,4 +50,17 @@ export class OrdersController {
   orderUpdated(@Body() payload: unknown, @Headers('x-shopify-hmac-sha256') hmac: string | undefined, @Req() request: Request & { rawBody?: Buffer }) {
     return this.orders.handleShopifyOrderUpdated(payload, hmac, request.rawBody);
   }
+}
+
+interface SheetPendingOrderRow {
+  orderNumber: string;
+  title: string;
+  quantity?: number;
+  shippingMethod?: string;
+  orderedAt?: string;
+  productType?: string;
+  color?: string;
+  size?: string;
+  sku?: string;
+  imageUrl?: string;
 }
