@@ -1,0 +1,31 @@
+{
+  "name": "mitaller",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Monorepo MVP para operaciones de taller, stock, compras y envios de una tienda Shopify.",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev:api": "npm --workspace @mitaller/api run start:dev",
+    "start:api": "npm --workspace @mitaller/api run start",
+    "build:api": "npm --workspace @mitaller/api run build",
+    "dev:admin": "npm --workspace @mitaller/admin-web run dev",
+    "dev:mobile": "npm --workspace @mitaller/mobile run start",
+    "service:api:install": "zsh scripts/install-macos-api-service.sh",
+    "service:api:uninstall": "zsh scripts/uninstall-macos-api-service.sh",
+    "service:api:status": "launchctl print gui/$(id -u)/com.mitaller.api",
+    "db:up": "docker compose -f infra/docker-compose.yml up -d",
+    "db:down": "docker compose -f infra/docker-compose.yml down",
+    "prisma:generate": "npm --workspace @mitaller/api run prisma:generate",
+    "prisma:push": "npm --workspace @mitaller/api exec prisma db push",
+    "prisma:migrate": "npm --workspace @mitaller/api run prisma:migrate",
+    "seed": "npm --workspace @mitaller/api run seed",
+    "test": "npm --workspace @mitaller/api run test",
+    "typecheck": "npm --workspaces --if-present run typecheck"
+  },
+  "devDependencies": {
+    "typescript": "^5.8.3"
+  }
+}

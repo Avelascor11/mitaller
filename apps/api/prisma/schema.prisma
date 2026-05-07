@@ -1,0 +1,354 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  ADMIN
+  WORKSHOP_MANAGER
+  PRODUCTION
+  PICKING
+  SHIPPING
+  PURCHASING
+}
+
+enum OperationalStatus {
+  NEW
+  WAITING_STOCK
+  WAITING_PRODUCTION
+  IN_PRODUCTION
+  PRODUCED
+  WAITING_PICKING
+  PICKED
+  READY_FOR_LABEL
+  LABEL_CREATED
+  SHIPPED
+  BLOCKED
+  CANCELLED
+}
+
+enum ProductionTaskStatus {
+  PENDING
+  IN_PROGRESS
+  DONE
+  BLOCKED
+  CANCELLED
+}
+
+enum PriorityLevel {
+  CRITICAL
+  HIGH
+  NORMAL
+  LOW
+  BLOCKED
+}
+
+enum OrderItemStatus {
+  PENDING
+  RESERVED
+  IN_PRODUCTION
+  PRODUCED
+  PICKED
+  BLOCKED
+  CANCELLED
+}
+
+enum StockItemType {
+  BLANK_GARMENT
+  TRANSFER
+  PACKAGING
+  FINISHED_GOOD
+  MERCH
+  OTHER
+}
+
+enum StockLocationType {
+  WORKSHOP
+  SHELF
+  PRODUCED
+  PACKING
+  INCIDENTS
+  INBOUND
+}
+
+enum PurchaseNeedStatus {
+  OPEN
+  ORDERED
+  RECEIVED
+  CANCELLED
+}
+
+enum ShipmentStatus {
+  PENDING
+  PARCEL_CREATED
+  LABEL_CREATED
+  IN_TRANSIT
+  DELIVERED
+  CANCELLED
+  ERROR
+}
+
+model User {
+  id              String           @id @default(cuid())
+  name            String
+  email           String           @unique
+  passwordHash    String
+  role            Role             @default(PRODUCTION)
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+  assignedTasks   ProductionTask[]
+  stockMovements  StockMovement[]
+  activityLogs    ActivityLog[]
+}
+
+model Order {
+  id                  String             @id @default(cuid())
+  shopifyOrderId      String             @unique
+  orderNumber         String             @unique
+  customerName        String
+  customerEmail       String?
+  shippingMethod      String
+  shippingCountry     String?
+  shippingAddressJson Json?
+  financialStatus     String
+  fulfillmentStatus   String?
+  operationalStatus   OperationalStatus  @default(NEW)
+  priorityLevel       PriorityLevel      @default(NORMAL)
+  orderedAt           DateTime
+  internalDeadlineAt  DateTime?
+  createdAt           DateTime           @default(now())
+  updatedAt           DateTime           @updatedAt
+  items               OrderItem[]
+  productionTasks     ProductionTask[]
+  stockMovements      StockMovement[]
+  shipments           Shipment[]
+}
+
+model OrderItem {
+  id                 String           @id @default(cuid())
+  orderId            String
+  shopifyLineItemId  String?
+  shopifyProductId   String?
+  shopifyVariantId   String?
+  sku                String
+  title              String
+  variantTitle       String?
+  quantity           Int
+  imageUrl           String?
+  imageUrlsJson      Json?
+  color              String?
+  size               String?
+  productType        String?
+  status             OrderItemStatus  @default(PENDING)
+  createdAt          DateTime         @default(now())
+  updatedAt          DateTime         @updatedAt
+  order              Order            @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  productionTasks    ProductionTask[]
+}
+
+model ProductionTask {
+  id                  String                @id @default(cuid())
+  orderId             String
+  orderItemId         String?
+  title               String
+  sku                 String?
+  productName         String
+  color               String?
+  size                String?
+  quantity            Int
+  status              ProductionTaskStatus  @default(PENDING)
+  priorityLevel       PriorityLevel         @default(NORMAL)
+  internalDeadlineAt  DateTime?
+  blockedReason       String?
+  assignedToUserId    String?
+  startedAt           DateTime?
+  completedAt         DateTime?
+  createdAt           DateTime              @default(now())
+  updatedAt           DateTime              @updatedAt
+  order               Order                 @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  orderItem           OrderItem?            @relation(fields: [orderItemId], references: [id], onDelete: SetNull)
+  assignedToUser      User?                 @relation(fields: [assignedToUserId], references: [id], onDelete: SetNull)
+  stockMovements      StockMovement[]
+}
+
+model StockItem {
+  id                 String             @id @default(cuid())
+  sku                String             @unique
+  name               String
+  type               StockItemType
+  color              String?
+  size               String?
+  barcode            String?
+  supplierSku        String?
+  minStock           Int                @default(0)
+  createdAt          DateTime           @default(now())
+  updatedAt          DateTime           @updatedAt
+  levels             StockLevel[]
+  movements          StockMovement[]
+  recipeComponents   RecipeComponent[]
+  purchaseNeeds      PurchaseNeed[]
+}
+
+model StockLocation {
+  id             String          @id @default(cuid())
+  code           String          @unique
+  name           String
+  type           StockLocationType
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+  levels         StockLevel[]
+  movementsFrom  StockMovement[] @relation("fromLocation")
+  movementsTo    StockMovement[] @relation("toLocation")
+}
+
+model StockLevel {
+  id           String        @id @default(cuid())
+  stockItemId  String
+  locationId   String
+  quantity     Int           @default(0)
+  updatedAt    DateTime      @updatedAt
+  stockItem    StockItem     @relation(fields: [stockItemId], references: [id], onDelete: Cascade)
+  location     StockLocation @relation(fields: [locationId], references: [id], onDelete: Cascade)
+
+  @@unique([stockItemId, locationId])
+}
+
+model StockMovement {
+  id              String         @id @default(cuid())
+  stockItemId     String
+  fromLocationId  String?
+  toLocationId    String?
+  quantity        Int
+  reason          String
+  relatedOrderId  String?
+  relatedTaskId   String?
+  userId          String?
+  createdAt       DateTime       @default(now())
+  stockItem       StockItem      @relation(fields: [stockItemId], references: [id], onDelete: Cascade)
+  fromLocation    StockLocation? @relation("fromLocation", fields: [fromLocationId], references: [id], onDelete: SetNull)
+  toLocation      StockLocation? @relation("toLocation", fields: [toLocationId], references: [id], onDelete: SetNull)
+  relatedOrder    Order?         @relation(fields: [relatedOrderId], references: [id], onDelete: SetNull)
+  relatedTask     ProductionTask? @relation(fields: [relatedTaskId], references: [id], onDelete: SetNull)
+  user            User?          @relation(fields: [userId], references: [id], onDelete: SetNull)
+}
+
+model Recipe {
+  id                String             @id @default(cuid())
+  shopifyProductId  String?
+  shopifyVariantId  String?
+  name              String
+  createdAt         DateTime           @default(now())
+  updatedAt         DateTime           @updatedAt
+  components        RecipeComponent[]
+}
+
+model RecipeComponent {
+  id           String     @id @default(cuid())
+  recipeId     String
+  stockItemId  String
+  quantity     Int
+  recipe       Recipe     @relation(fields: [recipeId], references: [id], onDelete: Cascade)
+  stockItem    StockItem  @relation(fields: [stockItemId], references: [id], onDelete: Cascade)
+}
+
+model ProductSubproductMapping {
+  id             String    @id @default(cuid())
+  productName    String    @unique
+  productType    String?
+  color          String?
+  size           String?
+  sku            String
+  subproductName String
+  imageRef       String?
+  source         String    @default("MEJOR PRODUCCION")
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+}
+
+model SupplierArticle {
+  id             String   @id @default(cuid())
+  supplier       String
+  supplierSku    String
+  styleCode      String?
+  brand          String?
+  productName    String
+  color          String?
+  size           String?
+  ean            String?
+  purchasePrice  Decimal? @db.Decimal(10, 2)
+  weightGrams    Int?
+  packQuantity   Int?
+  cartonQuantity Int?
+  rawDataJson    Json?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@unique([supplier, supplierSku])
+}
+
+model SupplierStock {
+  id                 String   @id @default(cuid())
+  supplier           String
+  supplierSku        String
+  availableQuantity  Int
+  lastSyncedAt       DateTime @default(now())
+
+  @@unique([supplier, supplierSku])
+}
+
+model PurchaseNeed {
+  id                           String             @id @default(cuid())
+  stockItemId                  String
+  supplierSku                  String?
+  neededForPendingOrders       Int
+  minStockTarget               Int
+  currentInternalStock         Int
+  alreadyOrderedQuantity       Int                @default(0)
+  recommendedPurchaseQuantity  Int
+  supplierAvailableQuantity    Int?
+  status                       PurchaseNeedStatus @default(OPEN)
+  generatedAt                  DateTime           @default(now())
+  stockItem                    StockItem          @relation(fields: [stockItemId], references: [id], onDelete: Cascade)
+}
+
+model Shipment {
+  id                 String         @id @default(cuid())
+  orderId            String
+  provider           String
+  sendcloudParcelId  String?
+  trackingNumber     String?
+  carrier            String?
+  labelUrl           String?
+  status             ShipmentStatus @default(PENDING)
+  createdAt          DateTime       @default(now())
+  updatedAt          DateTime       @updatedAt
+  order              Order          @relation(fields: [orderId], references: [id], onDelete: Cascade)
+}
+
+model ShippingRule {
+  id                            String   @id @default(cuid())
+  name                          String
+  shopifyShippingMethodContains String
+  maxHoursToProduce             Int
+  priorityBoost                 Int      @default(0)
+  sendcloudMethodCode           String?
+  shouldCreateLabel             Boolean  @default(true)
+  createdAt                     DateTime @default(now())
+  updatedAt                     DateTime @updatedAt
+}
+
+model ActivityLog {
+  id           String   @id @default(cuid())
+  entityType   String
+  entityId     String
+  action       String
+  message      String
+  userId       String?
+  metadataJson Json?
+  createdAt    DateTime @default(now())
+  user         User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+}

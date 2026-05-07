@@ -1,0 +1,12 @@
+node_modules
+.env
+.env.local
+.expo
+.next
+dist
+coverage
+*.log
+.mitaller-api.pid
+*.tsbuildinfo
+apps/api/generated
+apps/api/prisma/dev.db

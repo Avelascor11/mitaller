@@ -1,0 +1,12 @@
+{
+  "extends": "expo/tsconfig.base",
+  "compilerOptions": {
+    "strict": true,
+    "baseUrl": "../..",
+    "paths": {
+      "@mitaller/types": ["packages/types/src"],
+      "@mitaller/shared": ["packages/shared/src"]
+    }
+  },
+  "include": ["App.tsx", "src"]
+}

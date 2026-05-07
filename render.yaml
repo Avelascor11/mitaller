@@ -1,0 +1,89 @@
+services:
+  - type: web
+    name: mitaller-api
+    runtime: docker
+    dockerfilePath: ./apps/api/Dockerfile
+    plan: starter
+    healthCheckPath: /health
+    autoDeploy: false
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 3001
+      - key: DATABASE_URL
+        fromDatabase:
+          name: mitaller-postgres
+          property: connectionString
+      - key: JWT_SECRET
+        sync: false
+      - key: SHOPIFY_SHOP_DOMAIN
+        sync: false
+      - key: SHOPIFY_ADMIN_ACCESS_TOKEN
+        sync: false
+      - key: SHOPIFY_WEBHOOK_SECRET
+        sync: false
+      - key: SHOPIFY_API_VERSION
+        value: 2026-04
+      - key: SHOPIFY_IMPORT_ORDER_LIMIT
+        value: "100"
+      - key: SHOPIFY_MIN_ORDER_NUMBER
+        value: "9341"
+      - key: SENDCLOUD_PUBLIC_KEY
+        sync: false
+      - key: SENDCLOUD_SECRET_KEY
+        sync: false
+      - key: SENDCLOUD_API_BASE_URL
+        value: https://panel.sendcloud.sc/api/v2
+      - key: SENDCLOUD_API_V3_BASE_URL
+        value: https://panel.sendcloud.sc/api/v3
+      - key: SENDCLOUD_DEFAULT_WEIGHT_KG
+        value: "0.3"
+      - key: SENDCLOUD_DEFAULT_LENGTH_CM
+        value: "30.00"
+      - key: SENDCLOUD_DEFAULT_WIDTH_CM
+        value: "20.00"
+      - key: SENDCLOUD_DEFAULT_HEIGHT_CM
+        value: "3.00"
+      - key: SENDCLOUD_SHIPPING_OPTION_CODE
+        value: sendcloud:letter
+      - key: SENDCLOUD_SENDER_ADDRESS_ID
+        sync: false
+      - key: SENDCLOUD_FROM_NAME
+        sync: false
+      - key: SENDCLOUD_FROM_COMPANY_NAME
+        sync: false
+      - key: SENDCLOUD_FROM_ADDRESS_LINE_1
+        sync: false
+      - key: SENDCLOUD_FROM_ADDRESS_LINE_2
+        sync: false
+      - key: SENDCLOUD_FROM_HOUSE_NUMBER
+        sync: false
+      - key: SENDCLOUD_FROM_POSTAL_CODE
+        sync: false
+      - key: SENDCLOUD_FROM_CITY
+        sync: false
+      - key: SENDCLOUD_FROM_COUNTRY_CODE
+        value: ES
+      - key: SENDCLOUD_FROM_PHONE
+        sync: false
+      - key: SENDCLOUD_FROM_EMAIL
+        sync: false
+      - key: SENDCLOUD_SHIPMENT_METHOD_ID
+        sync: false
+      - key: SENDCLOUD_STANDARD_SHIPMENT_METHOD_ID
+        sync: false
+      - key: SENDCLOUD_PREMIUM_SHIPMENT_METHOD_ID
+        sync: false
+      - key: AUTO_PRINT_LABELS
+        value: "false"
+      - key: LABEL_PRINTER_NAME
+        sync: false
+      - key: LABEL_PAPER_SIZE
+        value: Custom.100x150mm
+
+databases:
+  - name: mitaller-postgres
+    databaseName: mitaller
+    user: mitaller
+    plan: starter

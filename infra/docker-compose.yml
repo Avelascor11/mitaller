@@ -1,0 +1,16 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: mitaller-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: mitaller
+      POSTGRES_PASSWORD: mitaller
+      POSTGRES_DB: mitaller
+    ports:
+      - "5432:5432"
+    volumes:
+      - mitaller-postgres:/var/lib/postgresql/data
+
+volumes:
+  mitaller-postgres:

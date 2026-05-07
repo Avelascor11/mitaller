@@ -1,0 +1,31 @@
+{
+  "name": "@mitaller/mobile",
+  "version": "0.1.0",
+  "private": true,
+  "main": "expo/AppEntry.js",
+  "scripts": {
+    "start": "expo start",
+    "android": "expo start --android",
+    "ios": "expo start --ios",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@expo/vector-icons": "^14.1.0",
+    "@mitaller/shared": "0.1.0",
+    "@mitaller/types": "0.1.0",
+    "@react-navigation/bottom-tabs": "^7.3.13",
+    "@react-navigation/native": "^7.1.9",
+    "@react-navigation/native-stack": "^7.3.13",
+    "expo": "^53.0.8",
+    "expo-barcode-scanner": "^13.0.1",
+    "expo-status-bar": "~2.2.3",
+    "react": "19.0.0",
+    "react-native": "0.79.2",
+    "react-native-safe-area-context": "5.4.0",
+    "react-native-screens": "~4.10.0"
+  },
+  "devDependencies": {
+    "@types/react": "~19.0.10",
+    "typescript": "^5.8.3"
+  }
+}

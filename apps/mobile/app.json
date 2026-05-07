@@ -1,0 +1,18 @@
+{
+  "expo": {
+    "name": "Mitaller",
+    "slug": "mitaller",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "scheme": "mitaller",
+    "userInterfaceStyle": "automatic",
+    "ios": {
+      "supportsTablet": true
+    },
+    "android": {
+      "adaptiveIcon": {
+        "backgroundColor": "#111827"
+      }
+    }
+  }
+}
