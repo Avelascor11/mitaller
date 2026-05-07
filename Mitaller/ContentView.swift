@@ -7,6 +7,22 @@
 
 import SwiftUI
 
+enum AppTheme {
+    static let canvasTop = Color(red: 0.96, green: 0.98, blue: 1.00)
+    static let canvasBottom = Color(red: 0.98, green: 0.96, blue: 0.92)
+    static let surface = Color.white.opacity(0.88)
+    static let surfaceStrong = Color.white
+    static let ink = Color(red: 0.08, green: 0.10, blue: 0.16)
+    static let muted = Color(red: 0.41, green: 0.45, blue: 0.54)
+    static let line = Color.black.opacity(0.08)
+    static let blue = Color(red: 0.16, green: 0.42, blue: 0.92)
+    static let teal = Color(red: 0.00, green: 0.58, blue: 0.62)
+    static let amber = Color(red: 0.96, green: 0.55, blue: 0.12)
+    static let magenta = Color(red: 0.86, green: 0.18, blue: 0.43)
+    static let green = Color(red: 0.06, green: 0.58, blue: 0.34)
+    static let purple = Color(red: 0.48, green: 0.28, blue: 0.92)
+}
+
 enum PriorityLevel: String, CaseIterable, Identifiable {
     case critical = "CRITICO"
     case high = "ALTA"
@@ -18,11 +34,11 @@ enum PriorityLevel: String, CaseIterable, Identifiable {
 
     var color: Color {
         switch self {
-        case .critical: .red
-        case .high: .orange
-        case .normal: .blue
-        case .low: .gray
-        case .blocked: .brown
+        case .critical: AppTheme.magenta
+        case .high: AppTheme.amber
+        case .normal: AppTheme.blue
+        case .low: AppTheme.muted
+        case .blocked: .red
         }
     }
 
@@ -647,6 +663,7 @@ struct MainTabView: View {
             AdminView()
                 .tabItem { Label("Admin", systemImage: "chart.bar.xaxis") }
         }
+        .tint(AppTheme.blue)
     }
 }
 
@@ -658,37 +675,28 @@ struct DashboardView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 18) {
                     SyncStatusView()
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("Ahora")
-                            .font(.system(size: 38, weight: .black))
-                        Text("La siguiente accion del taller, ordenada por urgencia.")
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
-                    }
+                    DashboardHeroView()
                     if let nextOrder = store.pendingPreparationOrders.first {
                         VStack(alignment: .leading, spacing: 10) {
-                            Text("Siguiente pedido")
-                                .font(.caption.weight(.bold))
-                                .foregroundStyle(.secondary)
-                                .textCase(.uppercase)
+                            SectionHeader(title: "Siguiente pedido", subtitle: "La accion mas urgente ahora mismo")
                             NavigationLink(value: nextOrder) {
                                 PendingOrderRow(order: nextOrder, showsAction: false) {}
-                                    .glassPanel(padding: 14)
+                                    .glassPanel(padding: 14, accent: nextOrder.priority.color)
                             }
                             .buttonStyle(.plain)
                         }
                     }
                     LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 12) {
-                        MetricTile(title: "Urgentes", value: store.urgentPendingOrders, color: .red, icon: "flame.fill")
-                        MetricTile(title: "Altas", value: store.highPendingOrders, color: .orange, icon: "arrow.up.circle.fill")
-                        MetricTile(title: "Bloqueados", value: store.blockedOrders, color: .brown, icon: "exclamationmark.triangle.fill")
-                        MetricTile(title: "Sin preparar", value: store.pendingPreparationOrders.count, color: .purple, icon: "shippingbox.fill")
+                        MetricTile(title: "Urgentes", value: store.urgentPendingOrders, color: AppTheme.magenta, icon: "flame.fill")
+                        MetricTile(title: "Altas", value: store.highPendingOrders, color: AppTheme.amber, icon: "arrow.up.circle.fill")
+                        MetricTile(title: "Bloqueados", value: store.blockedOrders, color: .red, icon: "exclamationmark.triangle.fill")
+                        MetricTile(title: "Sin preparar", value: store.pendingPreparationOrders.count, color: AppTheme.purple, icon: "shippingbox.fill")
                     }
                     SectionHeader(title: "Cola urgente", subtitle: "Pedidos sin preparar ordenados por prioridad")
                     ForEach(store.pendingPreparationOrders.prefix(4)) { order in
                         NavigationLink(value: order) {
                             PendingOrderRow(order: order, showsAction: false) {}
-                                .glassPanel(padding: 14)
+                                .glassPanel(padding: 14, accent: order.priority.color)
                         }
                         .buttonStyle(.plain)
                     }
@@ -779,6 +787,67 @@ struct ProductionQueueView: View {
                 TaskDetailView(task: task)
             }
         }
+    }
+}
+
+struct DashboardHeroView: View {
+    @Environment(WorkshopStore.self) private var store
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            HStack(alignment: .top, spacing: 14) {
+                ZStack {
+                    RoundedRectangle(cornerRadius: 18)
+                        .fill(LinearGradient(colors: [AppTheme.blue, AppTheme.teal], startPoint: .topLeading, endPoint: .bottomTrailing))
+                    Image(systemName: "shippingbox.and.arrow.backward.fill")
+                        .font(.system(size: 28, weight: .black))
+                        .foregroundStyle(.white)
+                }
+                .frame(width: 62, height: 62)
+
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Taller en marcha")
+                        .font(.system(size: 34, weight: .black))
+                        .foregroundStyle(AppTheme.ink)
+                    Text("Pedidos, stock y etiquetas sincronizados con Railway y Shopify.")
+                        .font(.subheadline.weight(.medium))
+                        .foregroundStyle(AppTheme.muted)
+                }
+            }
+
+            HStack(spacing: 10) {
+                HeroPill(title: "Pendientes", value: "\(store.pendingPreparationOrders.count)", color: AppTheme.purple, icon: "tray.full.fill")
+                HeroPill(title: "Listos envío", value: "\(store.readyForShipping)", color: AppTheme.green, icon: "tag.fill")
+            }
+        }
+        .glassPanel(padding: 18, accent: AppTheme.blue)
+    }
+}
+
+struct HeroPill: View {
+    let title: String
+    let value: String
+    let color: Color
+    let icon: String
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(systemName: icon)
+                .foregroundStyle(color)
+            VStack(alignment: .leading, spacing: 0) {
+                Text(value)
+                    .font(.headline.weight(.black))
+                    .foregroundStyle(AppTheme.ink)
+                Text(title)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(AppTheme.muted)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
+        .background(color.opacity(0.10))
+        .clipShape(RoundedRectangle(cornerRadius: 12))
     }
 }
 
@@ -879,23 +948,32 @@ struct PickingView: View {
                     VStack(alignment: .leading, spacing: 4) {
                         Text("Sin preparar")
                             .font(.system(size: 38, weight: .black))
+                            .foregroundStyle(AppTheme.ink)
                         Text("Shopify y hoja, ordenados por urgencia.")
                             .font(.subheadline)
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(AppTheme.muted)
                     }
 
                     LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 12) {
-                        MetricTile(title: "Críticos", value: store.urgentPendingOrders, color: .red, icon: "flame.fill")
-                        MetricTile(title: "Altos", value: store.highPendingOrders, color: .orange, icon: "arrow.up.circle.fill")
-                        MetricTile(title: "Bloqueados", value: store.blockedOrders, color: .brown, icon: "exclamationmark.triangle.fill")
-                        MetricTile(title: "Total", value: filteredOrders.count, color: .purple, icon: "shippingbox.fill")
+                        MetricTile(title: "Críticos", value: store.urgentPendingOrders, color: AppTheme.magenta, icon: "flame.fill")
+                        MetricTile(title: "Altos", value: store.highPendingOrders, color: AppTheme.amber, icon: "arrow.up.circle.fill")
+                        MetricTile(title: "Bloqueados", value: store.blockedOrders, color: .red, icon: "exclamationmark.triangle.fill")
+                        MetricTile(title: "Total", value: filteredOrders.count, color: AppTheme.purple, icon: "shippingbox.fill")
                     }
 
                     VStack(spacing: 10) {
-                        TextField("Buscar pedido, SKU, talla o cliente", text: $searchText)
-                            .textFieldStyle(.roundedBorder)
-                            .textInputAutocapitalization(.never)
-                            .keyboardType(.default)
+                        HStack(spacing: 10) {
+                            Image(systemName: "magnifyingglass")
+                                .foregroundStyle(AppTheme.muted)
+                            TextField("Buscar pedido, SKU, talla o cliente", text: $searchText)
+                                .textInputAutocapitalization(.never)
+                                .keyboardType(.default)
+                        }
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 11)
+                        .background(Color.white)
+                        .overlay(RoundedRectangle(cornerRadius: 12).stroke(AppTheme.line))
+                        .clipShape(RoundedRectangle(cornerRadius: 12))
 
                         ScrollView(.horizontal, showsIndicators: false) {
                             HStack(spacing: 8) {
@@ -907,9 +985,10 @@ struct PickingView: View {
                                             .font(.subheadline.weight(.black))
                                             .padding(.horizontal, 12)
                                             .padding(.vertical, 8)
-                                            .background(priorityFilter == option ? Color.accentColor : Color(.secondarySystemBackground))
+                                            .background(priorityFilter == option ? AppTheme.blue : Color.white)
                                             .foregroundStyle(priorityFilter == option ? .white : .primary)
-                                            .clipShape(RoundedRectangle(cornerRadius: 8))
+                                            .overlay(RoundedRectangle(cornerRadius: 10).stroke(priorityFilter == option ? Color.clear : AppTheme.line))
+                                            .clipShape(RoundedRectangle(cornerRadius: 10))
                                     }
                                     .buttonStyle(.plain)
                                 }
@@ -925,7 +1004,7 @@ struct PickingView: View {
                         ForEach(filteredOrders) { order in
                             NavigationLink(value: order) {
                                 PendingOrderRow(order: order, showsAction: false) {}
-                                    .glassPanel(padding: 14)
+                                    .glassPanel(padding: 14, accent: order.priority.color)
                             }
                             .buttonStyle(.plain)
                         }
@@ -965,106 +1044,38 @@ struct ShippingView: View {
 
     var body: some View {
         NavigationStack {
-            List {
-                SyncStatusView()
-                ForEach(shippingOrders) { order in
-                    VStack(alignment: .leading, spacing: 12) {
-                        HStack(alignment: .top) {
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text(order.number).font(.title3.weight(.black))
-                                Text(order.customer)
-                                    .font(.subheadline)
-                                    .foregroundStyle(.secondary)
-                            }
-                            Spacer()
-                            PriorityBadge(priority: order.priority)
-                        }
-                        HStack(spacing: 8) {
-                            SourceChip(source: order.source)
-                            StatusChip(status: order.status)
-                            ShippingChip(category: order.shippingCategory)
-                            PrintStatusChip(status: order.printStatus)
-                            Tag(text: order.hasMultipleItems ? "\(order.items.count) artículos" : "1 artículo", systemImage: "square.stack.3d.up.fill")
-                        }
-                        Text(order.shippingMethod).foregroundStyle(.secondary)
+            ScrollView {
+                VStack(alignment: .leading, spacing: 16) {
+                    SyncStatusView()
 
-                        VStack(alignment: .leading, spacing: 7) {
-                            ForEach(order.items.prefix(4)) { item in
-                                CompactOrderItemLine(item: item)
-                            }
-                            if order.items.count > 4 {
-                                Text("+\(order.items.count - 4) artículos más")
-                                    .font(.footnote.weight(.semibold))
-                                    .foregroundStyle(.orange)
-                            }
-                        }
-
-                        VStack(spacing: 8) {
-                            if let tracking = order.tracking {
-                                Label(tracking, systemImage: "barcode.viewfinder")
-                                    .font(.subheadline.weight(.bold))
-                                    .foregroundStyle(.teal)
-                                    .frame(maxWidth: .infinity, alignment: .leading)
-                            }
-
-                            if order.printStatus == .pending {
-                                Label("Etiqueta creada, pendiente de imprimir en taller", systemImage: "printer.fill")
-                                    .font(.subheadline.weight(.bold))
-                                    .foregroundStyle(.orange)
-                                    .frame(maxWidth: .infinity, alignment: .leading)
-                            } else if order.printStatus == .printed {
-                                Label("Etiqueta impresa", systemImage: "checkmark.circle.fill")
-                                    .font(.subheadline.weight(.bold))
-                                    .foregroundStyle(.green)
-                                    .frame(maxWidth: .infinity, alignment: .leading)
-                            }
-
-                            if order.tracking == nil {
-                                Button { Task { await store.createLabelRemote(for: order) } } label: {
-                                    if store.labelCreationOrderID == order.id {
-                                        ProgressView()
-                                            .frame(maxWidth: .infinity)
-                                    } else {
-                                        Label("Crear etiqueta", systemImage: "tag.fill")
-                                            .frame(maxWidth: .infinity)
-                                    }
-                                }
-                                .buttonStyle(.borderedProminent)
-                                .disabled(store.labelCreationOrderID != nil)
-                            }
-
-                            Button { scanningOrder = order } label: {
-                                if store.labelScanOrderID == order.id {
-                                    ProgressView()
-                                        .frame(maxWidth: .infinity)
-                                } else {
-                                    Label(order.tracking == nil ? "Escanear código de etiqueta" : "Releer código de etiqueta", systemImage: "barcode.viewfinder")
-                                        .frame(maxWidth: .infinity)
-                                }
-                            }
-                            .buttonStyle(.borderedProminent)
-                            .tint(.teal)
-                            .disabled(store.labelScanOrderID != nil)
-
-                            Button { Task { await store.reopenPreparationRemote(order) } } label: {
-                                Label("Volver a sin preparar", systemImage: "arrow.uturn.backward.circle.fill")
-                                    .frame(maxWidth: .infinity)
-                            }
-                            .buttonStyle(.bordered)
-                            .disabled(order.status == .shipped)
-                        }
-
-                        NavigationLink(value: order) {
-                            Label("Ver pedido completo", systemImage: "doc.text.magnifyingglass")
-                                .frame(maxWidth: .infinity)
-                        }
-                        .buttonStyle(.bordered)
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("Envios")
+                            .font(.system(size: 38, weight: .black))
+                            .foregroundStyle(AppTheme.ink)
+                        Text("Pedidos preparados, etiquetas y lectura de tracking.")
+                            .font(.subheadline.weight(.medium))
+                            .foregroundStyle(AppTheme.muted)
                     }
-                    .padding(.vertical, 6)
+
+                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 104), spacing: 10)], spacing: 10) {
+                        MetricTile(title: "Listos", value: shippingOrders.count, color: AppTheme.blue, icon: "shippingbox.fill")
+                        MetricTile(title: "Sin etiqueta", value: shippingOrders.filter { $0.tracking == nil }.count, color: AppTheme.amber, icon: "tag")
+                        MetricTile(title: "Imprimir", value: shippingOrders.filter { $0.printStatus == .pending }.count, color: AppTheme.magenta, icon: "printer.fill")
+                    }
+
+                    if shippingOrders.isEmpty {
+                        ContentUnavailableView("Sin envios pendientes", systemImage: "checkmark.seal", description: Text("Cuando marques un pedido como preparado aparecera aqui."))
+                            .glassPanel(accent: AppTheme.green)
+                    } else {
+                        LazyVStack(spacing: 14) {
+                            ForEach(shippingOrders) { order in
+                                ShippingOrderCard(order: order, scanningOrder: $scanningOrder)
+                            }
+                        }
+                    }
                 }
+                .padding()
             }
-            .listStyle(.insetGrouped)
-            .scrollContentBackground(.hidden)
             .screenBackground()
             .navigationTitle("Envios")
             .toolbar {
@@ -1095,6 +1106,112 @@ struct ShippingView: View {
                 }
             }
         }
+    }
+}
+
+struct ShippingOrderCard: View {
+    @Environment(WorkshopStore.self) private var store
+    let order: WorkshopOrder
+    @Binding var scanningOrder: WorkshopOrder?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 13) {
+            HStack(alignment: .top, spacing: 12) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(order.number)
+                        .font(.title2.weight(.black))
+                        .foregroundStyle(AppTheme.ink)
+                    Text(order.customer)
+                        .font(.subheadline.weight(.medium))
+                        .foregroundStyle(AppTheme.muted)
+                }
+                Spacer()
+                PriorityBadge(priority: order.priority)
+            }
+
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 118), spacing: 8)], alignment: .leading, spacing: 8) {
+                SourceChip(source: order.source)
+                StatusChip(status: order.status)
+                ShippingChip(category: order.shippingCategory)
+                PrintStatusChip(status: order.printStatus)
+                Tag(text: order.hasMultipleItems ? "\(order.items.count) articulos" : "1 articulo", systemImage: "square.stack.3d.up.fill")
+            }
+
+            Text(order.shippingMethod)
+                .font(.footnote.weight(.semibold))
+                .foregroundStyle(AppTheme.muted)
+
+            VStack(alignment: .leading, spacing: 7) {
+                ForEach(order.items.prefix(4)) { item in
+                    CompactOrderItemLine(item: item)
+                }
+                if order.items.count > 4 {
+                    Text("+\(order.items.count - 4) articulos mas")
+                        .font(.footnote.weight(.semibold))
+                        .foregroundStyle(AppTheme.amber)
+                }
+            }
+            .padding(12)
+            .background(Color.white.opacity(0.62))
+            .clipShape(RoundedRectangle(cornerRadius: 14))
+
+            if let tracking = order.tracking {
+                Label(tracking, systemImage: "barcode.viewfinder")
+                    .font(.subheadline.weight(.bold))
+                    .foregroundStyle(AppTheme.teal)
+            } else if order.printStatus == .pending {
+                Label("Etiqueta creada, pendiente de imprimir en taller", systemImage: "printer.fill")
+                    .font(.subheadline.weight(.bold))
+                    .foregroundStyle(AppTheme.amber)
+            } else if order.printStatus == .printed {
+                Label("Etiqueta impresa", systemImage: "checkmark.circle.fill")
+                    .font(.subheadline.weight(.bold))
+                    .foregroundStyle(AppTheme.green)
+            }
+
+            VStack(spacing: 9) {
+                if order.tracking == nil {
+                    Button { Task { await store.createLabelRemote(for: order) } } label: {
+                        if store.labelCreationOrderID == order.id {
+                            ProgressView().frame(maxWidth: .infinity)
+                        } else {
+                            Label("Crear etiqueta", systemImage: "tag.fill").frame(maxWidth: .infinity)
+                        }
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(AppTheme.blue)
+                    .disabled(store.labelCreationOrderID != nil)
+                }
+
+                Button { scanningOrder = order } label: {
+                    if store.labelScanOrderID == order.id {
+                        ProgressView().frame(maxWidth: .infinity)
+                    } else {
+                        Label(order.tracking == nil ? "Escanear codigo de etiqueta" : "Releer codigo de etiqueta", systemImage: "barcode.viewfinder")
+                            .frame(maxWidth: .infinity)
+                    }
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(AppTheme.teal)
+                .disabled(store.labelScanOrderID != nil)
+
+                HStack(spacing: 10) {
+                    Button { Task { await store.reopenPreparationRemote(order) } } label: {
+                        Label("Sin preparar", systemImage: "arrow.uturn.backward.circle.fill")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.bordered)
+                    .disabled(order.status == .shipped)
+
+                    NavigationLink(value: order) {
+                        Label("Ver pedido", systemImage: "doc.text.magnifyingglass")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.bordered)
+                }
+            }
+        }
+        .glassPanel(padding: 14, accent: order.priority.color)
     }
 }
 
@@ -1133,6 +1250,7 @@ struct LabelScanView: View {
                         .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.borderedProminent)
+                .tint(AppTheme.teal)
                 .disabled(manualBarcode.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }
             .padding()
@@ -1171,15 +1289,16 @@ struct StockView: View {
                     VStack(alignment: .leading, spacing: 4) {
                         Text("Stock")
                             .font(.system(size: 38, weight: .black))
+                            .foregroundStyle(AppTheme.ink)
                         Text("Stock real del taller. Toca una talla para modificar unidades.")
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
+                            .font(.subheadline.weight(.medium))
+                            .foregroundStyle(AppTheme.muted)
                     }
 
                     LazyVGrid(columns: [GridItem(.adaptive(minimum: 104), spacing: 10)], spacing: 10) {
-                        MetricTile(title: "Stock", value: store.purchaseMatrix.reduce(0) { $0 + $1.totalStock }, color: .green, icon: "archivebox.fill")
-                        MetricTile(title: "Con stock", value: store.purchaseMatrix.reduce(0) { $0 + $1.entries.filter { $0.currentInternalStock > 0 }.count }, color: .blue, icon: "checkmark.circle.fill")
-                        MetricTile(title: "Sin stock", value: store.purchaseMatrix.reduce(0) { $0 + $1.entries.filter { $0.currentInternalStock == 0 }.count }, color: .orange, icon: "exclamationmark.circle.fill")
+                        MetricTile(title: "Stock", value: store.purchaseMatrix.reduce(0) { $0 + $1.totalStock }, color: AppTheme.green, icon: "archivebox.fill")
+                        MetricTile(title: "Con stock", value: store.purchaseMatrix.reduce(0) { $0 + $1.entries.filter { $0.currentInternalStock > 0 }.count }, color: AppTheme.blue, icon: "checkmark.circle.fill")
+                        MetricTile(title: "Sin stock", value: store.purchaseMatrix.reduce(0) { $0 + $1.entries.filter { $0.currentInternalStock == 0 }.count }, color: AppTheme.amber, icon: "exclamationmark.circle.fill")
                     }
 
                     VStack(spacing: 10) {
@@ -1190,6 +1309,7 @@ struct StockView: View {
                                 .frame(maxWidth: .infinity)
                         }
                         .buttonStyle(.bordered)
+                        .tint(AppTheme.blue)
                     }
                     .glassPanel(padding: 12)
 
@@ -1280,9 +1400,9 @@ struct StockMatrixCard: View {
                     } label: {
                         Text("\(entry.currentInternalStock)")
                             .font(.system(size: 32, weight: .black))
-                            .foregroundStyle(entry.currentInternalStock > 0 ? .green : .primary)
+                            .foregroundStyle(entry.currentInternalStock > 0 ? AppTheme.green : AppTheme.ink)
                             .frame(maxWidth: .infinity, minHeight: 64)
-                            .background(.background)
+                            .background(Color.white.opacity(0.86))
                     }
                     .buttonStyle(.plain)
                     .disabled(entry.sku == nil)
@@ -1292,8 +1412,8 @@ struct StockMatrixCard: View {
                 }
             }
         }
-        .clipShape(RoundedRectangle(cornerRadius: 8))
-        .overlay(RoundedRectangle(cornerRadius: 8).stroke(.primary.opacity(0.7), lineWidth: 1))
+        .clipShape(RoundedRectangle(cornerRadius: 14))
+        .overlay(RoundedRectangle(cornerRadius: 14).stroke(AppTheme.line, lineWidth: 1))
         .glassPanel(padding: 0)
     }
 }
@@ -1323,8 +1443,9 @@ struct StockEditSheet: View {
                 VStack(alignment: .leading, spacing: 6) {
                     Text(selection.entry.subproductName)
                         .font(.title2.weight(.black))
+                        .foregroundStyle(AppTheme.ink)
                     Text("Pedidos sin preparar: \(selection.entry.pendingOrderNeed)")
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(AppTheme.muted)
                 }
 
                 VStack(alignment: .leading, spacing: 8) {
@@ -1335,14 +1456,14 @@ struct StockEditSheet: View {
                         .font(.system(size: 44, weight: .black))
                         .multilineTextAlignment(.center)
                         .padding(.vertical, 12)
-                        .background(.background)
-                        .clipShape(RoundedRectangle(cornerRadius: 8))
+                        .background(Color.white.opacity(0.88))
+                        .clipShape(RoundedRectangle(cornerRadius: 14))
                 }
-                .glassPanel()
+                .glassPanel(accent: AppTheme.green)
 
                 Text("Al guardar, Compras recalcula automaticamente lo que hay que pedir.")
                     .font(.footnote)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(AppTheme.muted)
 
                 Spacer()
             }
@@ -1355,6 +1476,7 @@ struct StockEditSheet: View {
                     Button("Guardar") {
                         onSave(max(0, Int(quantityText) ?? selection.entry.currentInternalStock))
                     }
+                    .tint(AppTheme.green)
                 }
             }
         }
@@ -1372,19 +1494,26 @@ struct PurchaseMatrixView: View {
                     VStack(alignment: .leading, spacing: 4) {
                         Text("Comprar")
                             .font(.system(size: 38, weight: .black))
+                            .foregroundStyle(AppTheme.ink)
                         Text("Unidades a comprar segun pedidos sin preparar y stock actual.")
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
+                            .font(.subheadline.weight(.medium))
+                            .foregroundStyle(AppTheme.muted)
                     }
 
                     LazyVGrid(columns: [GridItem(.adaptive(minimum: 104), spacing: 10)], spacing: 10) {
-                        MetricTile(title: "Comprar", value: store.purchaseMatrix.reduce(0) { $0 + $1.totalRecommended }, color: .red, icon: "cart.badge.plus")
-                        MetricTile(title: "Pedidos", value: store.purchaseMatrix.reduce(0) { $0 + $1.totalPending }, color: .blue, icon: "shippingbox.fill")
-                        MetricTile(title: "Stock", value: store.purchaseMatrix.reduce(0) { $0 + $1.totalStock }, color: .green, icon: "archivebox.fill")
+                        MetricTile(title: "Comprar", value: store.purchaseMatrix.reduce(0) { $0 + $1.totalRecommended }, color: AppTheme.magenta, icon: "cart.badge.plus")
+                        MetricTile(title: "Pedidos", value: store.purchaseMatrix.reduce(0) { $0 + $1.totalPending }, color: AppTheme.blue, icon: "shippingbox.fill")
+                        MetricTile(title: "Stock", value: store.purchaseMatrix.reduce(0) { $0 + $1.totalStock }, color: AppTheme.green, icon: "archivebox.fill")
                     }
 
-                    ForEach(store.purchaseMatrix.filter { $0.totalRecommended > 0 }) { group in
-                        PurchaseMatrixCard(group: group, mode: .recommended)
+                    let groups = store.purchaseMatrix.filter { $0.totalRecommended > 0 }
+                    if groups.isEmpty {
+                        ContentUnavailableView("No hay compras pendientes", systemImage: "checkmark.seal", description: Text("El stock actual cubre los pedidos sin preparar."))
+                            .glassPanel(accent: AppTheme.green)
+                    } else {
+                        ForEach(groups) { group in
+                            PurchaseMatrixCard(group: group, mode: .recommended)
+                        }
                     }
                 }
                 .padding()
@@ -1436,8 +1565,8 @@ struct PurchaseMatrixCard: View {
                     .font(.subheadline.weight(.black))
                     .padding(.horizontal, 10)
                     .padding(.vertical, 5)
-                    .background(group.foregroundColor.opacity(0.14))
-                    .clipShape(RoundedRectangle(cornerRadius: 7))
+                    .background(Color.white.opacity(0.24))
+                    .clipShape(RoundedRectangle(cornerRadius: 9))
             }
             .foregroundStyle(group.foregroundColor)
             .padding(.horizontal, 12)
@@ -1462,8 +1591,8 @@ struct PurchaseMatrixCard: View {
                 }
             }
         }
-        .clipShape(RoundedRectangle(cornerRadius: 8))
-        .overlay(RoundedRectangle(cornerRadius: 8).stroke(.primary.opacity(0.75), lineWidth: 1))
+        .clipShape(RoundedRectangle(cornerRadius: 14))
+        .overlay(RoundedRectangle(cornerRadius: 14).stroke(AppTheme.line, lineWidth: 1))
         .glassPanel(padding: 0)
     }
 
@@ -1492,23 +1621,23 @@ struct MatrixQuantityCell: View {
         VStack(spacing: 3) {
             Text("\(value)")
                 .font(.title3.weight(.black))
-                .foregroundStyle(value > 0 && mode == .recommended ? .red : .primary)
+                .foregroundStyle(value > 0 && mode == .recommended ? AppTheme.magenta : AppTheme.ink)
             if mode == .recommended && entry.pendingOrderNeed > 0 {
                 Text("ped \(entry.pendingOrderNeed) · stk \(entry.currentInternalStock) · ss \(entry.minStockTarget)")
                     .font(.caption2.weight(.semibold))
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(AppTheme.muted)
             }
             if mode != .recommended {
                 Text(entry.subproductName.replacingOccurrences(of: "Camiseta ", with: "").replacingOccurrences(of: "Sudadera ", with: ""))
                     .font(.caption2.weight(.medium))
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(AppTheme.muted)
                     .lineLimit(2)
                     .multilineTextAlignment(.center)
                     .minimumScaleFactor(0.75)
             }
         }
         .frame(maxWidth: .infinity, minHeight: 54)
-        .background(.background)
+        .background(Color.white.opacity(0.86))
         .overlay(alignment: .trailing) {
             Divider()
         }
@@ -1673,12 +1802,16 @@ struct PendingOrderRow: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(alignment: .top) {
-                VStack(alignment: .leading, spacing: 4) {
+                RoundedRectangle(cornerRadius: 5)
+                    .fill(order.priority.color)
+                    .frame(width: 6)
+                VStack(alignment: .leading, spacing: 5) {
                     Text(order.number)
-                        .font(.title3.weight(.black))
+                        .font(.title2.weight(.black))
+                        .foregroundStyle(AppTheme.ink)
                     Text(order.customer)
                         .font(.subheadline)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(AppTheme.muted)
                 }
                 Spacer()
                 PriorityBadge(priority: order.priority)
@@ -1691,7 +1824,7 @@ struct PendingOrderRow: View {
             }
             Text(order.shippingMethod)
                 .font(.footnote)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(AppTheme.muted)
             VStack(alignment: .leading, spacing: 7) {
                 ForEach(order.items.prefix(3)) { item in
                     CompactOrderItemLine(item: item)
@@ -1708,6 +1841,7 @@ struct PendingOrderRow: View {
                         .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.borderedProminent)
+                .tint(AppTheme.green)
                 .controlSize(.large)
                 .disabled(order.status == .waitingStock)
             }
@@ -1751,9 +1885,10 @@ struct OrderPreparationDetailView: View {
                         VStack(alignment: .leading, spacing: 4) {
                             Text(currentOrder.number)
                                 .font(.system(size: 34, weight: .black))
+                                .foregroundStyle(AppTheme.ink)
                             Text(currentOrder.customer)
                                 .font(.headline)
-                                .foregroundStyle(.secondary)
+                                .foregroundStyle(AppTheme.muted)
                         }
                         Spacer()
                         PriorityBadge(priority: currentOrder.priority)
@@ -1769,9 +1904,9 @@ struct OrderPreparationDetailView: View {
                         .foregroundStyle(currentOrder.priority.color)
                     Text(currentOrder.shippingMethod)
                         .font(.subheadline)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(AppTheme.muted)
                 }
-                .glassPanel()
+                .glassPanel(accent: currentOrder.priority.color)
 
                 SectionHeader(title: "Contenido del pedido", subtitle: "Revisa unidades y prendas antes de marcarlo preparado")
 
@@ -1782,7 +1917,7 @@ struct OrderPreparationDetailView: View {
                             .foregroundStyle(.orange)
                         Text("Hay algun item con 2 o mas unidades. Comprueba que van todas dentro del paquete.")
                             .font(.subheadline)
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(AppTheme.muted)
                         ForEach(repeatedQuantityItems) { item in
                             Text("\(item.displayTitle) · x\(item.quantity)")
                                 .font(.subheadline.weight(.bold))
@@ -1802,9 +1937,9 @@ struct OrderPreparationDetailView: View {
                             .foregroundStyle(.green)
                         Text("El contenido sigue visible aqui para revisar fotos, tallas y unidades aunque ya no aparezca en Sin preparar.")
                             .font(.subheadline)
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(AppTheme.muted)
                     }
-                    .glassPanel()
+                    .glassPanel(accent: AppTheme.green)
 
                     Button {
                         Task { await store.reopenPreparationRemote(currentOrder) }
@@ -1813,6 +1948,7 @@ struct OrderPreparationDetailView: View {
                             .frame(maxWidth: .infinity)
                     }
                     .buttonStyle(.bordered)
+                    .tint(AppTheme.blue)
                     .controlSize(.large)
                 } else {
                     Button {
@@ -1822,6 +1958,7 @@ struct OrderPreparationDetailView: View {
                             .frame(maxWidth: .infinity)
                     }
                     .buttonStyle(.borderedProminent)
+                    .tint(AppTheme.green)
                     .controlSize(.large)
                     .disabled(currentOrder.status == .waitingStock)
                 }
@@ -1851,11 +1988,12 @@ struct OrderItemCard: View {
                 VStack(alignment: .leading, spacing: 8) {
                     Text(item.sizeText)
                         .font(.system(size: 46, weight: .black))
+                        .foregroundStyle(AppTheme.blue)
                         .lineLimit(1)
                         .minimumScaleFactor(0.55)
                     Text(item.quantity == 1 ? "x1 unidad" : "x\(item.quantity) unidades")
                         .font(.title2.weight(.black))
-                        .foregroundStyle(item.quantity > 1 ? .orange : .secondary)
+                        .foregroundStyle(item.quantity > 1 ? AppTheme.amber : AppTheme.muted)
                 }
                 .frame(width: 112, alignment: .leading)
                 Spacer()
@@ -1875,15 +2013,16 @@ struct OrderItemCard: View {
             VStack(alignment: .leading, spacing: 8) {
                 Text(item.displayTitle)
                     .font(.headline.weight(.bold))
+                    .foregroundStyle(AppTheme.ink)
                     .lineLimit(3)
                 if !item.detailLine.isEmpty {
                     Text(item.detailLine)
                         .font(.subheadline)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(AppTheme.muted)
                 }
             }
         }
-        .glassPanel(padding: 14)
+        .glassPanel(padding: 14, accent: item.quantity > 1 ? AppTheme.amber : AppTheme.blue.opacity(0.8))
     }
 }
 
@@ -2015,16 +2154,16 @@ struct ProductImageView: View {
                 placeholder
             }
         }
-        .clipShape(RoundedRectangle(cornerRadius: 8))
-        .overlay(RoundedRectangle(cornerRadius: 8).stroke(.quaternary, lineWidth: 1))
+        .clipShape(RoundedRectangle(cornerRadius: 14))
+        .overlay(RoundedRectangle(cornerRadius: 14).stroke(AppTheme.line, lineWidth: 1))
     }
 
     private var placeholder: some View {
         ZStack {
-            Color(.secondarySystemGroupedBackground)
+            LinearGradient(colors: [AppTheme.blue.opacity(0.10), AppTheme.amber.opacity(0.10)], startPoint: .topLeading, endPoint: .bottomTrailing)
             Text(initials.isEmpty ? "?" : initials)
                 .font(.headline.weight(.black))
-                .foregroundStyle(.secondary)
+                .foregroundStyle(AppTheme.muted)
         }
     }
 }
@@ -2036,24 +2175,25 @@ struct MetricTile: View {
     let icon: String
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: 12) {
             HStack {
                 Image(systemName: icon)
-                    .font(.headline)
-                    .foregroundStyle(color)
-                    .frame(width: 34, height: 34)
-                    .background(color.opacity(0.12))
-                    .clipShape(RoundedRectangle(cornerRadius: 8))
+                    .font(.system(size: 17, weight: .black))
+                    .foregroundStyle(.white)
+                    .frame(width: 38, height: 38)
+                    .background(LinearGradient(colors: [color, color.opacity(0.72)], startPoint: .topLeading, endPoint: .bottomTrailing))
+                    .clipShape(RoundedRectangle(cornerRadius: 10))
                 Spacer()
             }
             Text("\(value)")
-                .font(.system(size: 34, weight: .black))
+                .font(.system(size: 36, weight: .black))
+                .foregroundStyle(AppTheme.ink)
             Text(title)
                 .font(.subheadline.weight(.semibold))
-                .foregroundStyle(.secondary)
+                .foregroundStyle(AppTheme.muted)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .glassPanel(padding: 16)
+        .glassPanel(padding: 16, accent: color)
     }
 }
 
@@ -2063,11 +2203,11 @@ struct PriorityBadge: View {
     var body: some View {
         Text(priority.rawValue)
             .font(.caption.weight(.black))
-            .foregroundStyle(priority.color)
-            .padding(.horizontal, 8)
-            .padding(.vertical, 5)
-            .background(priority.color.opacity(0.14))
-            .clipShape(RoundedRectangle(cornerRadius: 6))
+            .foregroundStyle(priority == .critical ? .white : priority.color)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .background(priority == .critical ? priority.color : priority.color.opacity(0.13))
+            .clipShape(Capsule())
     }
 }
 
@@ -2077,11 +2217,21 @@ struct StatusChip: View {
     var body: some View {
         Label(status.label, systemImage: status == .waitingStock ? "exclamationmark.triangle.fill" : "shippingbox.fill")
             .font(.caption.weight(.bold))
-            .foregroundStyle(status == .waitingStock ? .orange : .secondary)
-            .padding(.horizontal, 8)
-            .padding(.vertical, 5)
-            .background(.quaternary)
-            .clipShape(RoundedRectangle(cornerRadius: 6))
+            .foregroundStyle(statusColor)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .background(statusColor.opacity(0.12))
+            .clipShape(Capsule())
+    }
+
+    private var statusColor: Color {
+        switch status {
+        case .readyForLabel, .labelCreated, .shipped: AppTheme.green
+        case .waitingStock: AppTheme.magenta
+        case .inProduction, .produced, .picked: AppTheme.blue
+        case .cancelled: .gray
+        default: AppTheme.amber
+        }
     }
 }
 
@@ -2091,11 +2241,11 @@ struct ShippingChip: View {
     var body: some View {
         Label(category.rawValue, systemImage: category == .premium ? "bolt.fill" : "shippingbox.fill")
             .font(.caption.weight(.bold))
-            .foregroundStyle(category == .premium ? .orange : .blue)
-            .padding(.horizontal, 8)
-            .padding(.vertical, 5)
-            .background((category == .premium ? Color.orange : Color.blue).opacity(0.12))
-            .clipShape(RoundedRectangle(cornerRadius: 6))
+            .foregroundStyle(category == .premium ? AppTheme.amber : AppTheme.blue)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .background((category == .premium ? AppTheme.amber : AppTheme.blue).opacity(0.12))
+            .clipShape(Capsule())
     }
 }
 
@@ -2105,11 +2255,11 @@ struct SourceChip: View {
     var body: some View {
         Label(source.rawValue, systemImage: source.icon)
             .font(.caption.weight(.bold))
-            .foregroundStyle(source == .shopify ? .green : .indigo)
-            .padding(.horizontal, 8)
-            .padding(.vertical, 5)
-            .background((source == .shopify ? Color.green : Color.indigo).opacity(0.12))
-            .clipShape(RoundedRectangle(cornerRadius: 6))
+            .foregroundStyle(source == .shopify ? AppTheme.green : AppTheme.purple)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .background((source == .shopify ? AppTheme.green : AppTheme.purple).opacity(0.12))
+            .clipShape(Capsule())
     }
 }
 
@@ -2123,19 +2273,19 @@ struct PrintStatusChip: View {
         case .pending:
             Label("Pendiente imprimir", systemImage: "printer.fill")
                 .font(.caption.weight(.bold))
-                .foregroundStyle(.orange)
-                .padding(.horizontal, 8)
-                .padding(.vertical, 5)
-                .background(Color.orange.opacity(0.12))
-                .clipShape(RoundedRectangle(cornerRadius: 6))
+                .foregroundStyle(AppTheme.amber)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 6)
+                .background(AppTheme.amber.opacity(0.12))
+                .clipShape(Capsule())
         case .printed:
             Label("Impresa", systemImage: "checkmark.circle.fill")
                 .font(.caption.weight(.bold))
-                .foregroundStyle(.green)
-                .padding(.horizontal, 8)
-                .padding(.vertical, 5)
-                .background(Color.green.opacity(0.12))
-                .clipShape(RoundedRectangle(cornerRadius: 6))
+                .foregroundStyle(AppTheme.green)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 6)
+                .background(AppTheme.green.opacity(0.12))
+                .clipShape(Capsule())
         }
     }
 }
@@ -2147,10 +2297,12 @@ struct Tag: View {
     var body: some View {
         Label(text, systemImage: systemImage)
             .font(.caption.weight(.semibold))
-            .padding(.horizontal, 8)
-            .padding(.vertical, 5)
-            .background(.quaternary.opacity(0.8))
-            .clipShape(RoundedRectangle(cornerRadius: 6))
+            .foregroundStyle(AppTheme.muted)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .background(Color.white.opacity(0.72))
+            .overlay(Capsule().stroke(AppTheme.line))
+            .clipShape(Capsule())
     }
 }
 
@@ -2160,8 +2312,12 @@ struct SectionHeader: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
-            Text(title).font(.title3.weight(.black))
-            Text(subtitle).font(.subheadline).foregroundStyle(.secondary)
+            Text(title)
+                .font(.title3.weight(.black))
+                .foregroundStyle(AppTheme.ink)
+            Text(subtitle)
+                .font(.subheadline)
+                .foregroundStyle(AppTheme.muted)
         }
     }
 }
@@ -2172,11 +2328,13 @@ struct InfoPanel: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text(title).font(.headline)
+            Text(title)
+                .font(.headline.weight(.black))
+                .foregroundStyle(AppTheme.ink)
             ForEach(rows, id: \.self) { row in
                 Label(row, systemImage: "circle.fill")
                     .font(.subheadline)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(AppTheme.muted)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -2229,53 +2387,62 @@ struct SyncStatusView: View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
                 Label(store.isAPIConnected ? "API conectada" : "API sin conexion", systemImage: store.isAPIConnected ? "checkmark.icloud.fill" : "exclamationmark.icloud.fill")
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(store.isAPIConnected ? .teal : .orange)
+                    .font(.subheadline.weight(.black))
+                    .foregroundStyle(store.isAPIConnected ? AppTheme.teal : AppTheme.amber)
                 Spacer()
                 if store.isLoading {
                     ProgressView()
                 } else {
                     Text(store.lastSyncText)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(AppTheme.muted)
                 }
             }
             if let syncError = store.syncError {
                 Text(syncError)
                     .font(.caption)
-                    .foregroundStyle(.orange)
+                    .foregroundStyle(AppTheme.amber)
             }
         }
-        .glassPanel(padding: 12)
+        .glassPanel(padding: 12, accent: store.isAPIConnected ? AppTheme.teal : AppTheme.amber)
     }
 }
 
 struct GlassPanelModifier: ViewModifier {
     let padding: CGFloat
+    let accent: Color?
 
     func body(content: Content) -> some View {
         content
             .padding(padding)
-            .background(.regularMaterial)
-            .clipShape(RoundedRectangle(cornerRadius: 8))
-            .overlay(
-                RoundedRectangle(cornerRadius: 8)
-                    .stroke(.white.opacity(0.28), lineWidth: 1)
-            )
-            .shadow(color: .black.opacity(0.05), radius: 12, y: 6)
+            .background(RoundedRectangle(cornerRadius: 18).fill(AppTheme.surface))
+            .overlay(alignment: .top) {
+                if let accent {
+                    RoundedRectangle(cornerRadius: 18)
+                        .fill(accent.opacity(0.18))
+                        .frame(height: 4)
+                        .padding(.horizontal, 18)
+                        .padding(.top, 1)
+                }
+            }
+            .overlay(RoundedRectangle(cornerRadius: 18).stroke(AppTheme.line, lineWidth: 1))
+            .shadow(color: .black.opacity(0.07), radius: 18, x: 0, y: 8)
     }
 }
 
 struct ScreenBackgroundModifier: ViewModifier {
     func body(content: Content) -> some View {
-        content
-            .background(Color(.systemGroupedBackground))
+        ZStack {
+            LinearGradient(colors: [AppTheme.canvasTop, AppTheme.canvasBottom], startPoint: .topLeading, endPoint: .bottomTrailing)
+                .ignoresSafeArea()
+            content
+        }
     }
 }
 
 extension View {
-    func glassPanel(padding: CGFloat = 16) -> some View {
-        modifier(GlassPanelModifier(padding: padding))
+    func glassPanel(padding: CGFloat = 16, accent: Color? = nil) -> some View {
+        modifier(GlassPanelModifier(padding: padding, accent: accent))
     }
 
     func screenBackground() -> some View {
