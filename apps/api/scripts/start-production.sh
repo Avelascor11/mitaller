@@ -13,5 +13,10 @@ fi
 echo "Applying Prisma schema"
 npm run prisma:push
 
+if [ "${SEED_ON_START:-false}" = "true" ]; then
+  echo "Running seed"
+  npm run seed
+fi
+
 echo "Starting Nest API"
 npm run start:api
