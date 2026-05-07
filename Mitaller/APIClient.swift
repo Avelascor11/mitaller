@@ -208,6 +208,7 @@ private struct OrderDTO: Decodable {
     let shippingMethod: String
     let operationalStatus: String
     let priorityLevel: String
+    let orderedAt: Date?
     let internalDeadlineAt: Date?
     let items: [OrderItemDTO]?
     let shipments: [ShipmentDTO]?
@@ -224,7 +225,8 @@ private struct OrderDTO: Decodable {
             items: items?.map(\.workshopItem) ?? [],
             tracking: shipments?.compactMap(\.trackingNumber).first,
             source: (shopifyOrderId ?? "").hasPrefix("sheet:") ? .sheet : .shopify,
-            printStatus: WorkshopOrder.PrintStatus(shipments: shipments ?? [])
+            printStatus: WorkshopOrder.PrintStatus(shipments: shipments ?? []),
+            createdAt: orderedAt
         )
     }
 }

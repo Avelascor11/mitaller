@@ -1,5 +1,5 @@
 import { execFile } from 'node:child_process';
-import { mkdir, writeFile } from 'node:fs/promises';
+import { mkdir, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
@@ -47,20 +47,73 @@ function sendcloudHeaders(labelUrl) {
   };
 }
 
+const SUMATRA_CANDIDATES = [
+  process.env.LABEL_PRINTER_BIN,
+  'C:\\Program Files\\SumatraPDF\\SumatraPDF.exe',
+  'C:\\Program Files (x86)\\SumatraPDF\\SumatraPDF.exe',
+  process.env.LOCALAPPDATA ? join(process.env.LOCALAPPDATA, 'SumatraPDF', 'SumatraPDF.exe') : null
+].filter(Boolean);
+
+async function detectSumatra() {
+  for (const candidate of SUMATRA_CANDIDATES) {
+    try {
+      await stat(candidate);
+      return candidate;
+    } catch {}
+  }
+  try {
+    const result = await execFileAsync('where', ['SumatraPDF']);
+    const first = result.stdout.split(/\r?\n/).map((s) => s.trim()).filter(Boolean)[0];
+    if (first) return first;
+  } catch {}
+  return null;
+}
+
 async function printFile(file, orderNumber) {
   if (DRY_RUN) {
     console.log(`[dry-run] ${orderNumber}: ${file}`);
     return { dryRun: true, file };
   }
 
+  if (process.platform === 'win32') {
+    return printWindows(file);
+  }
+  return printPosix(file);
+}
+
+async function printPosix(file) {
   const args = ['-d', PRINTER_NAME, '-o', 'fit-to-page', '-o', `media=${PAPER_SIZE}`, file];
   const result = await execFileAsync('lp', args);
   return {
+    platform: process.platform,
     printerName: PRINTER_NAME,
     paperSize: PAPER_SIZE,
     file,
     stdout: result.stdout.trim(),
     stderr: result.stderr.trim()
+  };
+}
+
+async function printWindows(file) {
+  const bin = await detectSumatra();
+  if (!bin) {
+    throw new Error(
+      'No se encontró SumatraPDF. Instálalo desde https://www.sumatrapdfreader.org/download-free-pdf-viewer ' +
+      'o define LABEL_PRINTER_BIN con la ruta a SumatraPDF.exe.'
+    );
+  }
+  const settings = process.env.LABEL_PRINT_SETTINGS ?? 'noscale';
+  const args = ['-print-to', PRINTER_NAME, '-print-settings', settings, '-silent', '-exit-when-done', file];
+  const result = await execFileAsync(bin, args);
+  return {
+    platform: 'win32',
+    printerName: PRINTER_NAME,
+    paperSize: PAPER_SIZE,
+    bin,
+    settings,
+    file,
+    stdout: (result.stdout || '').trim(),
+    stderr: (result.stderr || '').trim()
   };
 }
 

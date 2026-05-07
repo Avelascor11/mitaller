@@ -8,19 +8,42 @@
 import SwiftUI
 
 enum AppTheme {
-    static let canvasTop = Color(red: 0.96, green: 0.98, blue: 1.00)
-    static let canvasBottom = Color(red: 0.98, green: 0.96, blue: 0.92)
-    static let surface = Color.white.opacity(0.88)
-    static let surfaceStrong = Color.white
-    static let ink = Color(red: 0.08, green: 0.10, blue: 0.16)
-    static let muted = Color(red: 0.41, green: 0.45, blue: 0.54)
-    static let line = Color.black.opacity(0.08)
-    static let blue = Color(red: 0.16, green: 0.42, blue: 0.92)
-    static let teal = Color(red: 0.00, green: 0.58, blue: 0.62)
-    static let amber = Color(red: 0.96, green: 0.55, blue: 0.12)
-    static let magenta = Color(red: 0.86, green: 0.18, blue: 0.43)
-    static let green = Color(red: 0.06, green: 0.58, blue: 0.34)
-    static let purple = Color(red: 0.48, green: 0.28, blue: 0.92)
+    // Canvas: deep ink with subtle indigo/teal washes — dark SaaS (Linear/Vercel feel)
+    static let canvasTop    = Color(red: 0.043, green: 0.055, blue: 0.094) // #0B0E18
+    static let canvasBottom = Color(red: 0.027, green: 0.035, blue: 0.067) // #070911
+    static let canvasAccent = Color(red: 0.071, green: 0.078, blue: 0.137) // #121423
+
+    // Surfaces (elevated dark cards)
+    static let surface       = Color(red: 0.090, green: 0.106, blue: 0.157) // #171B28 card
+    static let surfaceStrong = Color(red: 0.114, green: 0.137, blue: 0.196) // #1D2332 elevated
+    static let surfaceSoft   = Color(red: 0.067, green: 0.082, blue: 0.125) // #111521 inner panel
+    static let surfaceTinted = Color(red: 0.078, green: 0.094, blue: 0.141) // #141824
+
+    // Text — high contrast on dark
+    static let ink       = Color(red: 0.965, green: 0.973, blue: 0.988) // #F6F8FC primary
+    static let inkSoft   = Color(red: 0.875, green: 0.890, blue: 0.918) // #DFE3EA
+    static let muted     = Color(red: 0.616, green: 0.651, blue: 0.722) // #9DA6B8
+    static let mutedSoft = Color(red: 0.482, green: 0.522, blue: 0.604) // #7B859A
+
+    // Lines (subtle dividers, slight lift)
+    static let line     = Color.white.opacity(0.08)
+    static let lineSoft = Color.white.opacity(0.04)
+
+    // Brand + semantic — saturated, vivid against dark
+    static let blue    = Color(red: 0.451, green: 0.420, blue: 0.969) // #736BF7 indigo
+    static let blueSoft = Color(red: 0.451, green: 0.420, blue: 0.969).opacity(0.16)
+    static let teal    = Color(red: 0.275, green: 0.831, blue: 0.937) // #46D4EF
+    static let tealSoft = Color(red: 0.275, green: 0.831, blue: 0.937).opacity(0.16)
+    static let amber   = Color(red: 0.984, green: 0.749, blue: 0.286) // #FBBF49
+    static let amberSoft = Color(red: 0.984, green: 0.749, blue: 0.286).opacity(0.18)
+    static let magenta = Color(red: 0.961, green: 0.404, blue: 0.808) // #F567CE
+    static let magentaSoft = Color(red: 0.961, green: 0.404, blue: 0.808).opacity(0.18)
+    static let green   = Color(red: 0.318, green: 0.871, blue: 0.604) // #51DE9A
+    static let greenSoft = Color(red: 0.318, green: 0.871, blue: 0.604).opacity(0.18)
+    static let purple  = Color(red: 0.690, green: 0.490, blue: 0.992) // #B07DFD
+    static let purpleSoft = Color(red: 0.690, green: 0.490, blue: 0.992).opacity(0.18)
+    static let red     = Color(red: 0.984, green: 0.408, blue: 0.467) // #FB6877
+    static let redSoft = Color(red: 0.984, green: 0.408, blue: 0.467).opacity(0.18)
 }
 
 enum PriorityLevel: String, CaseIterable, Identifiable {
@@ -34,11 +57,21 @@ enum PriorityLevel: String, CaseIterable, Identifiable {
 
     var color: Color {
         switch self {
-        case .critical: AppTheme.magenta
+        case .critical: AppTheme.red
         case .high: AppTheme.amber
         case .normal: AppTheme.blue
         case .low: AppTheme.muted
-        case .blocked: .red
+        case .blocked: AppTheme.magenta
+        }
+    }
+
+    var softColor: Color {
+        switch self {
+        case .critical: AppTheme.redSoft
+        case .high: AppTheme.amberSoft
+        case .normal: AppTheme.blueSoft
+        case .low: AppTheme.surfaceTinted
+        case .blocked: AppTheme.magentaSoft
         }
     }
 
@@ -211,6 +244,7 @@ struct WorkshopOrder: Identifiable, Hashable {
     var tracking: String?
     let source: Source
     var printStatus: PrintStatus
+    let createdAt: Date?
 
     var hasMultipleItems: Bool { items.count > 1 }
     var totalUnits: Int { items.reduce(0) { $0 + $1.quantity } }
@@ -221,6 +255,19 @@ struct WorkshopOrder: Identifiable, Hashable {
             return .premium
         }
         return .standard
+    }
+
+    var createdAtShort: String? {
+        guard let createdAt else { return nil }
+        return createdAt.formatted(.dateTime.day().month(.abbreviated).hour().minute())
+    }
+
+    var createdAtRelative: String? {
+        guard let createdAt else { return nil }
+        let formatter = RelativeDateTimeFormatter()
+        formatter.unitsStyle = .short
+        formatter.locale = Locale(identifier: "es_ES")
+        return formatter.localizedString(for: createdAt, relativeTo: Date())
     }
 
     init(
@@ -234,7 +281,8 @@ struct WorkshopOrder: Identifiable, Hashable {
         items: [WorkshopOrderItem],
         tracking: String? = nil,
         source: Source = .shopify,
-        printStatus: PrintStatus = .none
+        printStatus: PrintStatus = .none,
+        createdAt: Date? = nil
     ) {
         self.remoteID = remoteID
         self.number = number
@@ -247,6 +295,7 @@ struct WorkshopOrder: Identifiable, Hashable {
         self.tracking = tracking
         self.source = source
         self.printStatus = printStatus
+        self.createdAt = createdAt
     }
 }
 
@@ -635,6 +684,8 @@ struct ContentView: View {
     var body: some View {
         MainTabView()
             .environment(store)
+            .preferredColorScheme(.dark)
+            .tint(AppTheme.blue)
             .task {
                 await store.bootstrap()
             }
@@ -794,33 +845,41 @@ struct DashboardHeroView: View {
     @Environment(WorkshopStore.self) private var store
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            HStack(alignment: .top, spacing: 14) {
+        VStack(alignment: .leading, spacing: 18) {
+            HStack(alignment: .center, spacing: 14) {
                 ZStack {
-                    RoundedRectangle(cornerRadius: 18)
-                        .fill(LinearGradient(colors: [AppTheme.blue, AppTheme.teal], startPoint: .topLeading, endPoint: .bottomTrailing))
+                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                        .fill(
+                            LinearGradient(
+                                colors: [AppTheme.blue, AppTheme.teal],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            )
+                        )
                     Image(systemName: "shippingbox.and.arrow.backward.fill")
-                        .font(.system(size: 28, weight: .black))
+                        .font(.system(size: 22, weight: .bold))
                         .foregroundStyle(.white)
                 }
-                .frame(width: 62, height: 62)
+                .frame(width: 52, height: 52)
+                .shadow(color: AppTheme.blue.opacity(0.25), radius: 10, x: 0, y: 4)
 
-                VStack(alignment: .leading, spacing: 6) {
+                VStack(alignment: .leading, spacing: 4) {
                     Text("Taller en marcha")
-                        .font(.system(size: 34, weight: .black))
+                        .font(.system(size: 26, weight: .heavy, design: .rounded))
                         .foregroundStyle(AppTheme.ink)
-                    Text("Pedidos, stock y etiquetas sincronizados con Railway y Shopify.")
-                        .font(.subheadline.weight(.medium))
+                    Text("Sincronizado con Shopify y Sendcloud.")
+                        .font(.footnote.weight(.medium))
                         .foregroundStyle(AppTheme.muted)
                 }
+                Spacer()
             }
 
             HStack(spacing: 10) {
-                HeroPill(title: "Pendientes", value: "\(store.pendingPreparationOrders.count)", color: AppTheme.purple, icon: "tray.full.fill")
-                HeroPill(title: "Listos envío", value: "\(store.readyForShipping)", color: AppTheme.green, icon: "tag.fill")
+                HeroPill(title: "Pendientes", value: "\(store.pendingPreparationOrders.count)", color: AppTheme.blue, soft: AppTheme.blueSoft, icon: "tray.full.fill")
+                HeroPill(title: "Listos envío", value: "\(store.readyForShipping)", color: AppTheme.green, soft: AppTheme.greenSoft, icon: "paperplane.fill")
             }
         }
-        .glassPanel(padding: 18, accent: AppTheme.blue)
+        .glassPanel(padding: 18)
     }
 }
 
@@ -828,26 +887,37 @@ struct HeroPill: View {
     let title: String
     let value: String
     let color: Color
+    let soft: Color
     let icon: String
 
     var body: some View {
-        HStack(spacing: 8) {
+        HStack(spacing: 12) {
             Image(systemName: icon)
+                .font(.system(size: 14, weight: .bold))
                 .foregroundStyle(color)
-            VStack(alignment: .leading, spacing: 0) {
+                .frame(width: 32, height: 32)
+                .background(soft)
+                .clipShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
+            VStack(alignment: .leading, spacing: 1) {
                 Text(value)
-                    .font(.headline.weight(.black))
+                    .font(.system(size: 20, weight: .heavy, design: .rounded))
                     .foregroundStyle(AppTheme.ink)
-                Text(title)
-                    .font(.caption.weight(.semibold))
+                Text(title.uppercased())
+                    .font(.caption2.weight(.bold))
+                    .tracking(0.5)
                     .foregroundStyle(AppTheme.muted)
             }
+            Spacer(minLength: 0)
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, 12)
         .padding(.vertical, 10)
-        .background(color.opacity(0.10))
-        .clipShape(RoundedRectangle(cornerRadius: 12))
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(AppTheme.surfaceSoft)
+        .overlay(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .stroke(AppTheme.lineSoft, lineWidth: 1)
+        )
+        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
     }
 }
 
@@ -971,7 +1041,7 @@ struct PickingView: View {
                         }
                         .padding(.horizontal, 12)
                         .padding(.vertical, 11)
-                        .background(Color.white)
+                        .background(AppTheme.surfaceSoft)
                         .overlay(RoundedRectangle(cornerRadius: 12).stroke(AppTheme.line))
                         .clipShape(RoundedRectangle(cornerRadius: 12))
 
@@ -985,8 +1055,8 @@ struct PickingView: View {
                                             .font(.subheadline.weight(.black))
                                             .padding(.horizontal, 12)
                                             .padding(.vertical, 8)
-                                            .background(priorityFilter == option ? AppTheme.blue : Color.white)
-                                            .foregroundStyle(priorityFilter == option ? .white : .primary)
+                                            .background(priorityFilter == option ? AppTheme.blue : AppTheme.surfaceSoft)
+                                            .foregroundStyle(priorityFilter == option ? .white : AppTheme.inkSoft)
                                             .overlay(RoundedRectangle(cornerRadius: 10).stroke(priorityFilter == option ? Color.clear : AppTheme.line))
                                             .clipShape(RoundedRectangle(cornerRadius: 10))
                                     }
@@ -1137,9 +1207,19 @@ struct ShippingOrderCard: View {
                 Tag(text: order.hasMultipleItems ? "\(order.items.count) articulos" : "1 articulo", systemImage: "square.stack.3d.up.fill")
             }
 
-            Text(order.shippingMethod)
-                .font(.footnote.weight(.semibold))
-                .foregroundStyle(AppTheme.muted)
+            HStack(spacing: 12) {
+                Text(order.shippingMethod)
+                    .font(.footnote.weight(.semibold))
+                    .foregroundStyle(AppTheme.muted)
+                    .lineLimit(1)
+                if let created = order.createdAtShort {
+                    Spacer(minLength: 0)
+                    Label(created, systemImage: "calendar")
+                        .font(.footnote.weight(.semibold))
+                        .foregroundStyle(AppTheme.muted)
+                        .lineLimit(1)
+                }
+            }
 
             VStack(alignment: .leading, spacing: 7) {
                 ForEach(order.items.prefix(4)) { item in
@@ -1152,7 +1232,7 @@ struct ShippingOrderCard: View {
                 }
             }
             .padding(12)
-            .background(Color.white.opacity(0.62))
+            .background(AppTheme.surfaceSoft)
             .clipShape(RoundedRectangle(cornerRadius: 14))
 
             if let tracking = order.tracking {
@@ -1402,7 +1482,7 @@ struct StockMatrixCard: View {
                             .font(.system(size: 32, weight: .black))
                             .foregroundStyle(entry.currentInternalStock > 0 ? AppTheme.green : AppTheme.ink)
                             .frame(maxWidth: .infinity, minHeight: 64)
-                            .background(Color.white.opacity(0.86))
+                            .background(AppTheme.surfaceStrong)
                     }
                     .buttonStyle(.plain)
                     .disabled(entry.sku == nil)
@@ -1456,7 +1536,7 @@ struct StockEditSheet: View {
                         .font(.system(size: 44, weight: .black))
                         .multilineTextAlignment(.center)
                         .padding(.vertical, 12)
-                        .background(Color.white.opacity(0.88))
+                        .background(AppTheme.surfaceStrong)
                         .clipShape(RoundedRectangle(cornerRadius: 14))
                 }
                 .glassPanel(accent: AppTheme.green)
@@ -1637,7 +1717,7 @@ struct MatrixQuantityCell: View {
             }
         }
         .frame(maxWidth: .infinity, minHeight: 54)
-        .background(Color.white.opacity(0.86))
+        .background(AppTheme.surfaceStrong)
         .overlay(alignment: .trailing) {
             Divider()
         }
@@ -1731,40 +1811,45 @@ struct TaskCard: View {
     let showsActions: Bool
 
     var body: some View {
-        HStack(spacing: 14) {
-            RoundedRectangle(cornerRadius: 4)
-                .fill(task.priority.color)
-                .frame(width: 5)
-            VStack(alignment: .leading, spacing: 12) {
-                HStack {
-                    Text(task.orderNumber)
-                        .font(.title3.weight(.black))
-                    Spacer()
-                    PriorityBadge(priority: task.priority)
-                }
-                Text(task.productName)
-                    .font(.headline)
-                    .lineLimit(2)
-                HStack(spacing: 8) {
-                    if !task.color.isEmpty { Tag(text: task.color, systemImage: "paintpalette.fill") }
-                    if !task.size.isEmpty { Tag(text: task.size, systemImage: "ruler.fill") }
-                    Tag(text: "\(task.quantity) ud.", systemImage: "number")
-                }
-                HStack {
-                    Label(task.deadline, systemImage: "clock.fill")
-                    Spacer()
-                    Text(task.status.rawValue)
-                        .font(.subheadline.weight(.semibold))
-                }
-                .foregroundStyle(.secondary)
-                if let reason = task.blockedReason {
-                    Label(reason, systemImage: "exclamationmark.triangle.fill")
-                        .font(.footnote.weight(.semibold))
-                        .foregroundStyle(.red)
-                }
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .firstTextBaseline) {
+                Text(task.orderNumber)
+                    .font(.system(size: 18, weight: .heavy, design: .rounded))
+                    .foregroundStyle(AppTheme.ink)
+                Spacer()
+                PriorityBadge(priority: task.priority)
+            }
+            Text(task.productName)
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(AppTheme.inkSoft)
+                .lineLimit(2)
+            HStack(spacing: 6) {
+                if !task.color.isEmpty { Tag(text: task.color, systemImage: "paintpalette.fill") }
+                if !task.size.isEmpty { Tag(text: task.size, systemImage: "ruler.fill") }
+                Tag(text: "\(task.quantity) ud.", systemImage: "number")
+            }
+            HStack(spacing: 8) {
+                Label(task.deadline, systemImage: "clock.fill")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(AppTheme.muted)
+                Spacer()
+                Text(task.status.rawValue.uppercased())
+                    .font(.caption2.weight(.bold))
+                    .tracking(0.4)
+                    .foregroundStyle(AppTheme.muted)
+            }
+            if let reason = task.blockedReason {
+                Label(reason, systemImage: "exclamationmark.triangle.fill")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(AppTheme.red)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 6)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(AppTheme.redSoft)
+                    .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
             }
         }
-        .glassPanel(padding: 14)
+        .glassPanel(padding: 14, accent: task.priority.color)
     }
 }
 
@@ -1801,30 +1886,37 @@ struct PendingOrderRow: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            HStack(alignment: .top) {
-                RoundedRectangle(cornerRadius: 5)
-                    .fill(order.priority.color)
-                    .frame(width: 6)
-                VStack(alignment: .leading, spacing: 5) {
+            HStack(alignment: .firstTextBaseline) {
+                VStack(alignment: .leading, spacing: 2) {
                     Text(order.number)
-                        .font(.title2.weight(.black))
+                        .font(.system(size: 20, weight: .heavy, design: .rounded))
                         .foregroundStyle(AppTheme.ink)
                     Text(order.customer)
-                        .font(.subheadline)
+                        .font(.footnote.weight(.medium))
                         .foregroundStyle(AppTheme.muted)
                 }
                 Spacer()
                 PriorityBadge(priority: order.priority)
             }
-            HStack(spacing: 8) {
+            FlowChips {
                 SourceChip(source: order.source)
                 StatusChip(status: order.status)
                 ShippingChip(category: order.shippingCategory)
                 Tag(text: order.hasMultipleItems ? "\(order.items.count) líneas · \(order.totalUnits) uds" : "\(order.totalUnits) ud", systemImage: "square.stack.3d.up.fill")
             }
-            Text(order.shippingMethod)
-                .font(.footnote)
-                .foregroundStyle(AppTheme.muted)
+            HStack(spacing: 12) {
+                Label(order.shippingMethod, systemImage: "shippingbox.and.arrow.backward.fill")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(AppTheme.muted)
+                    .lineLimit(1)
+                if let created = order.createdAtShort {
+                    Spacer(minLength: 0)
+                    Label(created, systemImage: "calendar")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(AppTheme.muted)
+                        .lineLimit(1)
+                }
+            }
             VStack(alignment: .leading, spacing: 7) {
                 ForEach(order.items.prefix(3)) { item in
                     CompactOrderItemLine(item: item)
@@ -1832,9 +1924,12 @@ struct PendingOrderRow: View {
                 if order.items.count > 3 {
                     Text("+\(order.items.count - 3) artículos más dentro")
                         .font(.footnote.weight(.semibold))
-                        .foregroundStyle(.orange)
+                        .foregroundStyle(AppTheme.amber)
                 }
             }
+            .padding(10)
+            .background(AppTheme.surfaceSoft)
+            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
             if showsAction {
                 Button(action: markPrepared) {
                     Label("Pedido preparado", systemImage: "checkmark.circle.fill")
@@ -1846,7 +1941,17 @@ struct PendingOrderRow: View {
                 .disabled(order.status == .waitingStock)
             }
         }
-        .padding(.vertical, 4)
+    }
+}
+
+// Lightweight chip flow — wraps to next line if needed
+struct FlowChips<Content: View>: View {
+    @ViewBuilder var content: Content
+
+    var body: some View {
+        HStack(spacing: 6) {
+            content
+        }
     }
 }
 
@@ -1902,6 +2007,18 @@ struct OrderPreparationDetailView: View {
                     Label(currentOrder.deadline, systemImage: "clock.fill")
                         .font(.subheadline.weight(.semibold))
                         .foregroundStyle(currentOrder.priority.color)
+                    if let created = currentOrder.createdAtShort {
+                        HStack(spacing: 6) {
+                            Label(created, systemImage: "calendar")
+                                .font(.subheadline.weight(.semibold))
+                                .foregroundStyle(AppTheme.muted)
+                            if let rel = currentOrder.createdAtRelative {
+                                Text("· \(rel)")
+                                    .font(.caption.weight(.medium))
+                                    .foregroundStyle(AppTheme.mutedSoft)
+                            }
+                        }
+                    }
                     Text(currentOrder.shippingMethod)
                         .font(.subheadline)
                         .foregroundStyle(AppTheme.muted)
@@ -2175,25 +2292,59 @@ struct MetricTile: View {
     let icon: String
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 8) {
                 Image(systemName: icon)
-                    .font(.system(size: 17, weight: .black))
-                    .foregroundStyle(.white)
-                    .frame(width: 38, height: 38)
-                    .background(LinearGradient(colors: [color, color.opacity(0.72)], startPoint: .topLeading, endPoint: .bottomTrailing))
-                    .clipShape(RoundedRectangle(cornerRadius: 10))
-                Spacer()
+                    .font(.system(size: 13, weight: .bold))
+                    .foregroundStyle(color)
+                    .frame(width: 28, height: 28)
+                    .background(color.opacity(0.12))
+                    .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                Text(title.uppercased())
+                    .font(.caption2.weight(.bold))
+                    .tracking(0.6)
+                    .foregroundStyle(AppTheme.muted)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.7)
+                Spacer(minLength: 0)
             }
             Text("\(value)")
-                .font(.system(size: 36, weight: .black))
+                .font(.system(size: 30, weight: .heavy, design: .rounded))
                 .foregroundStyle(AppTheme.ink)
-            Text(title)
-                .font(.subheadline.weight(.semibold))
-                .foregroundStyle(AppTheme.muted)
+                .lineLimit(1)
+                .minimumScaleFactor(0.6)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .glassPanel(padding: 16, accent: color)
+        .glassPanel(padding: 14)
+    }
+}
+
+// Shared pill style for any status/badge
+struct StatusPill: View {
+    let text: String
+    let systemImage: String?
+    let foreground: Color
+    let background: Color
+    let border: Color
+    var compact: Bool = false
+
+    var body: some View {
+        HStack(spacing: 5) {
+            if let systemImage {
+                Image(systemName: systemImage)
+                    .font(.system(size: 10, weight: .bold))
+            }
+            Text(text)
+                .font(.caption2.weight(.bold))
+                .tracking(0.3)
+                .lineLimit(1)
+        }
+        .foregroundStyle(foreground)
+        .padding(.horizontal, compact ? 8 : 10)
+        .padding(.vertical, compact ? 4 : 5)
+        .background(background)
+        .overlay(Capsule().stroke(border, lineWidth: 0.8))
+        .clipShape(Capsule())
     }
 }
 
@@ -2201,13 +2352,13 @@ struct PriorityBadge: View {
     let priority: PriorityLevel
 
     var body: some View {
-        Text(priority.rawValue)
-            .font(.caption.weight(.black))
-            .foregroundStyle(priority == .critical ? .white : priority.color)
-            .padding(.horizontal, 10)
-            .padding(.vertical, 6)
-            .background(priority == .critical ? priority.color : priority.color.opacity(0.13))
-            .clipShape(Capsule())
+        StatusPill(
+            text: priority.rawValue,
+            systemImage: nil,
+            foreground: priority.color,
+            background: priority.softColor,
+            border: priority.color.opacity(0.25)
+        )
     }
 }
 
@@ -2215,22 +2366,43 @@ struct StatusChip: View {
     let status: OrderStatus
 
     var body: some View {
-        Label(status.label, systemImage: status == .waitingStock ? "exclamationmark.triangle.fill" : "shippingbox.fill")
-            .font(.caption.weight(.bold))
-            .foregroundStyle(statusColor)
-            .padding(.horizontal, 10)
-            .padding(.vertical, 6)
-            .background(statusColor.opacity(0.12))
-            .clipShape(Capsule())
+        StatusPill(
+            text: status.label.uppercased(),
+            systemImage: icon,
+            foreground: foreground,
+            background: softBackground,
+            border: foreground.opacity(0.22)
+        )
     }
 
-    private var statusColor: Color {
+    private var foreground: Color {
         switch status {
         case .readyForLabel, .labelCreated, .shipped: AppTheme.green
         case .waitingStock: AppTheme.magenta
         case .inProduction, .produced, .picked: AppTheme.blue
-        case .cancelled: .gray
+        case .cancelled: AppTheme.muted
         default: AppTheme.amber
+        }
+    }
+
+    private var softBackground: Color {
+        switch status {
+        case .readyForLabel, .labelCreated, .shipped: AppTheme.greenSoft
+        case .waitingStock: AppTheme.magentaSoft
+        case .inProduction, .produced, .picked: AppTheme.blueSoft
+        case .cancelled: AppTheme.surfaceTinted
+        default: AppTheme.amberSoft
+        }
+    }
+
+    private var icon: String {
+        switch status {
+        case .readyForLabel, .labelCreated: "checkmark.seal.fill"
+        case .shipped: "paperplane.fill"
+        case .waitingStock: "exclamationmark.triangle.fill"
+        case .inProduction, .produced, .picked: "gearshape.2.fill"
+        case .cancelled: "xmark.circle.fill"
+        default: "shippingbox.fill"
         }
     }
 }
@@ -2239,13 +2411,14 @@ struct ShippingChip: View {
     let category: ShippingCategory
 
     var body: some View {
-        Label(category.rawValue, systemImage: category == .premium ? "bolt.fill" : "shippingbox.fill")
-            .font(.caption.weight(.bold))
-            .foregroundStyle(category == .premium ? AppTheme.amber : AppTheme.blue)
-            .padding(.horizontal, 10)
-            .padding(.vertical, 6)
-            .background((category == .premium ? AppTheme.amber : AppTheme.blue).opacity(0.12))
-            .clipShape(Capsule())
+        let isPremium = category == .premium
+        StatusPill(
+            text: category.rawValue.uppercased(),
+            systemImage: isPremium ? "bolt.fill" : "shippingbox.fill",
+            foreground: isPremium ? AppTheme.amber : AppTheme.blue,
+            background: isPremium ? AppTheme.amberSoft : AppTheme.blueSoft,
+            border: (isPremium ? AppTheme.amber : AppTheme.blue).opacity(0.22)
+        )
     }
 }
 
@@ -2253,13 +2426,14 @@ struct SourceChip: View {
     let source: WorkshopOrder.Source
 
     var body: some View {
-        Label(source.rawValue, systemImage: source.icon)
-            .font(.caption.weight(.bold))
-            .foregroundStyle(source == .shopify ? AppTheme.green : AppTheme.purple)
-            .padding(.horizontal, 10)
-            .padding(.vertical, 6)
-            .background((source == .shopify ? AppTheme.green : AppTheme.purple).opacity(0.12))
-            .clipShape(Capsule())
+        let isShopify = source == .shopify
+        StatusPill(
+            text: source.rawValue.uppercased(),
+            systemImage: source.icon,
+            foreground: isShopify ? AppTheme.green : AppTheme.purple,
+            background: isShopify ? AppTheme.greenSoft : AppTheme.purpleSoft,
+            border: (isShopify ? AppTheme.green : AppTheme.purple).opacity(0.22)
+        )
     }
 }
 
@@ -2271,21 +2445,21 @@ struct PrintStatusChip: View {
         case .none:
             EmptyView()
         case .pending:
-            Label("Pendiente imprimir", systemImage: "printer.fill")
-                .font(.caption.weight(.bold))
-                .foregroundStyle(AppTheme.amber)
-                .padding(.horizontal, 10)
-                .padding(.vertical, 6)
-                .background(AppTheme.amber.opacity(0.12))
-                .clipShape(Capsule())
+            StatusPill(
+                text: "PENDIENTE IMPRIMIR",
+                systemImage: "printer.fill",
+                foreground: AppTheme.amber,
+                background: AppTheme.amberSoft,
+                border: AppTheme.amber.opacity(0.22)
+            )
         case .printed:
-            Label("Impresa", systemImage: "checkmark.circle.fill")
-                .font(.caption.weight(.bold))
-                .foregroundStyle(AppTheme.green)
-                .padding(.horizontal, 10)
-                .padding(.vertical, 6)
-                .background(AppTheme.green.opacity(0.12))
-                .clipShape(Capsule())
+            StatusPill(
+                text: "IMPRESA",
+                systemImage: "checkmark.circle.fill",
+                foreground: AppTheme.green,
+                background: AppTheme.greenSoft,
+                border: AppTheme.green.opacity(0.22)
+            )
         }
     }
 }
@@ -2296,12 +2470,12 @@ struct Tag: View {
 
     var body: some View {
         Label(text, systemImage: systemImage)
-            .font(.caption.weight(.semibold))
+            .font(.caption2.weight(.semibold))
             .foregroundStyle(AppTheme.muted)
             .padding(.horizontal, 10)
-            .padding(.vertical, 6)
-            .background(Color.white.opacity(0.72))
-            .overlay(Capsule().stroke(AppTheme.line))
+            .padding(.vertical, 5)
+            .background(AppTheme.surfaceSoft)
+            .overlay(Capsule().stroke(AppTheme.line, lineWidth: 0.8))
             .clipShape(Capsule())
     }
 }
@@ -2311,14 +2485,15 @@ struct SectionHeader: View {
     let subtitle: String
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
+        VStack(alignment: .leading, spacing: 2) {
             Text(title)
-                .font(.title3.weight(.black))
+                .font(.system(size: 19, weight: .heavy, design: .rounded))
                 .foregroundStyle(AppTheme.ink)
             Text(subtitle)
-                .font(.subheadline)
+                .font(.footnote.weight(.medium))
                 .foregroundStyle(AppTheme.muted)
         }
+        .padding(.top, 4)
     }
 }
 
@@ -2385,26 +2560,38 @@ struct SyncStatusView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                Label(store.isAPIConnected ? "API conectada" : "API sin conexion", systemImage: store.isAPIConnected ? "checkmark.icloud.fill" : "exclamationmark.icloud.fill")
-                    .font(.subheadline.weight(.black))
-                    .foregroundStyle(store.isAPIConnected ? AppTheme.teal : AppTheme.amber)
+            HStack(spacing: 10) {
+                Circle()
+                    .fill(store.isAPIConnected ? AppTheme.green : AppTheme.amber)
+                    .frame(width: 8, height: 8)
+                    .overlay(
+                        Circle()
+                            .stroke((store.isAPIConnected ? AppTheme.green : AppTheme.amber).opacity(0.25), lineWidth: 4)
+                    )
+                Text(store.isAPIConnected ? "API conectada" : "API sin conexión")
+                    .font(.footnote.weight(.semibold))
+                    .foregroundStyle(AppTheme.inkSoft)
                 Spacer()
                 if store.isLoading {
-                    ProgressView()
+                    ProgressView().controlSize(.small)
                 } else {
-                    Text(store.lastSyncText)
-                        .font(.caption.weight(.semibold))
+                    Label(store.lastSyncText, systemImage: "arrow.triangle.2.circlepath")
+                        .font(.caption2.weight(.semibold))
                         .foregroundStyle(AppTheme.muted)
                 }
             }
             if let syncError = store.syncError {
-                Text(syncError)
-                    .font(.caption)
+                Label(syncError, systemImage: "exclamationmark.triangle.fill")
+                    .font(.caption2.weight(.semibold))
                     .foregroundStyle(AppTheme.amber)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 6)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(AppTheme.amberSoft)
+                    .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
             }
         }
-        .glassPanel(padding: 12, accent: store.isAPIConnected ? AppTheme.teal : AppTheme.amber)
+        .glassPanel(padding: 12, accent: store.isAPIConnected ? AppTheme.green : AppTheme.amber)
     }
 }
 
@@ -2413,28 +2600,46 @@ struct GlassPanelModifier: ViewModifier {
     let accent: Color?
 
     func body(content: Content) -> some View {
-        content
-            .padding(padding)
-            .background(RoundedRectangle(cornerRadius: 18).fill(AppTheme.surface))
-            .overlay(alignment: .top) {
-                if let accent {
-                    RoundedRectangle(cornerRadius: 18)
-                        .fill(accent.opacity(0.18))
-                        .frame(height: 4)
-                        .padding(.horizontal, 18)
-                        .padding(.top, 1)
-                }
+        HStack(spacing: 0) {
+            if let accent {
+                Rectangle()
+                    .fill(accent)
+                    .frame(width: 3)
             }
-            .overlay(RoundedRectangle(cornerRadius: 18).stroke(AppTheme.line, lineWidth: 1))
-            .shadow(color: .black.opacity(0.07), radius: 18, x: 0, y: 8)
+            content
+                .padding(padding)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .background(RoundedRectangle(cornerRadius: 16, style: .continuous).fill(AppTheme.surface))
+        .overlay(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .stroke(AppTheme.line, lineWidth: 1)
+        )
+        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .shadow(color: Color.black.opacity(0.04), radius: 14, x: 0, y: 6)
+        .shadow(color: Color.black.opacity(0.02), radius: 2, x: 0, y: 1)
     }
 }
 
 struct ScreenBackgroundModifier: ViewModifier {
     func body(content: Content) -> some View {
         ZStack {
-            LinearGradient(colors: [AppTheme.canvasTop, AppTheme.canvasBottom], startPoint: .topLeading, endPoint: .bottomTrailing)
-                .ignoresSafeArea()
+            // Base canvas
+            AppTheme.canvasTop.ignoresSafeArea()
+            // Subtle indigo wash top-trailing
+            LinearGradient(
+                colors: [AppTheme.blue.opacity(0.08), Color.clear],
+                startPoint: .topTrailing,
+                endPoint: .center
+            )
+            .ignoresSafeArea()
+            // Subtle teal wash bottom-leading
+            LinearGradient(
+                colors: [Color.clear, AppTheme.teal.opacity(0.06)],
+                startPoint: .center,
+                endPoint: .bottomLeading
+            )
+            .ignoresSafeArea()
             content
         }
     }
