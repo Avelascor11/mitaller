@@ -225,7 +225,7 @@ export class PurchaseService {
   }
 
   private mapOrderItemToBlankGarment(item: { productType?: string | null; title: string; sku: string; color?: string | null; size?: string | null; variantTitle?: string | null }, mappingIndex?: Map<string, string>) {
-    const mappedSubproduct = mappingIndex?.get(`sku:${item.sku}`) ?? mappingIndex?.get(`name:${this.normalizeText(item.title)}`);
+    const mappedSubproduct = mappingIndex?.get(`name:${this.normalizeText(item.title)}`) ?? (this.isReliableSku(item.sku) ? mappingIndex?.get(`sku:${item.sku}`) : undefined);
     if (mappedSubproduct) {
       const mapped = this.mapSubproductName(mappedSubproduct);
       if (mapped) return mapped;
@@ -252,6 +252,11 @@ export class PurchaseService {
 
   private matrixKey(kind: string, color: string, size: string) {
     return `${kind}:${color}:${size}`;
+  }
+
+  private isReliableSku(sku: string) {
+    const normalized = sku.trim().toUpperCase();
+    return Boolean(normalized) && !normalized.startsWith('WRONG-') && !normalized.startsWith('NO-SKU');
   }
 
   private filterByMinimumOrderNumber<T extends { order: { orderNumber: string } }>(items: T[]) {
