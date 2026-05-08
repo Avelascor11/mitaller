@@ -106,6 +106,13 @@ struct APIClient {
         return try await perform(request)
     }
 
+    func economicsToday() async throws -> EconomicsSummary { try await get("/economics/today") }
+    func economicsMonth() async throws -> EconomicsSummary { try await get("/economics/month") }
+    func economicsProducts() async throws -> [ProductMarginRow] { try await get("/economics/products") }
+    func economicsForOrder(_ id: String) async throws -> OrderBreakdown {
+        try await get("/economics/order/\(Self.pathSegment(id))")
+    }
+
     private func patchTask(path: String) async throws {
         let request = try jsonRequest(path: path, method: "PATCH", body: EmptyBody())
         let _: EmptyResponse = try await perform(request)
@@ -193,6 +200,74 @@ private struct ManualPrintRequest: Encodable {
 struct ManualPrintResponse: Decodable {
     let id: String
     let filename: String
+}
+
+struct EconomicsSummary: Decodable {
+    let from: String
+    let to: String
+    let currency: String
+    let grossRevenue: Double
+    let itemsRevenue: Double
+    let shippingRevenue: Double
+    let totalDiscount: Double
+    let shopifyFee: Double
+    let productCost: Double
+    let shippingCost: Double
+    let netMargin: Double
+    let netMarginPct: Double?
+    let shippingReserve: Double
+    let orderCount: Int
+    let orders: [OrderBreakdown]
+}
+
+struct OrderBreakdown: Decodable, Identifiable {
+    var id: String { orderId }
+    let orderId: String
+    let orderNumber: String
+    let customer: String
+    let orderedAt: Date
+    let currency: String
+    let itemsRevenue: Double
+    let shippingRevenue: Double
+    let totalDiscount: Double
+    let grossRevenue: Double
+    let shopifyFee: Double
+    let productCost: Double
+    let shippingCost: Double
+    let netMargin: Double
+    let netMarginPct: Double?
+    let items: [OrderItemBreakdown]
+    let shipmentCostKnown: Bool
+    let hasItemPrices: Bool
+}
+
+struct OrderItemBreakdown: Decodable, Identifiable {
+    var id: String { itemId }
+    let itemId: String
+    let sku: String
+    let title: String
+    let variantTitle: String?
+    let color: String?
+    let size: String?
+    let quantity: Int
+    let unitPrice: Double
+    let unitCost: Double
+    let costDescription: String
+    let revenue: Double
+    let cost: Double
+    let margin: Double
+    let marginPct: Double?
+}
+
+struct ProductMarginRow: Decodable, Identifiable {
+    var id: String { sku }
+    let sku: String
+    let title: String
+    let quantity: Int
+    let revenue: Double
+    let cost: Double
+    let margin: Double
+    let marginPct: Double?
 }
 private struct APIErrorResponse: Decodable {
     let message: String?

@@ -99,6 +99,7 @@ export class SendcloudAdapter {
     const data = response.data ?? response;
     const parcel = data.parcels?.[0];
     const labelUrl = this.extractLabelUrl(data);
+    const price = this.extractPrice(data, parcel);
     return {
       mode: 'real',
       shipmentId: String(data.id ?? ''),
@@ -106,8 +107,31 @@ export class SendcloudAdapter {
       trackingNumber: parcel?.tracking_number,
       carrier: data.carrier?.name,
       labelUrl,
+      cost: price?.value,
+      costCurrency: price?.currency,
       raw: data
     };
+  }
+
+  private extractPrice(
+    data: SendcloudShipmentV3Data,
+    parcel?: SendcloudShipmentV3Parcel
+  ): { value: number; currency: string } | undefined {
+    const candidates: Array<{ value?: string | number; currency?: string } | undefined> = [
+      parcel?.total_price,
+      parcel?.price,
+      data.total_price,
+      data.price
+    ];
+    for (const candidate of candidates) {
+      if (!candidate) continue;
+      const raw = candidate.value;
+      const num = typeof raw === 'number' ? raw : raw ? Number(raw) : NaN;
+      if (Number.isFinite(num)) {
+        return { value: num, currency: candidate.currency ?? 'EUR' };
+      }
+    }
+    return undefined;
   }
 
   async createLabel(parcelId: string) {
@@ -465,6 +489,8 @@ interface SendcloudShipmentV3Data {
   id?: string;
   carrier?: { name?: string };
   parcels?: SendcloudShipmentV3Parcel[];
+  total_price?: { value?: string | number; currency?: string };
+  price?: { value?: string | number; currency?: string };
 }
 
 interface SendcloudShipmentV3Parcel {
@@ -474,6 +500,8 @@ interface SendcloudShipmentV3Parcel {
     type?: string;
     link?: string;
   }>;
+  total_price?: { value?: string | number; currency?: string };
+  price?: { value?: string | number; currency?: string };
 }
 
 interface SendcloudSenderAddressesResponse {

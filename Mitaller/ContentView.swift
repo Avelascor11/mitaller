@@ -714,6 +714,8 @@ struct MainTabView: View {
                 .tabItem { Label("Compras", systemImage: "cart.badge.plus") }
             ManualPrintView()
                 .tabItem { Label("Imprimir", systemImage: "printer.fill") }
+            EconomicsView()
+                .tabItem { Label("Economía", systemImage: "eurosign.circle.fill") }
             AdminView()
                 .tabItem { Label("Admin", systemImage: "chart.bar.xaxis") }
         }
@@ -2829,6 +2831,284 @@ extension View {
     func screenBackground() -> some View {
         modifier(ScreenBackgroundModifier())
     }
+}
+
+struct EconomicsView: View {
+    @Environment(WorkshopStore.self) private var store
+    @State private var today: EconomicsSummary?
+    @State private var month: EconomicsSummary?
+    @State private var products: [ProductMarginRow] = []
+    @State private var loading = false
+    @State private var error: String?
+    @State private var range: Range = .today
+
+    enum Range: String, CaseIterable, Identifiable {
+        case today, month
+        var id: String { rawValue }
+        var label: String {
+            switch self { case .today: "Hoy"; case .month: "Este mes" }
+        }
+    }
+
+    var current: EconomicsSummary? {
+        switch range { case .today: today; case .month: month }
+    }
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 16) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Economía")
+                            .font(.system(size: 30, weight: .heavy, design: .rounded))
+                            .foregroundStyle(AppTheme.ink)
+                        Text("Ingresos, costes y reserva para envíos.")
+                            .font(.subheadline.weight(.medium))
+                            .foregroundStyle(AppTheme.muted)
+                    }
+
+                    Picker("Rango", selection: $range) {
+                        ForEach(Range.allCases) { Text($0.label).tag($0) }
+                    }
+                    .pickerStyle(.segmented)
+
+                    if loading && current == nil {
+                        ProgressView().frame(maxWidth: .infinity)
+                    } else if let summary = current {
+                        ShippingReserveCard(summary: summary)
+                        EconomicsSummaryCard(summary: summary)
+                        OrdersBreakdownSection(summary: summary)
+                    }
+
+                    if !products.isEmpty {
+                        SectionHeader(title: "Margen por producto", subtitle: "Top 10 con mejor margen acumulado")
+                        ForEach(products.prefix(10)) { row in
+                            ProductMarginRowView(row: row)
+                        }
+                    }
+
+                    if let error {
+                        Text(error)
+                            .font(.footnote)
+                            .foregroundStyle(AppTheme.red)
+                            .padding(10)
+                            .glassPanel(padding: 10, accent: AppTheme.red)
+                    }
+                }
+                .padding()
+            }
+            .screenBackground()
+            .navigationTitle("Economía")
+            .toolbar {
+                Button { Task { await reload() } } label: {
+                    Image(systemName: "arrow.clockwise")
+                }.disabled(loading)
+            }
+            .task { await reload() }
+            .refreshable { await reload() }
+        }
+    }
+
+    private func reload() async {
+        guard let client = store.apiClient else { error = "API no configurada"; return }
+        loading = true
+        error = nil
+        defer { loading = false }
+        do {
+            async let t = client.economicsToday()
+            async let m = client.economicsMonth()
+            async let p = client.economicsProducts()
+            today = try await t
+            month = try await m
+            products = try await p
+        } catch let err {
+            error = err.localizedDescription
+        }
+    }
+}
+
+struct ShippingReserveCard: View {
+    let summary: EconomicsSummary
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Image(systemName: "shippingbox.and.arrow.backward.fill")
+                    .font(.title3)
+                    .foregroundStyle(AppTheme.amber)
+                Text("Reserva envíos")
+                    .font(.subheadline.weight(.bold))
+                    .foregroundStyle(AppTheme.muted)
+                    .textCase(.uppercase)
+                Spacer()
+            }
+            Text(formatMoney(summary.shippingReserve, currency: summary.currency))
+                .font(.system(size: 36, weight: .heavy, design: .rounded))
+                .foregroundStyle(AppTheme.amber)
+            Text("Aparta esta cantidad de las ventas para pagar Sendcloud (\(summary.orderCount) pedido\(summary.orderCount == 1 ? "" : "s")).")
+                .font(.caption)
+                .foregroundStyle(AppTheme.muted)
+        }
+        .glassPanel(padding: 16, accent: AppTheme.amber)
+    }
+}
+
+struct EconomicsSummaryCard: View {
+    let summary: EconomicsSummary
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                MoneyTile(label: "Ingresos", value: summary.grossRevenue, currency: summary.currency, color: AppTheme.green)
+                MoneyTile(label: "Neto", value: summary.netMargin, currency: summary.currency, color: summary.netMargin >= 0 ? AppTheme.blue : AppTheme.red)
+            }
+            Divider().background(AppTheme.line)
+            CostRow(label: "Coste producto", value: summary.productCost, currency: summary.currency)
+            CostRow(label: "Coste envíos", value: summary.shippingCost, currency: summary.currency)
+            CostRow(label: "Comisión Shopify (2.4%)", value: summary.shopifyFee, currency: summary.currency)
+            if let pct = summary.netMarginPct {
+                HStack {
+                    Text("Margen %")
+                        .font(.caption.weight(.bold))
+                        .foregroundStyle(AppTheme.muted)
+                    Spacer()
+                    Text(String(format: "%.1f%%", pct))
+                        .font(.subheadline.weight(.heavy))
+                        .foregroundStyle(pct >= 0 ? AppTheme.green : AppTheme.red)
+                }
+            }
+        }
+        .glassPanel(padding: 16)
+    }
+}
+
+struct MoneyTile: View {
+    let label: String
+    let value: Double
+    let currency: String
+    let color: Color
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(label.uppercased())
+                .font(.caption2.weight(.bold))
+                .tracking(0.5)
+                .foregroundStyle(AppTheme.muted)
+            Text(formatMoney(value, currency: currency))
+                .font(.system(size: 22, weight: .heavy, design: .rounded))
+                .foregroundStyle(color)
+                .lineLimit(1)
+                .minimumScaleFactor(0.5)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+struct CostRow: View {
+    let label: String
+    let value: Double
+    let currency: String
+
+    var body: some View {
+        HStack {
+            Text(label).font(.subheadline).foregroundStyle(AppTheme.inkSoft)
+            Spacer()
+            Text(formatMoney(value, currency: currency))
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(AppTheme.muted)
+        }
+    }
+}
+
+struct OrdersBreakdownSection: View {
+    let summary: EconomicsSummary
+
+    var body: some View {
+        if summary.orders.isEmpty {
+            EmptyView()
+        } else {
+            VStack(alignment: .leading, spacing: 10) {
+                SectionHeader(title: "Pedidos", subtitle: "\(summary.orders.count) pedido\(summary.orders.count == 1 ? "" : "s") en el rango")
+                ForEach(summary.orders) { order in
+                    OrderBreakdownRow(order: order)
+                }
+            }
+        }
+    }
+}
+
+struct OrderBreakdownRow: View {
+    let order: OrderBreakdown
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text(order.orderNumber)
+                    .font(.headline.weight(.heavy))
+                    .foregroundStyle(AppTheme.ink)
+                Spacer()
+                Text(formatMoney(order.netMargin, currency: order.currency))
+                    .font(.subheadline.weight(.heavy))
+                    .foregroundStyle(order.netMargin >= 0 ? AppTheme.green : AppTheme.red)
+            }
+            Text(order.customer)
+                .font(.caption)
+                .foregroundStyle(AppTheme.muted)
+            HStack(spacing: 8) {
+                Tag(text: "Ing \(formatMoneyShort(order.grossRevenue))", systemImage: "arrow.down.circle.fill")
+                Tag(text: "Prod \(formatMoneyShort(order.productCost))", systemImage: "scissors")
+                Tag(text: "Env \(formatMoneyShort(order.shippingCost))", systemImage: "shippingbox.fill")
+            }
+            if !order.shipmentCostKnown {
+                Label("Coste envío estimado", systemImage: "questionmark.circle")
+                    .font(.caption2)
+                    .foregroundStyle(AppTheme.amber)
+            }
+            if !order.hasItemPrices {
+                Label("Sin precios — re-sincroniza Shopify", systemImage: "arrow.clockwise")
+                    .font(.caption2)
+                    .foregroundStyle(AppTheme.muted)
+            }
+        }
+        .glassPanel(padding: 14, accent: order.netMargin >= 0 ? AppTheme.green : AppTheme.red)
+    }
+}
+
+struct ProductMarginRowView: View {
+    let row: ProductMarginRow
+
+    var body: some View {
+        HStack {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(row.title).font(.subheadline.weight(.bold)).foregroundStyle(AppTheme.ink).lineLimit(1)
+                Text("\(row.quantity) ud · \(row.sku)").font(.caption).foregroundStyle(AppTheme.muted).lineLimit(1)
+            }
+            Spacer()
+            VStack(alignment: .trailing, spacing: 2) {
+                Text(formatMoneyShort(row.margin))
+                    .font(.subheadline.weight(.heavy))
+                    .foregroundStyle(row.margin >= 0 ? AppTheme.green : AppTheme.red)
+                if let pct = row.marginPct {
+                    Text(String(format: "%.0f%%", pct))
+                        .font(.caption2.weight(.bold))
+                        .foregroundStyle(AppTheme.muted)
+                }
+            }
+        }
+        .glassPanel(padding: 12)
+    }
+}
+
+func formatMoney(_ value: Double, currency: String = "EUR") -> String {
+    let formatter = NumberFormatter()
+    formatter.numberStyle = .currency
+    formatter.currencyCode = currency
+    formatter.locale = Locale(identifier: "es_ES")
+    return formatter.string(from: NSNumber(value: value)) ?? String(format: "%.2f", value)
+}
+
+func formatMoneyShort(_ value: Double) -> String {
+    String(format: "%.0f€", value)
 }
 
 #Preview {

@@ -35,6 +35,12 @@ export class ShopifyAdapter {
               displayFinancialStatus
               displayFulfillmentStatus
               cancelledAt
+              currentSubtotalPriceSet { shopMoney { amount currencyCode } }
+              currentTotalPriceSet { shopMoney { amount currencyCode } }
+              currentTotalDiscountsSet { shopMoney { amount currencyCode } }
+              currentTotalTaxSet { shopMoney { amount currencyCode } }
+              totalShippingPriceSet { shopMoney { amount currencyCode } }
+              currencyCode
               customer {
                 displayName
                 email
@@ -60,6 +66,9 @@ export class ShopifyAdapter {
                   quantity
                   sku
                   variantTitle
+                  originalUnitPriceSet { shopMoney { amount } }
+                  discountedUnitPriceSet { shopMoney { amount } }
+                  totalDiscountSet { shopMoney { amount } }
                   product {
                     id
                     productType
@@ -205,12 +214,21 @@ export class ShopifyAdapter {
           displayFinancialStatus
           displayFulfillmentStatus
           cancelledAt
+          currentSubtotalPriceSet { shopMoney { amount currencyCode } }
+          currentTotalPriceSet { shopMoney { amount currencyCode } }
+          currentTotalDiscountsSet { shopMoney { amount currencyCode } }
+          currentTotalTaxSet { shopMoney { amount currencyCode } }
+          totalShippingPriceSet { shopMoney { amount currencyCode } }
+          currencyCode
           customer { displayName email }
           shippingAddress { name address1 address2 city province zip countryCodeV2 phone }
           shippingLine { title code }
           lineItems(first: 100) {
             nodes {
               id title quantity sku variantTitle
+              originalUnitPriceSet { shopMoney { amount } }
+              discountedUnitPriceSet { shopMoney { amount } }
+              totalDiscountSet { shopMoney { amount } }
               product { id productType featuredImage { url } media(first: 2) { nodes { ... on MediaImage { image { url } } } } }
               variant { id sku title image { url } selectedOptions { name value } }
             }
@@ -319,8 +337,21 @@ export class ShopifyAdapter {
       fulfillmentStatus: order.displayFulfillmentStatus?.toLowerCase() ?? 'unfulfilled',
       operationalStatus: order.cancelledAt ? 'CANCELLED' : undefined,
       orderedAt: new Date(order.createdAt),
+      subtotalPrice: ShopifyAdapter.parseMoney(order.currentSubtotalPriceSet),
+      totalPrice: ShopifyAdapter.parseMoney(order.currentTotalPriceSet),
+      totalDiscount: ShopifyAdapter.parseMoney(order.currentTotalDiscountsSet),
+      totalTax: ShopifyAdapter.parseMoney(order.currentTotalTaxSet),
+      totalShipping: ShopifyAdapter.parseMoney(order.totalShippingPriceSet),
+      currency: order.currencyCode ?? order.currentTotalPriceSet?.shopMoney?.currencyCode,
       items: order.lineItems.nodes.map((item) => this.mapGraphqlLineItem(item))
     };
+  }
+
+  private static parseMoney(set?: { shopMoney?: { amount?: string | number; currencyCode?: string } } | null): number | undefined {
+    const amount = set?.shopMoney?.amount;
+    if (amount == null) return undefined;
+    const num = typeof amount === 'number' ? amount : Number(amount);
+    return Number.isFinite(num) ? num : undefined;
   }
 
   private mapGraphqlLineItem(item: ShopifyLineItemNode): ImportedOrder['items'][number] {
@@ -339,7 +370,9 @@ export class ShopifyAdapter {
       imageUrlsJson: imageUrls,
       color: getOption('color') ?? getOption('colour'),
       size: getOption('size') ?? getOption('talla'),
-      productType: item.product?.productType ?? item.variant?.product?.productType
+      productType: item.product?.productType ?? item.variant?.product?.productType,
+      unitPrice: ShopifyAdapter.parseMoney(item.discountedUnitPriceSet) ?? ShopifyAdapter.parseMoney(item.originalUnitPriceSet),
+      lineDiscount: ShopifyAdapter.parseMoney(item.totalDiscountSet)
     };
   }
 
@@ -426,6 +459,8 @@ interface ShopifyProductsResponse {
   products: { nodes: unknown[] };
 }
 
+type ShopifyMoneySet = { shopMoney?: { amount?: string | number; currencyCode?: string } } | null;
+
 interface ShopifyOrderNode {
   id: string;
   name: string;
@@ -434,6 +469,12 @@ interface ShopifyOrderNode {
   displayFinancialStatus?: string;
   displayFulfillmentStatus?: string;
   cancelledAt?: string | null;
+  currencyCode?: string;
+  currentSubtotalPriceSet?: ShopifyMoneySet;
+  currentTotalPriceSet?: ShopifyMoneySet;
+  currentTotalDiscountsSet?: ShopifyMoneySet;
+  currentTotalTaxSet?: ShopifyMoneySet;
+  totalShippingPriceSet?: ShopifyMoneySet;
   customer?: { displayName?: string; email?: string } | null;
   shippingAddress?: ShopifyAddress | null;
   shippingLine?: { title?: string; code?: string } | null;
@@ -446,6 +487,9 @@ interface ShopifyLineItemNode {
   quantity: number;
   sku?: string;
   variantTitle?: string;
+  originalUnitPriceSet?: ShopifyMoneySet;
+  discountedUnitPriceSet?: ShopifyMoneySet;
+  totalDiscountSet?: ShopifyMoneySet;
   product?: ShopifyProductRef | null;
   variant?: {
     id: string;

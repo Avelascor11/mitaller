@@ -121,6 +121,12 @@ model Order {
   priorityLevel       PriorityLevel      @default(NORMAL)
   orderedAt           DateTime
   internalDeadlineAt  DateTime?
+  subtotalPrice       Float?
+  totalShipping       Float?
+  totalTax            Float?
+  totalDiscount       Float?
+  totalPrice          Float?
+  currency            String?
   createdAt           DateTime           @default(now())
   updatedAt           DateTime           @updatedAt
   items               OrderItem[]
@@ -144,6 +150,8 @@ model OrderItem {
   color              String?
   size               String?
   productType        String?
+  unitPrice          Float?
+  lineDiscount       Float?
   status             OrderItemStatus  @default(PENDING)
   createdAt          DateTime         @default(now())
   updatedAt          DateTime         @updatedAt
@@ -324,6 +332,8 @@ model Shipment {
   trackingNumber     String?
   carrier            String?
   labelUrl           String?
+  cost               Float?
+  costCurrency       String?
   status             ShipmentStatus @default(PENDING)
   createdAt          DateTime       @default(now())
   updatedAt          DateTime       @updatedAt

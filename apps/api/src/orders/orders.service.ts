@@ -216,7 +216,13 @@ export class OrdersService {
         fulfillmentStatus: input.fulfillmentStatus,
         operationalStatus,
         priorityLevel: calculated.priorityLevel,
-        internalDeadlineAt: calculated.internalDeadlineAt
+        internalDeadlineAt: calculated.internalDeadlineAt,
+        subtotalPrice: input.subtotalPrice ?? null,
+        totalShipping: input.totalShipping ?? null,
+        totalTax: input.totalTax ?? null,
+        totalDiscount: input.totalDiscount ?? null,
+        totalPrice: input.totalPrice ?? null,
+        currency: input.currency ?? null
       },
       create: {
         shopifyOrderId: input.shopifyOrderId,
@@ -232,6 +238,12 @@ export class OrdersService {
         priorityLevel: calculated.priorityLevel,
         orderedAt: input.orderedAt,
         internalDeadlineAt: calculated.internalDeadlineAt,
+        subtotalPrice: input.subtotalPrice ?? null,
+        totalShipping: input.totalShipping ?? null,
+        totalTax: input.totalTax ?? null,
+        totalDiscount: input.totalDiscount ?? null,
+        totalPrice: input.totalPrice ?? null,
+        currency: input.currency ?? null,
         items: { create: input.items }
       },
       include: { items: true }
@@ -317,6 +329,12 @@ export interface ImportedOrder {
   fulfillmentStatus?: string;
   operationalStatus?: string;
   orderedAt: Date;
+  subtotalPrice?: number;
+  totalShipping?: number;
+  totalTax?: number;
+  totalDiscount?: number;
+  totalPrice?: number;
+  currency?: string;
   items: Array<{
     shopifyLineItemId?: string;
     shopifyProductId?: string;
@@ -330,6 +348,8 @@ export interface ImportedOrder {
     color?: string;
     size?: string;
     productType?: string;
+    unitPrice?: number;
+    lineDiscount?: number;
   }>;
 }
 

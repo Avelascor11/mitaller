@@ -4,6 +4,7 @@ import { ScheduleModule } from '@nestjs/schedule';
 import { ActivityModule } from './activity/activity.module';
 import { AppController } from './app.controller';
 import { AuthModule } from './auth/auth.module';
+import { EconomicsModule } from './economics/economics.module';
 import { ManualPrintModule } from './manual-print/manual-print.module';
 import { OrdersModule } from './orders/orders.module';
 import { PrismaModule } from './prisma/prisma.module';
@@ -32,7 +33,8 @@ import { SupplierModule } from './supplier/supplier.module';
     ShopifyModule,
     RecipesModule,
     SupplierModule,
-    ManualPrintModule
+    ManualPrintModule,
+    EconomicsModule
   ],
   controllers: [AppController]
 })

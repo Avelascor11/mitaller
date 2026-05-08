@@ -89,6 +89,8 @@ export class ShipmentsService {
         trackingNumber: label.trackingNumber,
         carrier: label.carrier,
         labelUrl: label.labelUrl,
+        cost: label.cost ?? null,
+        costCurrency: label.costCurrency ?? null,
         status: 'LABEL_CREATED'
       }
     });
