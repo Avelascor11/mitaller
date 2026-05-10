@@ -255,7 +255,18 @@ struct WorkshopOrder: Identifiable, Hashable {
         if value.contains("premium") || value.contains("express") || value.contains("urgente") {
             return .premium
         }
+        if value.contains("gratis") || value.contains("gratuito") || value.contains("free") || value.contains("recogida") {
+            return .free
+        }
         return .standard
+    }
+
+    var shippingSortRank: Int {
+        switch shippingCategory {
+        case .premium: 0
+        case .standard: 1
+        case .free: 2
+        }
     }
 
     var createdAtShort: String? {
@@ -301,6 +312,7 @@ struct WorkshopOrder: Identifiable, Hashable {
 }
 
 enum ShippingCategory: String {
+    case free = "Gratis"
     case standard = "Estandar"
     case premium = "Premium"
 }
@@ -329,44 +341,65 @@ enum ShippingFilter: String, CaseIterable, Identifiable {
     }
 }
 
-enum PreparationPriorityFilter: String, CaseIterable, Identifiable {
+enum ShippingChoice: String, CaseIterable, Identifiable {
     case all = "Todos"
-    case urgent = "Críticos"
-    case high = "Altos"
-    case standard = "Estándar"
     case premium = "Premium"
-    case multiple = "Varios"
-    case blocked = "Falta stock"
+    case standard = "Estándar"
+    case free = "Gratis"
 
     var id: String { rawValue }
+
+    var iconName: String {
+        switch self {
+        case .all: "shippingbox.and.arrow.backward.fill"
+        case .premium: "bolt.fill"
+        case .standard: "shippingbox.fill"
+        case .free: "gift.fill"
+        }
+    }
 
     func matches(_ order: WorkshopOrder) -> Bool {
         switch self {
         case .all: true
-        case .urgent: order.priority == .critical
-        case .high: order.priority == .high
-        case .standard: order.shippingCategory == .standard
         case .premium: order.shippingCategory == .premium
-        case .multiple: order.items.count > 1 || order.totalUnits > 1
-        case .blocked: order.priority == .blocked || order.status == .waitingStock
+        case .standard: order.shippingCategory == .standard
+        case .free: order.shippingCategory == .free
         }
     }
+}
+
+enum PriorityChoice: String, CaseIterable, Identifiable {
+    case all = "Todos"
+    case critical = "Críticos"
+    case high = "Altos"
+    case normal = "Medios"
+    case blocked = "Falta stock"
+
+    var id: String { rawValue }
 
     var iconName: String {
         switch self {
-        case .all: "line.3.horizontal.decrease.circle"
-        case .urgent: "flame.fill"
+        case .all: "flag"
+        case .critical: "flame.fill"
         case .high: "arrow.up.circle.fill"
-        case .standard: "shippingbox.fill"
-        case .premium: "bolt.fill"
-        case .multiple: "square.stack.3d.up.fill"
+        case .normal: "circle.fill"
         case .blocked: "exclamationmark.triangle.fill"
+        }
+    }
+
+    func matches(_ order: WorkshopOrder) -> Bool {
+        switch self {
+        case .all: true
+        case .critical: order.priority == .critical
+        case .high: order.priority == .high
+        case .normal: order.priority == .normal || order.priority == .low
+        case .blocked: order.priority == .blocked || order.status == .waitingStock
         }
     }
 }
 
 enum OrderSort: String, CaseIterable, Identifiable {
-    case priority = "Prioridad"
+    case smart = "Inteligente (envío + prioridad)"
     case dateDesc = "Más recientes"
     case dateAsc = "Más antiguos"
     case numberDesc = "Nº pedido ↓"
@@ -375,9 +408,20 @@ enum OrderSort: String, CaseIterable, Identifiable {
 
     var id: String { rawValue }
 
+    var shortLabel: String {
+        switch self {
+        case .smart: "Inteligente"
+        case .dateDesc: "Recientes"
+        case .dateAsc: "Antiguos"
+        case .numberDesc: "Nº ↓"
+        case .numberAsc: "Nº ↑"
+        case .customer: "Cliente"
+        }
+    }
+
     var iconName: String {
         switch self {
-        case .priority: "flame.fill"
+        case .smart: "sparkles"
         case .dateDesc: "arrow.down.circle.fill"
         case .dateAsc: "arrow.up.circle.fill"
         case .numberDesc: "number.circle.fill"
@@ -388,12 +432,19 @@ enum OrderSort: String, CaseIterable, Identifiable {
 
     func sort(_ orders: [WorkshopOrder]) -> [WorkshopOrder] {
         switch self {
-        case .priority:
+        case .smart:
+            // Premium → Estándar → Gratis, dentro de cada uno: críticos → alto → medio,
+            // y a igualdad, más recientes primero.
             return orders.sorted { left, right in
+                if left.shippingSortRank != right.shippingSortRank {
+                    return left.shippingSortRank < right.shippingSortRank
+                }
                 if left.priority.sortWeight != right.priority.sortWeight {
                     return left.priority.sortWeight < right.priority.sortWeight
                 }
-                return left.deadline < right.deadline
+                let lDate = left.createdAt ?? .distantPast
+                let rDate = right.createdAt ?? .distantPast
+                return lDate > rDate
             }
         case .dateDesc:
             return orders.sorted { (a, b) in
@@ -1230,15 +1281,21 @@ struct TaskDetailView: View {
 
 struct PickingView: View {
     @Environment(WorkshopStore.self) private var store
-    @State private var priorityFilter: PreparationPriorityFilter = .all
-    @State private var sort: OrderSort = .priority
+    @State private var shippingFilter: ShippingChoice = .all
+    @State private var priorityFilter: PriorityChoice = .all
+    @State private var sort: OrderSort = .smart
     @State private var searchText = ""
 
     var filteredOrders: [WorkshopOrder] {
         let filtered = store.pendingPreparationOrders
+            .filter { shippingFilter.matches($0) }
             .filter { priorityFilter.matches($0) }
             .filter { matchesSearch($0) }
         return sort.sort(filtered)
+    }
+
+    var hasActiveFilters: Bool {
+        shippingFilter != .all || priorityFilter != .all || sort != .smart
     }
 
     private func matchesSearch(_ order: WorkshopOrder) -> Bool {
@@ -1297,9 +1354,16 @@ struct PickingView: View {
                         .clipShape(RoundedRectangle(cornerRadius: 12))
 
                         Menu {
-                            Section("Filtrar") {
-                                Picker("Filtrar", selection: $priorityFilter) {
-                                    ForEach(PreparationPriorityFilter.allCases) { option in
+                            Section("Tipo de envío") {
+                                Picker("Envío", selection: $shippingFilter) {
+                                    ForEach(ShippingChoice.allCases) { option in
+                                        Label(option.rawValue, systemImage: option.iconName).tag(option)
+                                    }
+                                }
+                            }
+                            Section("Prioridad") {
+                                Picker("Prioridad", selection: $priorityFilter) {
+                                    ForEach(PriorityChoice.allCases) { option in
                                         Label(option.rawValue, systemImage: option.iconName).tag(option)
                                     }
                                 }
@@ -1311,17 +1375,17 @@ struct PickingView: View {
                                     }
                                 }
                             }
-                            if priorityFilter != .all || sort != .priority {
+                            if hasActiveFilters {
                                 Divider()
                                 Button(role: .destructive) {
+                                    shippingFilter = .all
                                     priorityFilter = .all
-                                    sort = .priority
+                                    sort = .smart
                                 } label: {
                                     Label("Limpiar filtros", systemImage: "xmark.circle")
                                 }
                             }
                         } label: {
-                            let active = priorityFilter != .all || sort != .priority
                             HStack(spacing: 6) {
                                 Image(systemName: "line.3.horizontal.decrease.circle.fill")
                                     .font(.subheadline.weight(.bold))
@@ -1330,26 +1394,32 @@ struct PickingView: View {
                             }
                             .padding(.horizontal, 14)
                             .padding(.vertical, 11)
-                            .background(active ? AppTheme.blue : AppTheme.surfaceSoft)
-                            .foregroundStyle(active ? .white : AppTheme.inkSoft)
-                            .overlay(RoundedRectangle(cornerRadius: 12).stroke(active ? Color.clear : AppTheme.line))
+                            .background(hasActiveFilters ? AppTheme.blue : AppTheme.surfaceSoft)
+                            .foregroundStyle(hasActiveFilters ? .white : AppTheme.inkSoft)
+                            .overlay(RoundedRectangle(cornerRadius: 12).stroke(hasActiveFilters ? Color.clear : AppTheme.line))
                             .clipShape(RoundedRectangle(cornerRadius: 12))
                         }
                     }
 
-                    if priorityFilter != .all || sort != .priority {
-                        HStack(spacing: 6) {
-                            if priorityFilter != .all {
-                                ActiveFilterChip(text: priorityFilter.rawValue, icon: priorityFilter.iconName) {
-                                    priorityFilter = .all
+                    if hasActiveFilters {
+                        ScrollView(.horizontal, showsIndicators: false) {
+                            HStack(spacing: 6) {
+                                if shippingFilter != .all {
+                                    ActiveFilterChip(text: shippingFilter.rawValue, icon: shippingFilter.iconName) {
+                                        shippingFilter = .all
+                                    }
+                                }
+                                if priorityFilter != .all {
+                                    ActiveFilterChip(text: priorityFilter.rawValue, icon: priorityFilter.iconName) {
+                                        priorityFilter = .all
+                                    }
+                                }
+                                if sort != .smart {
+                                    ActiveFilterChip(text: sort.shortLabel, icon: sort.iconName) {
+                                        sort = .smart
+                                    }
                                 }
                             }
-                            if sort != .priority {
-                                ActiveFilterChip(text: sort.rawValue, icon: sort.iconName) {
-                                    sort = .priority
-                                }
-                            }
-                            Spacer(minLength: 0)
                         }
                     }
 
@@ -2697,14 +2767,37 @@ struct ShippingChip: View {
     let category: ShippingCategory
 
     var body: some View {
-        let isPremium = category == .premium
         StatusPill(
             text: category.rawValue.uppercased(),
-            systemImage: isPremium ? "bolt.fill" : "shippingbox.fill",
-            foreground: isPremium ? AppTheme.amber : AppTheme.blue,
-            background: isPremium ? AppTheme.amberSoft : AppTheme.blueSoft,
-            border: (isPremium ? AppTheme.amber : AppTheme.blue).opacity(0.22)
+            systemImage: icon,
+            foreground: foreground,
+            background: background,
+            border: foreground.opacity(0.22)
         )
+    }
+
+    private var icon: String {
+        switch category {
+        case .premium: "bolt.fill"
+        case .standard: "shippingbox.fill"
+        case .free: "gift.fill"
+        }
+    }
+
+    private var foreground: Color {
+        switch category {
+        case .premium: AppTheme.amber
+        case .standard: AppTheme.blue
+        case .free: AppTheme.green
+        }
+    }
+
+    private var background: Color {
+        switch category {
+        case .premium: AppTheme.amberSoft
+        case .standard: AppTheme.blueSoft
+        case .free: AppTheme.greenSoft
+        }
     }
 }
 
