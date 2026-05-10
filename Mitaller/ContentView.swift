@@ -365,6 +365,58 @@ enum PreparationPriorityFilter: String, CaseIterable, Identifiable {
     }
 }
 
+enum OrderSort: String, CaseIterable, Identifiable {
+    case priority = "Prioridad"
+    case dateDesc = "Más recientes"
+    case dateAsc = "Más antiguos"
+    case numberDesc = "Nº pedido ↓"
+    case numberAsc = "Nº pedido ↑"
+    case customer = "Cliente A→Z"
+
+    var id: String { rawValue }
+
+    var iconName: String {
+        switch self {
+        case .priority: "flame.fill"
+        case .dateDesc: "arrow.down.circle.fill"
+        case .dateAsc: "arrow.up.circle.fill"
+        case .numberDesc: "number.circle.fill"
+        case .numberAsc: "number.circle"
+        case .customer: "person.fill"
+        }
+    }
+
+    func sort(_ orders: [WorkshopOrder]) -> [WorkshopOrder] {
+        switch self {
+        case .priority:
+            return orders.sorted { left, right in
+                if left.priority.sortWeight != right.priority.sortWeight {
+                    return left.priority.sortWeight < right.priority.sortWeight
+                }
+                return left.deadline < right.deadline
+            }
+        case .dateDesc:
+            return orders.sorted { (a, b) in
+                (a.createdAt ?? .distantPast) > (b.createdAt ?? .distantPast)
+            }
+        case .dateAsc:
+            return orders.sorted { (a, b) in
+                (a.createdAt ?? .distantFuture) < (b.createdAt ?? .distantFuture)
+            }
+        case .numberDesc:
+            return orders.sorted { OrderSort.numericValue($0.number) > OrderSort.numericValue($1.number) }
+        case .numberAsc:
+            return orders.sorted { OrderSort.numericValue($0.number) < OrderSort.numericValue($1.number) }
+        case .customer:
+            return orders.sorted { $0.customer.localizedCaseInsensitiveCompare($1.customer) == .orderedAscending }
+        }
+    }
+
+    private static func numericValue(_ number: String) -> Int {
+        Int(number.filter(\.isNumber)) ?? 0
+    }
+}
+
 enum ProductionFilter: String, CaseIterable, Identifiable {
     case all = "Todo"
     case critical = "Críticas"
@@ -1179,12 +1231,14 @@ struct TaskDetailView: View {
 struct PickingView: View {
     @Environment(WorkshopStore.self) private var store
     @State private var priorityFilter: PreparationPriorityFilter = .all
+    @State private var sort: OrderSort = .priority
     @State private var searchText = ""
 
     var filteredOrders: [WorkshopOrder] {
-        store.pendingPreparationOrders
+        let filtered = store.pendingPreparationOrders
             .filter { priorityFilter.matches($0) }
             .filter { matchesSearch($0) }
+        return sort.sort(filtered)
     }
 
     private func matchesSearch(_ order: WorkshopOrder) -> Bool {
@@ -1243,29 +1297,59 @@ struct PickingView: View {
                         .clipShape(RoundedRectangle(cornerRadius: 12))
 
                         Menu {
-                            Picker("Filtrar", selection: $priorityFilter) {
-                                ForEach(PreparationPriorityFilter.allCases) { option in
-                                    Label(option.rawValue, systemImage: option.iconName).tag(option)
+                            Section("Filtrar") {
+                                Picker("Filtrar", selection: $priorityFilter) {
+                                    ForEach(PreparationPriorityFilter.allCases) { option in
+                                        Label(option.rawValue, systemImage: option.iconName).tag(option)
+                                    }
+                                }
+                            }
+                            Section("Ordenar") {
+                                Picker("Ordenar", selection: $sort) {
+                                    ForEach(OrderSort.allCases) { option in
+                                        Label(option.rawValue, systemImage: option.iconName).tag(option)
+                                    }
+                                }
+                            }
+                            if priorityFilter != .all || sort != .priority {
+                                Divider()
+                                Button(role: .destructive) {
+                                    priorityFilter = .all
+                                    sort = .priority
+                                } label: {
+                                    Label("Limpiar filtros", systemImage: "xmark.circle")
                                 }
                             }
                         } label: {
+                            let active = priorityFilter != .all || sort != .priority
                             HStack(spacing: 6) {
-                                Image(systemName: priorityFilter.iconName)
+                                Image(systemName: "line.3.horizontal.decrease.circle.fill")
                                     .font(.subheadline.weight(.bold))
-                                if priorityFilter != .all {
-                                    Text(priorityFilter.rawValue)
-                                        .font(.subheadline.weight(.bold))
-                                        .lineLimit(1)
-                                }
                                 Image(systemName: "chevron.down")
                                     .font(.caption2.weight(.bold))
                             }
                             .padding(.horizontal, 14)
                             .padding(.vertical, 11)
-                            .background(priorityFilter == .all ? AppTheme.surfaceSoft : AppTheme.blue)
-                            .foregroundStyle(priorityFilter == .all ? AppTheme.inkSoft : .white)
-                            .overlay(RoundedRectangle(cornerRadius: 12).stroke(priorityFilter == .all ? AppTheme.line : Color.clear))
+                            .background(active ? AppTheme.blue : AppTheme.surfaceSoft)
+                            .foregroundStyle(active ? .white : AppTheme.inkSoft)
+                            .overlay(RoundedRectangle(cornerRadius: 12).stroke(active ? Color.clear : AppTheme.line))
                             .clipShape(RoundedRectangle(cornerRadius: 12))
+                        }
+                    }
+
+                    if priorityFilter != .all || sort != .priority {
+                        HStack(spacing: 6) {
+                            if priorityFilter != .all {
+                                ActiveFilterChip(text: priorityFilter.rawValue, icon: priorityFilter.iconName) {
+                                    priorityFilter = .all
+                                }
+                            }
+                            if sort != .priority {
+                                ActiveFilterChip(text: sort.rawValue, icon: sort.iconName) {
+                                    sort = .priority
+                                }
+                            }
+                            Spacer(minLength: 0)
                         }
                     }
 
@@ -2854,6 +2938,33 @@ extension View {
 
     func screenBackground() -> some View {
         modifier(ScreenBackgroundModifier())
+    }
+}
+
+struct ActiveFilterChip: View {
+    let text: String
+    let icon: String
+    let onClear: () -> Void
+
+    var body: some View {
+        HStack(spacing: 5) {
+            Image(systemName: icon)
+                .font(.caption2.weight(.bold))
+            Text(text)
+                .font(.caption.weight(.semibold))
+                .lineLimit(1)
+            Button(action: onClear) {
+                Image(systemName: "xmark")
+                    .font(.caption2.weight(.bold))
+            }
+            .buttonStyle(.plain)
+        }
+        .foregroundStyle(AppTheme.blue)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
+        .background(AppTheme.blueSoft)
+        .overlay(Capsule().stroke(AppTheme.blue.opacity(0.25), lineWidth: 0.8))
+        .clipShape(Capsule())
     }
 }
 
