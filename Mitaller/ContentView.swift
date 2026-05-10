@@ -351,6 +351,18 @@ enum PreparationPriorityFilter: String, CaseIterable, Identifiable {
         case .blocked: order.priority == .blocked || order.status == .waitingStock
         }
     }
+
+    var iconName: String {
+        switch self {
+        case .all: "line.3.horizontal.decrease.circle"
+        case .urgent: "flame.fill"
+        case .high: "arrow.up.circle.fill"
+        case .standard: "shippingbox.fill"
+        case .premium: "bolt.fill"
+        case .multiple: "square.stack.3d.up.fill"
+        case .blocked: "exclamationmark.triangle.fill"
+        }
+    }
 }
 
 enum ProductionFilter: String, CaseIterable, Identifiable {
@@ -1209,13 +1221,20 @@ struct PickingView: View {
                         MetricTile(title: "Total", value: filteredOrders.count, color: AppTheme.purple, icon: "shippingbox.fill")
                     }
 
-                    VStack(spacing: 10) {
+                    HStack(spacing: 10) {
                         HStack(spacing: 10) {
                             Image(systemName: "magnifyingglass")
                                 .foregroundStyle(AppTheme.muted)
-                            TextField("Buscar pedido, SKU, talla o cliente", text: $searchText)
+                            TextField("Buscar pedido, SKU, cliente…", text: $searchText)
                                 .textInputAutocapitalization(.never)
                                 .keyboardType(.default)
+                            if !searchText.isEmpty {
+                                Button { searchText = "" } label: {
+                                    Image(systemName: "xmark.circle.fill")
+                                        .foregroundStyle(AppTheme.muted)
+                                }
+                                .buttonStyle(.plain)
+                            }
                         }
                         .padding(.horizontal, 12)
                         .padding(.vertical, 11)
@@ -1223,27 +1242,32 @@ struct PickingView: View {
                         .overlay(RoundedRectangle(cornerRadius: 12).stroke(AppTheme.line))
                         .clipShape(RoundedRectangle(cornerRadius: 12))
 
-                        ScrollView(.horizontal, showsIndicators: false) {
-                            HStack(spacing: 8) {
+                        Menu {
+                            Picker("Filtrar", selection: $priorityFilter) {
                                 ForEach(PreparationPriorityFilter.allCases) { option in
-                                    Button {
-                                        priorityFilter = option
-                                    } label: {
-                                        Text(option.rawValue)
-                                            .font(.subheadline.weight(.black))
-                                            .padding(.horizontal, 12)
-                                            .padding(.vertical, 8)
-                                            .background(priorityFilter == option ? AppTheme.blue : AppTheme.surfaceSoft)
-                                            .foregroundStyle(priorityFilter == option ? .white : AppTheme.inkSoft)
-                                            .overlay(RoundedRectangle(cornerRadius: 10).stroke(priorityFilter == option ? Color.clear : AppTheme.line))
-                                            .clipShape(RoundedRectangle(cornerRadius: 10))
-                                    }
-                                    .buttonStyle(.plain)
+                                    Label(option.rawValue, systemImage: option.iconName).tag(option)
                                 }
                             }
+                        } label: {
+                            HStack(spacing: 6) {
+                                Image(systemName: priorityFilter.iconName)
+                                    .font(.subheadline.weight(.bold))
+                                if priorityFilter != .all {
+                                    Text(priorityFilter.rawValue)
+                                        .font(.subheadline.weight(.bold))
+                                        .lineLimit(1)
+                                }
+                                Image(systemName: "chevron.down")
+                                    .font(.caption2.weight(.bold))
+                            }
+                            .padding(.horizontal, 14)
+                            .padding(.vertical, 11)
+                            .background(priorityFilter == .all ? AppTheme.surfaceSoft : AppTheme.blue)
+                            .foregroundStyle(priorityFilter == .all ? AppTheme.inkSoft : .white)
+                            .overlay(RoundedRectangle(cornerRadius: 12).stroke(priorityFilter == .all ? AppTheme.line : Color.clear))
+                            .clipShape(RoundedRectangle(cornerRadius: 12))
                         }
                     }
-                    .glassPanel(padding: 12)
 
                     if filteredOrders.isEmpty {
                         ContentUnavailableView("Nada pendiente", systemImage: "checkmark.circle.fill", description: Text("No hay pedidos con estos filtros."))
