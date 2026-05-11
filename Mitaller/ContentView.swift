@@ -726,14 +726,14 @@ final class WorkshopStore {
         }
     }
 
-    func scanLabelRemote(for order: WorkshopOrder, barcode: String) async {
+    func scanLabelRemote(for order: WorkshopOrder, barcode: String, photo: Data? = nil) async {
         guard let client = apiClient else { return }
         labelScanOrderID = order.id
         syncError = nil
         defer { labelScanOrderID = nil }
 
         do {
-            let shipment = try await client.scanLabel(orderId: order.remoteID ?? order.number, barcode: barcode)
+            let shipment = try await client.scanLabel(orderId: order.remoteID ?? order.number, barcode: barcode, photo: photo)
             if let index = orders.firstIndex(where: { $0.id == order.id }) {
                 orders[index].tracking = shipment.trackingNumber ?? barcode
                 orders[index].status = .labelCreated
@@ -827,6 +827,8 @@ struct MainTabView: View {
                 .tabItem { Label("Stock", systemImage: "barcode.viewfinder") }
             PurchaseMatrixView()
                 .tabItem { Label("Compras", systemImage: "cart.badge.plus") }
+            FinalizedView()
+                .tabItem { Label("Finalizados", systemImage: "checkmark.seal.fill") }
             ManualPrintView()
                 .tabItem { Label("Imprimir", systemImage: "printer.fill") }
             EconomicsView()
@@ -1520,9 +1522,9 @@ struct ShippingView: View {
             }
             .sheet(item: $scanningOrder) { order in
                 NavigationStack {
-                    LabelScanView(order: order) { barcode in
+                    LabelScanView(order: order) { barcode, photo in
                         scanningOrder = nil
-                        Task { await store.scanLabelRemote(for: order, barcode: barcode) }
+                        Task { await store.scanLabelRemote(for: order, barcode: barcode, photo: photo) }
                     }
                     .navigationTitle(order.number)
                     .navigationBarTitleDisplayMode(.inline)
@@ -1653,23 +1655,23 @@ struct ShippingOrderCard: View {
 
 struct LabelScanView: View {
     let order: WorkshopOrder
-    var onBarcode: (String) -> Void
+    var onBarcode: (String, Data?) -> Void
     @State private var manualBarcode = ""
 
     var body: some View {
         VStack(spacing: 14) {
             VStack(alignment: .leading, spacing: 8) {
-                Text("Lee el código de barras de la etiqueta")
+                Text("Escanea la etiqueta del paquete")
                     .font(.headline.weight(.black))
-                Text("Al leerlo, se guarda como tracking y se marca el pedido como preparado en Shopify si es un pedido real.")
+                Text("Al leer el código se guardará el tracking y una foto del paquete escaneado.")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding()
 
-            BarcodeScannerView { code in
-                onBarcode(code)
+            BarcodeScannerView(capturesPhoto: true) { code, photo in
+                onBarcode(code, photo)
             }
             .frame(maxWidth: .infinity, minHeight: 340)
             .clipShape(RoundedRectangle(cornerRadius: 8))
@@ -1680,9 +1682,9 @@ struct LabelScanView: View {
                     .textFieldStyle(.roundedBorder)
                     .textInputAutocapitalization(.characters)
                 Button {
-                    onBarcode(manualBarcode)
+                    onBarcode(manualBarcode, nil)
                 } label: {
-                    Label("Confirmar número", systemImage: "checkmark.seal.fill")
+                    Label("Confirmar sin foto", systemImage: "checkmark.seal.fill")
                         .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.borderedProminent)
@@ -1779,7 +1781,7 @@ struct StockView: View {
             }
             .sheet(isPresented: $showingScanner) {
                 NavigationStack {
-                    BarcodeScannerView { code in
+                    BarcodeScannerView { code, _ in
                         query = code
                         showingScanner = false
                     }
@@ -3337,6 +3339,310 @@ func formatMoney(_ value: Double, currency: String = "EUR") -> String {
 
 func formatMoneyShort(_ value: Double) -> String {
     String(format: "%.0f€", value)
+}
+
+struct FinalizedView: View {
+    @Environment(WorkshopStore.self) private var store
+    @State private var shipments: [FinalizedShipment] = []
+    @State private var loading = false
+    @State private var error: String?
+    @State private var search = ""
+
+    var filtered: [FinalizedShipment] {
+        let q = search.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !q.isEmpty else { return shipments }
+        return shipments.filter {
+            $0.orderNumber.localizedCaseInsensitiveContains(q) ||
+            $0.customer.localizedCaseInsensitiveContains(q) ||
+            ($0.trackingNumber ?? "").localizedCaseInsensitiveContains(q)
+        }
+    }
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 14) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Finalizados")
+                            .font(.system(size: 30, weight: .heavy, design: .rounded))
+                            .foregroundStyle(AppTheme.ink)
+                        Text("Pedidos con etiqueta o ya enviados, con foto del paquete y tracking.")
+                            .font(.subheadline.weight(.medium))
+                            .foregroundStyle(AppTheme.muted)
+                    }
+
+                    HStack(spacing: 10) {
+                        Image(systemName: "magnifyingglass").foregroundStyle(AppTheme.muted)
+                        TextField("Buscar pedido, cliente o tracking", text: $search)
+                            .textInputAutocapitalization(.never)
+                        if !search.isEmpty {
+                            Button { search = "" } label: {
+                                Image(systemName: "xmark.circle.fill").foregroundStyle(AppTheme.muted)
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                    .padding(.horizontal, 12).padding(.vertical, 11)
+                    .background(AppTheme.surfaceSoft)
+                    .overlay(RoundedRectangle(cornerRadius: 12).stroke(AppTheme.line))
+                    .clipShape(RoundedRectangle(cornerRadius: 12))
+
+                    if loading && shipments.isEmpty {
+                        ProgressView().frame(maxWidth: .infinity)
+                    } else if filtered.isEmpty {
+                        ContentUnavailableView(
+                            "Sin finalizados",
+                            systemImage: "tray",
+                            description: Text("Cuando escanees una etiqueta aparecerá aquí con su foto y tracking.")
+                        )
+                        .glassPanel()
+                    } else {
+                        ForEach(filtered) { shipment in
+                            NavigationLink(value: shipment) {
+                                FinalizedRow(shipment: shipment)
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+
+                    if let error {
+                        Label(error, systemImage: "exclamationmark.triangle.fill")
+                            .font(.caption).foregroundStyle(AppTheme.red)
+                            .padding(10).glassPanel(padding: 10, accent: AppTheme.red)
+                    }
+                }
+                .padding()
+            }
+            .screenBackground()
+            .navigationTitle("Finalizados")
+            .toolbar {
+                Button { Task { await reload() } } label: {
+                    Image(systemName: "arrow.clockwise")
+                }.disabled(loading)
+            }
+            .task { await reload() }
+            .refreshable { await reload() }
+            .navigationDestination(for: FinalizedShipment.self) { shipment in
+                FinalizedDetailView(shipment: shipment)
+            }
+        }
+    }
+
+    private func reload() async {
+        guard let client = store.apiClient else { error = "API no configurada"; return }
+        loading = true; defer { loading = false }
+        error = nil
+        do {
+            shipments = try await client.finalizedShipments()
+        } catch let err {
+            error = err.localizedDescription
+        }
+    }
+}
+
+extension FinalizedShipment: Hashable {
+    static func == (lhs: FinalizedShipment, rhs: FinalizedShipment) -> Bool { lhs.id == rhs.id }
+    func hash(into hasher: inout Hasher) { hasher.combine(id) }
+}
+
+struct FinalizedRow: View {
+    @Environment(WorkshopStore.self) private var store
+    let shipment: FinalizedShipment
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 12) {
+            if shipment.hasPhoto, let url = store.apiClient?.packagePhotoURL(shipmentId: shipment.id) {
+                AsyncImage(url: url) { phase in
+                    switch phase {
+                    case .success(let image): image.resizable().scaledToFill()
+                    case .failure: photoPlaceholder
+                    case .empty: ProgressView()
+                    @unknown default: photoPlaceholder
+                    }
+                }
+                .frame(width: 64, height: 64)
+                .clipShape(RoundedRectangle(cornerRadius: 10))
+            } else {
+                photoPlaceholder.frame(width: 64, height: 64).clipShape(RoundedRectangle(cornerRadius: 10))
+            }
+            VStack(alignment: .leading, spacing: 4) {
+                HStack {
+                    Text(shipment.orderNumber)
+                        .font(.headline.weight(.heavy))
+                        .foregroundStyle(AppTheme.ink)
+                    Spacer()
+                    statusBadge
+                }
+                Text(shipment.customer).font(.caption).foregroundStyle(AppTheme.muted).lineLimit(1)
+                if let track = shipment.trackingNumber {
+                    Label(track, systemImage: "barcode.viewfinder")
+                        .font(.caption2.weight(.bold))
+                        .foregroundStyle(AppTheme.teal)
+                        .lineLimit(1)
+                }
+                if let live = shipment.trackingStatus, !live.isEmpty {
+                    Text(live)
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(AppTheme.muted)
+                        .lineLimit(1)
+                }
+            }
+        }
+        .glassPanel(padding: 12)
+    }
+
+    private var photoPlaceholder: some View {
+        ZStack {
+            AppTheme.surfaceSoft
+            Image(systemName: "photo")
+                .foregroundStyle(AppTheme.mutedSoft)
+        }
+    }
+
+    private var statusBadge: some View {
+        let raw = shipment.status.uppercased()
+        let color: Color
+        switch raw {
+        case "DELIVERED", "SHIPPED": color = AppTheme.green
+        case "IN_TRANSIT": color = AppTheme.blue
+        case "PRINTED": color = AppTheme.teal
+        default: color = AppTheme.amber
+        }
+        return StatusPill(
+            text: raw,
+            systemImage: "circle.fill",
+            foreground: color,
+            background: color.opacity(0.18),
+            border: color.opacity(0.25),
+            compact: true
+        )
+    }
+}
+
+struct FinalizedDetailView: View {
+    @Environment(WorkshopStore.self) private var store
+    let shipment: FinalizedShipment
+    @State private var tracking: ShipmentTrackingResponse?
+    @State private var loading = false
+    @State private var error: String?
+    @State private var timer: Timer?
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 16) {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(shipment.orderNumber)
+                        .font(.system(size: 28, weight: .heavy, design: .rounded))
+                        .foregroundStyle(AppTheme.ink)
+                    Text(shipment.customer)
+                        .font(.subheadline.weight(.medium))
+                        .foregroundStyle(AppTheme.muted)
+                    if let track = shipment.trackingNumber {
+                        Label(track, systemImage: "barcode.viewfinder")
+                            .font(.subheadline.weight(.bold))
+                            .foregroundStyle(AppTheme.teal)
+                    }
+                }
+                .glassPanel(padding: 16)
+
+                if shipment.hasPhoto, let url = store.apiClient?.packagePhotoURL(shipmentId: shipment.id) {
+                    SectionHeader(title: "Foto del paquete", subtitle: "Tomada al escanear la etiqueta")
+                    AsyncImage(url: url) { phase in
+                        switch phase {
+                        case .success(let image): image.resizable().scaledToFit()
+                        case .failure: Color.clear
+                        case .empty: ProgressView()
+                        @unknown default: Color.clear
+                        }
+                    }
+                    .frame(maxWidth: .infinity)
+                    .clipShape(RoundedRectangle(cornerRadius: 16))
+                    .glassPanel(padding: 0)
+                }
+
+                SectionHeader(title: "Seguimiento en tiempo real", subtitle: "Se actualiza cada 30 s automáticamente")
+                trackingPanel
+            }
+            .padding()
+        }
+        .screenBackground()
+        .navigationTitle(shipment.orderNumber)
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            if let url = shipment.trackingUrl, let u = URL(string: url) {
+                Link(destination: u) {
+                    Image(systemName: "safari.fill")
+                }
+            }
+        }
+        .task { await load() }
+        .onAppear {
+            timer = Timer.scheduledTimer(withTimeInterval: 30, repeats: true) { _ in
+                Task { await load() }
+            }
+        }
+        .onDisappear { timer?.invalidate(); timer = nil }
+    }
+
+    @ViewBuilder
+    private var trackingPanel: some View {
+        if loading && tracking == nil {
+            ProgressView().frame(maxWidth: .infinity).padding().glassPanel()
+        } else if let track = tracking {
+            VStack(alignment: .leading, spacing: 10) {
+                if let status = track.status, !status.isEmpty {
+                    Label(status, systemImage: "shippingbox.fill")
+                        .font(.headline.weight(.bold))
+                        .foregroundStyle(AppTheme.ink)
+                }
+                if let carrier = track.carrier, !carrier.isEmpty {
+                    Label(carrier, systemImage: "truck.box.fill")
+                        .font(.caption).foregroundStyle(AppTheme.muted)
+                }
+                if track.events.isEmpty {
+                    Text("Aún sin eventos del transportista.")
+                        .font(.caption).foregroundStyle(AppTheme.muted)
+                } else {
+                    Divider().background(AppTheme.line)
+                    ForEach(track.events) { event in
+                        HStack(alignment: .top, spacing: 10) {
+                            Circle().fill(AppTheme.teal).frame(width: 8, height: 8).padding(.top, 6)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(event.status ?? event.message ?? "Evento")
+                                    .font(.subheadline.weight(.semibold))
+                                    .foregroundStyle(AppTheme.ink)
+                                if let at = event.at {
+                                    Text(at).font(.caption2).foregroundStyle(AppTheme.muted)
+                                }
+                                if let m = event.message, m != event.status {
+                                    Text(m).font(.caption).foregroundStyle(AppTheme.muted)
+                                }
+                            }
+                            Spacer()
+                        }
+                    }
+                }
+                if let err = track.error {
+                    Text(err).font(.caption2).foregroundStyle(AppTheme.amber)
+                }
+            }
+            .glassPanel(padding: 16)
+        } else if let error {
+            Label(error, systemImage: "exclamationmark.triangle.fill")
+                .font(.caption).foregroundStyle(AppTheme.red)
+                .padding().glassPanel(padding: 12, accent: AppTheme.red)
+        }
+    }
+
+    private func load() async {
+        guard let client = store.apiClient else { return }
+        loading = true; defer { loading = false }
+        do {
+            tracking = try await client.shipmentTracking(shipment.id)
+        } catch let err {
+            error = err.localizedDescription
+        }
+    }
 }
 
 #Preview {

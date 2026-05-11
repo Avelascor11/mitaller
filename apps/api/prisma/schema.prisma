@@ -330,10 +330,15 @@ model Shipment {
   provider           String
   sendcloudParcelId  String?
   trackingNumber     String?
+  trackingUrl        String?
   carrier            String?
   labelUrl           String?
   cost               Float?
   costCurrency       String?
+  packagePhoto       Bytes?
+  packagePhotoAt     DateTime?
+  trackingStatus     String?
+  trackingSyncedAt   DateTime?
   status             ShipmentStatus @default(PENDING)
   createdAt          DateTime       @default(now())
   updatedAt          DateTime       @updatedAt

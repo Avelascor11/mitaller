@@ -5,12 +5,15 @@
 
 import AVFoundation
 import SwiftUI
+import UIKit
 
 struct BarcodeScannerView: UIViewControllerRepresentable {
-    var onCode: (String) -> Void
+    var capturesPhoto: Bool = false
+    var onCode: (String, Data?) -> Void
 
     func makeUIViewController(context: Context) -> ScannerViewController {
         let controller = ScannerViewController()
+        controller.capturesPhoto = capturesPhoto
         controller.onCode = onCode
         return controller
     }
@@ -18,10 +21,13 @@ struct BarcodeScannerView: UIViewControllerRepresentable {
     func updateUIViewController(_ uiViewController: ScannerViewController, context: Context) {}
 }
 
-final class ScannerViewController: UIViewController, AVCaptureMetadataOutputObjectsDelegate {
-    var onCode: ((String) -> Void)?
+final class ScannerViewController: UIViewController, AVCaptureMetadataOutputObjectsDelegate, AVCapturePhotoCaptureDelegate {
+    var capturesPhoto: Bool = false
+    var onCode: ((String, Data?) -> Void)?
     private let session = AVCaptureSession()
     private var previewLayer: AVCaptureVideoPreviewLayer?
+    private let photoOutput = AVCapturePhotoOutput()
+    private var pendingCode: String?
 
     override func viewDidLoad() {
         super.viewDidLoad()
@@ -58,6 +64,8 @@ final class ScannerViewController: UIViewController, AVCaptureMetadataOutputObje
             return
         }
 
+        session.beginConfiguration()
+        session.sessionPreset = capturesPhoto ? .photo : .high
         session.addInput(input)
 
         let output = AVCaptureMetadataOutput()
@@ -68,6 +76,12 @@ final class ScannerViewController: UIViewController, AVCaptureMetadataOutputObje
         session.addOutput(output)
         output.setMetadataObjectsDelegate(self, queue: .main)
         output.metadataObjectTypes = [.ean8, .ean13, .code128, .qr, .code39, .dataMatrix]
+
+        if capturesPhoto, session.canAddOutput(photoOutput) {
+            session.addOutput(photoOutput)
+        }
+
+        session.commitConfiguration()
 
         let layer = AVCaptureVideoPreviewLayer(session: session)
         layer.videoGravity = .resizeAspectFill
@@ -102,9 +116,39 @@ final class ScannerViewController: UIViewController, AVCaptureMetadataOutputObje
     }
 
     func metadataOutput(_ output: AVCaptureMetadataOutput, didOutput metadataObjects: [AVMetadataObject], from connection: AVCaptureConnection) {
-        guard let object = metadataObjects.first as? AVMetadataMachineReadableCodeObject,
+        guard pendingCode == nil,
+              let object = metadataObjects.first as? AVMetadataMachineReadableCodeObject,
               let value = object.stringValue else { return }
+        pendingCode = value
+
+        if capturesPhoto {
+            let settings = AVCapturePhotoSettings()
+            settings.flashMode = .off
+            photoOutput.capturePhoto(with: settings, delegate: self)
+        } else {
+            session.stopRunning()
+            onCode?(value, nil)
+        }
+    }
+
+    func photoOutput(_ output: AVCapturePhotoOutput, didFinishProcessingPhoto photo: AVCapturePhoto, error: Error?) {
+        let data = photo.fileDataRepresentation()
+        let compressed = Self.compressedJPEG(from: data)
         session.stopRunning()
-        onCode?(value)
+        if let code = pendingCode {
+            onCode?(code, compressed)
+        }
+    }
+
+    private static func compressedJPEG(from data: Data?) -> Data? {
+        guard let data, let image = UIImage(data: data) else { return data }
+        let maxDimension: CGFloat = 1280
+        let scale = min(1, maxDimension / max(image.size.width, image.size.height))
+        let newSize = CGSize(width: image.size.width * scale, height: image.size.height * scale)
+        UIGraphicsBeginImageContextWithOptions(newSize, true, 1)
+        image.draw(in: CGRect(origin: .zero, size: newSize))
+        let resized = UIGraphicsGetImageFromCurrentImageContext()
+        UIGraphicsEndImageContext()
+        return (resized ?? image).jpegData(compressionQuality: 0.6)
     }
 }

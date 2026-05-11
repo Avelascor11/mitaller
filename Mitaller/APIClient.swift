@@ -87,9 +87,25 @@ struct APIClient {
         return try await perform(request)
     }
 
-    func scanLabel(orderId: String, barcode: String) async throws -> ShipmentDTO {
-        let request = try jsonRequest(path: "/shipments/\(Self.pathSegment(orderId))/scan-label", method: "POST", body: ScanLabelRequest(barcode: barcode))
+    func scanLabel(orderId: String, barcode: String, photo: Data? = nil) async throws -> ShipmentDTO {
+        let request = try jsonRequest(
+            path: "/shipments/\(Self.pathSegment(orderId))/scan-label",
+            method: "POST",
+            body: ScanLabelRequest(barcode: barcode, photoBase64: photo?.base64EncodedString())
+        )
         return try await perform(request)
+    }
+
+    func finalizedShipments() async throws -> [FinalizedShipment] {
+        try await get("/shipments/finalized")
+    }
+
+    func shipmentTracking(_ id: String) async throws -> ShipmentTrackingResponse {
+        try await get("/shipments/\(Self.pathSegment(id))/tracking")
+    }
+
+    func packagePhotoURL(shipmentId: String) -> URL? {
+        URL(string: "/shipments/\(Self.pathSegment(shipmentId))/package-photo", relativeTo: baseURL)?.absoluteURL
     }
 
     func setStockQuantity(sku: String, quantity: Int) async throws {
@@ -189,6 +205,7 @@ private struct BlockRequest: Encodable {
 }
 private struct ScanLabelRequest: Encodable {
     let barcode: String
+    let photoBase64: String?
 }
 private struct SetStockQuantityRequest: Encodable {
     let quantity: Int
@@ -268,6 +285,42 @@ struct ProductMarginRow: Decodable, Identifiable {
     let cost: Double
     let margin: Double
     let marginPct: Double?
+}
+
+struct FinalizedShipment: Decodable, Identifiable {
+    let id: String
+    let orderId: String
+    let orderNumber: String
+    let customer: String
+    let shippingMethod: String
+    let trackingNumber: String?
+    let trackingUrl: String?
+    let carrier: String?
+    let status: String
+    let trackingStatus: String?
+    let hasPhoto: Bool
+    let packagePhotoAt: Date?
+    let cost: Double?
+    let createdAt: Date
+    let updatedAt: Date
+}
+
+struct ShipmentTrackingResponse: Decodable {
+    let shipmentId: String
+    let trackingNumber: String?
+    let trackingUrl: String?
+    let status: String?
+    let carrier: String?
+    let events: [TrackingEvent]
+    let cached: Bool?
+    let error: String?
+}
+
+struct TrackingEvent: Decodable, Identifiable {
+    var id: String { (at ?? "") + "-" + (status ?? message ?? "") }
+    let status: String?
+    let message: String?
+    let at: String?
 }
 private struct APIErrorResponse: Decodable {
     let message: String?

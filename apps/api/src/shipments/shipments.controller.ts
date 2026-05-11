@@ -1,4 +1,5 @@
-import { Body, Controller, Get, Headers, Param, Post } from '@nestjs/common';
+import { Body, Controller, Get, Headers, Param, Post, Res } from '@nestjs/common';
+import type { Response } from 'express';
 import { ShipmentsService } from './shipments.service';
 
 @Controller('shipments')
@@ -11,8 +12,31 @@ export class ShipmentsController {
   }
 
   @Post(':orderId/scan-label')
-  scanLabel(@Param('orderId') orderId: string, @Body() body: { barcode?: string }) {
-    return this.shipments.confirmLabelScan(orderId, body.barcode);
+  scanLabel(@Param('orderId') orderId: string, @Body() body: { barcode?: string; photoBase64?: string }) {
+    return this.shipments.confirmLabelScan(orderId, body.barcode, body.photoBase64);
+  }
+
+  @Post(':orderId/package-photo')
+  packagePhoto(@Param('orderId') orderId: string, @Body() body: { photoBase64?: string }) {
+    return this.shipments.savePackagePhoto(orderId, body.photoBase64 ?? '');
+  }
+
+  @Get(':id/package-photo')
+  async getPackagePhoto(@Param('id') id: string, @Res() res: Response) {
+    const photo = await this.shipments.getPackagePhoto(id);
+    res.setHeader('Content-Type', 'image/jpeg');
+    res.setHeader('Cache-Control', 'private, max-age=3600');
+    res.send(photo);
+  }
+
+  @Get(':id/tracking')
+  tracking(@Param('id') id: string) {
+    return this.shipments.fetchTracking(id);
+  }
+
+  @Get('finalized')
+  finalized() {
+    return this.shipments.findFinalized();
   }
 
   @Get()
