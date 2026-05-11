@@ -108,6 +108,16 @@ struct APIClient {
         try await get("/shipments/finalized")
     }
 
+    func reprintLabel(shipmentId: String) async throws {
+        let request = try jsonRequest(path: "/shipments/\(Self.pathSegment(shipmentId))/reprint", method: "POST", body: EmptyBody())
+        let _: EmptyResponse = try await perform(request)
+    }
+
+    func reprintLabelByOrder(orderId: String) async throws {
+        let request = try jsonRequest(path: "/shipments/order/\(Self.pathSegment(orderId))/reprint", method: "POST", body: EmptyBody())
+        let _: EmptyResponse = try await perform(request)
+    }
+
     func shipmentTracking(_ id: String) async throws -> ShipmentTrackingResponse {
         try await get("/shipments/\(Self.pathSegment(id))/tracking")
     }

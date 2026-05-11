@@ -200,6 +200,34 @@ export class ShipmentsService {
     return Buffer.from(shipment.packagePhoto as Buffer);
   }
 
+  async requestReprintByOrder(orderId: string) {
+    const order = await this.prisma.order.findFirst({
+      where: { OR: [{ id: orderId }, { orderNumber: orderId }, { shopifyOrderId: orderId }] },
+      include: { shipments: { orderBy: { createdAt: 'desc' }, take: 1 } }
+    });
+    if (!order) throw new NotFoundException('Pedido no encontrado');
+    const shipment = order.shipments[0];
+    if (!shipment) throw new BadRequestException('Este pedido no tiene etiqueta para reimprimir.');
+    return this.requestReprint(shipment.id);
+  }
+
+  async requestReprint(id: string) {
+    const shipment = await this.prisma.shipment.findUnique({ where: { id }, include: { order: true } });
+    if (!shipment) throw new NotFoundException('Envío no encontrado');
+    if (!shipment.labelUrl) throw new BadRequestException('El envío no tiene etiqueta para reimprimir.');
+    const deleted = await this.prisma.activityLog.deleteMany({
+      where: { entityType: 'Shipment', entityId: id, action: 'LABEL_PRINTED' }
+    });
+    await this.prisma.shipment.update({ where: { id }, data: { status: 'LABEL_CREATED' } });
+    await this.activity.log({
+      entityType: 'Shipment',
+      entityId: id,
+      action: 'LABEL_REPRINT_REQUESTED',
+      message: `Reimpresión solicitada para ${shipment.order.orderNumber}`
+    });
+    return { ok: true, shipmentId: id, removedPrintLogs: deleted.count };
+  }
+
   async findFinalized() {
     const shipments = await this.prisma.shipment.findMany({
       where: { status: { in: ['LABEL_CREATED', 'PRINTED', 'IN_TRANSIT', 'DELIVERED'] } },

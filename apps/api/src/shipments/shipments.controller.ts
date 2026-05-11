@@ -54,6 +54,16 @@ export class ShipmentsController {
     return this.shipments.markPrinted(id, token, body?.result);
   }
 
+  @Post(':id/reprint')
+  reprint(@Param('id') id: string) {
+    return this.shipments.requestReprint(id);
+  }
+
+  @Post('order/:orderId/reprint')
+  reprintByOrder(@Param('orderId') orderId: string) {
+    return this.shipments.requestReprintByOrder(orderId);
+  }
+
   @Get('shipping-methods')
   shippingMethods() {
     return this.shipments.listShippingMethods();

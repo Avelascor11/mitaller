@@ -775,6 +775,28 @@ final class WorkshopStore {
         }
     }
 
+    func reprintLabelRemote(for order: WorkshopOrder) async {
+        guard let client = apiClient else { return }
+        syncError = nil
+        do {
+            try await client.reprintLabelByOrder(orderId: order.remoteID ?? order.number)
+            await syncFromAPI()
+        } catch {
+            syncError = "No se pudo reimprimir: \(error.localizedDescription)"
+        }
+    }
+
+    func reprintLabelByShipment(_ shipmentId: String) async {
+        guard let client = apiClient else { return }
+        syncError = nil
+        do {
+            try await client.reprintLabel(shipmentId: shipmentId)
+            await syncFromAPI()
+        } catch {
+            syncError = "No se pudo reimprimir: \(error.localizedDescription)"
+        }
+    }
+
     func reopenPreparationRemote(_ order: WorkshopOrder) async {
         reopenPreparation(order)
         guard let client = apiClient else { return }
@@ -1920,6 +1942,17 @@ struct ShippingOrderCard: View {
                 .buttonStyle(.borderedProminent)
                 .tint(AppTheme.teal)
                 .disabled(store.labelScanOrderID != nil)
+
+                if order.tracking != nil || order.printStatus != .none {
+                    Button {
+                        Task { await store.reprintLabelRemote(for: order) }
+                    } label: {
+                        Label("Reimprimir etiqueta", systemImage: "printer.fill")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.bordered)
+                    .tint(AppTheme.amber)
+                }
 
                 HStack(spacing: 10) {
                     Button { Task { await store.reopenPreparationRemote(order) } } label: {
@@ -3913,6 +3946,16 @@ struct FinalizedDetailView: View {
                     .clipShape(RoundedRectangle(cornerRadius: 16))
                     .glassPanel(padding: 0)
                 }
+
+                Button {
+                    Task { await store.reprintLabelByShipment(shipment.id) }
+                } label: {
+                    Label("Reimprimir etiqueta", systemImage: "printer.fill")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(AppTheme.amber)
+                .controlSize(.large)
 
                 SectionHeader(title: "Seguimiento en tiempo real", subtitle: "Se actualiza cada 30 s automáticamente")
                 trackingPanel
