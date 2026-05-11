@@ -1,6 +1,7 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { ConfigService } from '@nestjs/config';
+import { Cron } from '@nestjs/schedule';
 import { ActivityService } from '../activity/activity.service';
 import { PriorityService } from '../priority/priority.service';
 import { PrismaService } from '../prisma/prisma.service';
@@ -9,6 +10,9 @@ import { OrderTaskFactoryService } from './order-task-factory.service';
 
 @Injectable()
 export class OrdersService {
+  private readonly logger = new Logger(OrdersService.name);
+  private isSyncing = false;
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly priority: PriorityService,
@@ -17,6 +21,21 @@ export class OrdersService {
     private readonly activity: ActivityService,
     private readonly config: ConfigService
   ) {}
+
+  @Cron('*/2 * * * *')
+  async scheduledShopifySync() {
+    if (this.isSyncing) return;
+    if (!this.shopify.hasCredentials()) return;
+    this.isSyncing = true;
+    try {
+      const result = await this.importShopifyOrders();
+      this.logger.log(`Scheduled Shopify sync: ${result.imported} orders`);
+    } catch (error) {
+      this.logger.warn(`Scheduled Shopify sync failed: ${error instanceof Error ? error.message : String(error)}`);
+    } finally {
+      this.isSyncing = false;
+    }
+  }
 
   async findAll() {
     const orders = await this.prisma.order.findMany({
