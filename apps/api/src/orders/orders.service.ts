@@ -275,7 +275,10 @@ export class OrdersService {
     const hasCreatedLabel = existingOrder?.shipments.some((shipment) =>
       shipment.status === 'LABEL_CREATED' || Boolean(shipment.trackingNumber)
     );
-    const operationalStatus = hasCreatedLabel
+    const isCancelled = input.operationalStatus === 'CANCELLED';
+    const operationalStatus = isCancelled
+      ? 'CANCELLED'
+      : hasCreatedLabel
       ? 'LABEL_CREATED'
       : existingOrder && locallyAdvancedStatuses.includes(existingOrder.operationalStatus)
       ? existingOrder.operationalStatus

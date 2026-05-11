@@ -105,7 +105,7 @@ export class ShopifyAdapter {
       `, {
         first: Math.min(50, importLimit - orders.length),
         after,
-        query: 'status:open'
+        query: 'status:any'
       });
 
       orders.push(...data.orders.nodes);
@@ -117,7 +117,7 @@ export class ShopifyAdapter {
     }
 
     return orders
-      .filter((order) => !order.cancelledAt && (order.displayFulfillmentStatus ?? '').toUpperCase() !== 'FULFILLED')
+      .filter((order) => order.cancelledAt || (order.displayFulfillmentStatus ?? '').toUpperCase() !== 'FULFILLED')
       .filter((order) => !minimumOrderNumber || this.orderNumberValue(order.name) >= minimumOrderNumber)
       .map((order) => this.mapGraphqlOrder(order));
   }
