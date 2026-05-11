@@ -2654,6 +2654,7 @@ struct OrderPreparationDetailView: View {
     @Environment(WorkshopStore.self) private var store
     @State private var showingPrepareConfirmation = false
     @State private var showingPhotoCapture = false
+    @State private var showingPrintPrompt = false
     let order: WorkshopOrder
 
     var currentOrder: WorkshopOrder {
@@ -2787,7 +2788,10 @@ struct OrderPreparationDetailView: View {
                 showingPhotoCapture = true
             }
             Button("Sin foto", role: .destructive) {
-                Task { await store.markPreparedRemote(currentOrder) }
+                Task {
+                    await store.markPreparedRemote(currentOrder)
+                    showingPrintPrompt = true
+                }
             }
         } message: {
             Text(prepareConfirmationMessage)
@@ -2796,7 +2800,10 @@ struct OrderPreparationDetailView: View {
             NavigationStack {
                 PackagePhotoCaptureView(order: currentOrder) { photo in
                     showingPhotoCapture = false
-                    Task { await store.markPreparedRemote(currentOrder, photo: photo) }
+                    Task {
+                        await store.markPreparedRemote(currentOrder, photo: photo)
+                        showingPrintPrompt = true
+                    }
                 }
                 .navigationTitle("Foto del paquete")
                 .navigationBarTitleDisplayMode(.inline)
@@ -2804,6 +2811,14 @@ struct OrderPreparationDetailView: View {
                     Button("Cancelar") { showingPhotoCapture = false }
                 }
             }
+        }
+        .alert("Imprimir etiqueta", isPresented: $showingPrintPrompt) {
+            Button("Sí, crear e imprimir") {
+                Task { await store.createLabelRemote(for: currentOrder) }
+            }
+            Button("Más tarde", role: .cancel) {}
+        } message: {
+            Text("Pedido marcado como preparado.\n¿Crear etiqueta de envío e imprimirla ahora?")
         }
     }
 }
