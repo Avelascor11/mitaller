@@ -1075,6 +1075,7 @@ struct DashboardView: View {
                 .padding()
             }
             .screenBackground()
+            .globalSearch()
             .navigationTitle("Hoy")
             .toolbar {
                 Button {
@@ -1430,6 +1431,7 @@ struct PickingView: View {
     @State private var sort: OrderSort = .smart
     @State private var searchText = ""
     @State private var rafagaActive = false
+    @State private var groupedActive = false
 
     var filteredOrders: [WorkshopOrder] {
         let filtered = store.pendingPreparationOrders
@@ -1586,8 +1588,14 @@ struct PickingView: View {
                 .padding()
             }
             .screenBackground()
+            .globalSearch()
             .navigationTitle("Sin preparar")
             .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button { groupedActive = true } label: {
+                        Image(systemName: "square.grid.3x3.fill")
+                    }
+                }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button { rafagaActive = true } label: {
                         Image(systemName: "barcode.viewfinder")
@@ -1611,6 +1619,205 @@ struct PickingView: View {
             .fullScreenCover(isPresented: $rafagaActive) {
                 RafagaPickingView(orders: store.pendingPreparationOrders)
             }
+            .fullScreenCover(isPresented: $groupedActive) {
+                GroupedPickingView()
+            }
+        }
+    }
+}
+
+struct GroupedPickingView: View {
+    @Environment(WorkshopStore.self) private var store
+    @Environment(\.dismiss) private var dismiss
+    @State private var query = ""
+
+    struct Group: Identifiable {
+        let id: String
+        let title: String
+        let color: String
+        let size: String
+        let totalQuantity: Int
+        let orders: [(order: WorkshopOrder, qty: Int)]
+        var orderCount: Int { orders.count }
+    }
+
+    var groups: [Group] {
+        var bucket: [String: Group] = [:]
+        for order in store.pendingPreparationOrders {
+            for item in order.items {
+                let titleKey = item.displayTitle.trimmingCharacters(in: .whitespaces).lowercased()
+                let key = "\(titleKey)|\(item.variantTitle?.lowercased() ?? "")|\(item.sku.lowercased())"
+                let existing = bucket[key]
+                let merged = Group(
+                    id: key,
+                    title: existing?.title ?? item.displayTitle,
+                    color: existing?.color ?? "",
+                    size: existing?.size ?? (item.variantTitle ?? ""),
+                    totalQuantity: (existing?.totalQuantity ?? 0) + item.quantity,
+                    orders: (existing?.orders ?? []) + [(order, item.quantity)]
+                )
+                bucket[key] = merged
+            }
+        }
+        let filtered = bucket.values.filter { group in
+            guard !query.isEmpty else { return true }
+            return group.title.localizedCaseInsensitiveContains(query) ||
+                group.size.localizedCaseInsensitiveContains(query)
+        }
+        return filtered.sorted { $0.totalQuantity > $1.totalQuantity }
+    }
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 14) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Picking por lote")
+                            .font(.system(size: 26, weight: .heavy, design: .rounded))
+                            .foregroundStyle(AppTheme.ink)
+                        Text("Productos iguales agrupados entre todos los pedidos pendientes. Prepara el lote y luego reparte.")
+                            .font(.subheadline.weight(.medium))
+                            .foregroundStyle(AppTheme.muted)
+                    }
+
+                    HStack(spacing: 10) {
+                        Image(systemName: "magnifyingglass").foregroundStyle(AppTheme.muted)
+                        TextField("Buscar producto o talla", text: $query)
+                            .textInputAutocapitalization(.never)
+                        if !query.isEmpty {
+                            Button { query = "" } label: {
+                                Image(systemName: "xmark.circle.fill").foregroundStyle(AppTheme.muted)
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                    .padding(.horizontal, 12).padding(.vertical, 11)
+                    .background(AppTheme.surfaceSoft)
+                    .overlay(RoundedRectangle(cornerRadius: 12).stroke(AppTheme.line))
+                    .clipShape(RoundedRectangle(cornerRadius: 12))
+
+                    if groups.isEmpty {
+                        ContentUnavailableView(
+                            "Sin lotes",
+                            systemImage: "square.grid.3x3",
+                            description: Text("No hay productos pendientes que agrupar.")
+                        )
+                        .glassPanel()
+                    } else {
+                        LazyVStack(spacing: 10) {
+                            ForEach(groups) { group in
+                                NavigationLink(value: group.id) {
+                                    GroupedPickingRow(group: group)
+                                }
+                                .buttonStyle(.plain)
+                            }
+                        }
+                    }
+                }
+                .padding()
+            }
+            .screenBackground()
+            .navigationTitle("Lotes")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Cerrar") { dismiss() }
+                }
+            }
+            .navigationDestination(for: String.self) { id in
+                if let group = groups.first(where: { $0.id == id }) {
+                    GroupedPickingDetail(group: group)
+                }
+            }
+        }
+    }
+}
+
+struct GroupedPickingRow: View {
+    let group: GroupedPickingView.Group
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Text("×\(group.totalQuantity)")
+                .font(.system(size: 26, weight: .heavy, design: .rounded))
+                .foregroundStyle(AppTheme.blue)
+                .frame(width: 64, height: 64)
+                .background(AppTheme.blueSoft)
+                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+            VStack(alignment: .leading, spacing: 3) {
+                Text(group.title)
+                    .font(.headline.weight(.heavy))
+                    .foregroundStyle(AppTheme.ink)
+                    .lineLimit(2)
+                if !group.size.isEmpty {
+                    Text(group.size)
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(AppTheme.muted)
+                }
+                Text("En \(group.orderCount) pedido\(group.orderCount == 1 ? "" : "s")")
+                    .font(.caption2.weight(.bold))
+                    .foregroundStyle(AppTheme.mutedSoft)
+            }
+            Spacer()
+            Image(systemName: "chevron.right").foregroundStyle(AppTheme.mutedSoft)
+        }
+        .glassPanel(padding: 12, accent: AppTheme.blue)
+    }
+}
+
+struct GroupedPickingDetail: View {
+    @Environment(WorkshopStore.self) private var store
+    let group: GroupedPickingView.Group
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 14) {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(group.title)
+                        .font(.system(size: 24, weight: .heavy, design: .rounded))
+                        .foregroundStyle(AppTheme.ink)
+                    HStack(spacing: 6) {
+                        Tag(text: "×\(group.totalQuantity) ud", systemImage: "number")
+                        if !group.size.isEmpty { Tag(text: group.size, systemImage: "ruler.fill") }
+                        Tag(text: "\(group.orderCount) pedidos", systemImage: "shippingbox.fill")
+                    }
+                }
+                .glassPanel(padding: 16, accent: AppTheme.blue)
+
+                SectionHeader(title: "Pedidos del lote", subtitle: "Toca un pedido para abrirlo y marcarlo preparado.")
+
+                LazyVStack(spacing: 10) {
+                    ForEach(Array(group.orders.enumerated()), id: \.offset) { _, entry in
+                        NavigationLink(value: entry.order) {
+                            HStack(spacing: 12) {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(entry.order.number)
+                                        .font(.headline.weight(.heavy))
+                                        .foregroundStyle(AppTheme.ink)
+                                    Text(entry.order.customer)
+                                        .font(.caption)
+                                        .foregroundStyle(AppTheme.muted)
+                                        .lineLimit(1)
+                                }
+                                Spacer()
+                                Text("×\(entry.qty)")
+                                    .font(.headline.weight(.heavy))
+                                    .foregroundStyle(AppTheme.blue)
+                                PriorityBadge(priority: entry.order.priority)
+                            }
+                            .glassPanel(padding: 12, accent: entry.order.priority.color)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+            }
+            .padding()
+        }
+        .screenBackground()
+        .navigationTitle("Lote")
+        .navigationBarTitleDisplayMode(.inline)
+        .navigationDestination(for: WorkshopOrder.self) { order in
+            OrderPreparationDetailView(order: order)
         }
     }
 }
@@ -1827,6 +2034,7 @@ struct ShippingView: View {
                 .padding()
             }
             .screenBackground()
+            .globalSearch()
             .navigationTitle("Envios")
             .toolbar {
                 Button {
@@ -2100,6 +2308,7 @@ struct StockView: View {
                 .padding()
             }
             .screenBackground()
+            .globalSearch()
             .navigationTitle("Stock")
             .toolbar {
                 Button {
@@ -3527,6 +3736,7 @@ struct EconomicsView: View {
                 .padding()
             }
             .screenBackground()
+            .globalSearch()
             .navigationTitle("Economía")
             .toolbar {
                 Button { Task { await reload() } } label: {
@@ -3815,6 +4025,7 @@ struct FinalizedView: View {
                 .padding()
             }
             .screenBackground()
+            .globalSearch()
             .navigationTitle("Finalizados")
             .toolbar {
                 Button { Task { await reload() } } label: {
@@ -4076,6 +4287,272 @@ struct FinalizedDetailView: View {
             error = err.localizedDescription
         }
     }
+}
+
+struct GlobalSearchSheet: View {
+    @Environment(WorkshopStore.self) private var store
+    @Environment(\.dismiss) private var dismiss
+    @State private var query = ""
+
+    enum Result: Identifiable, Hashable {
+        case order(WorkshopOrder)
+        case task(WorkshopTask)
+        case stock(UUID)
+
+        var id: String {
+            switch self {
+            case .order(let o): "order-\(o.id)"
+            case .task(let t): "task-\(t.id)"
+            case .stock(let id): "stock-\(id)"
+            }
+        }
+    }
+
+    var trimmed: String { query.trimmingCharacters(in: .whitespacesAndNewlines) }
+
+    var orderHits: [WorkshopOrder] {
+        guard !trimmed.isEmpty else { return [] }
+        return store.orders.filter { matchesOrder($0, query: trimmed) }
+            .prefix(20).map { $0 }
+    }
+
+    var taskHits: [WorkshopTask] {
+        guard !trimmed.isEmpty else { return [] }
+        return store.tasks.filter { matchesTask($0, query: trimmed) }
+            .prefix(20).map { $0 }
+    }
+
+    var stockHits: [StockRow] {
+        guard !trimmed.isEmpty else { return [] }
+        return store.stock.filter {
+            $0.sku.localizedCaseInsensitiveContains(trimmed) ||
+            $0.name.localizedCaseInsensitiveContains(trimmed) ||
+            $0.location.localizedCaseInsensitiveContains(trimmed)
+        }
+        .prefix(20).map { $0 }
+    }
+
+    var hasResults: Bool { !orderHits.isEmpty || !taskHits.isEmpty || !stockHits.isEmpty }
+
+    var body: some View {
+        NavigationStack {
+            ZStack {
+                AppTheme.canvasTop.ignoresSafeArea()
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 14) {
+                        HStack(spacing: 10) {
+                            Image(systemName: "magnifyingglass").foregroundStyle(AppTheme.muted)
+                            TextField("Pedido, cliente, SKU, tracking…", text: $query)
+                                .textInputAutocapitalization(.never)
+                                .submitLabel(.search)
+                            if !query.isEmpty {
+                                Button { query = "" } label: {
+                                    Image(systemName: "xmark.circle.fill").foregroundStyle(AppTheme.muted)
+                                }
+                                .buttonStyle(.plain)
+                            }
+                        }
+                        .padding(.horizontal, 12).padding(.vertical, 12)
+                        .background(AppTheme.surfaceSoft)
+                        .overlay(RoundedRectangle(cornerRadius: 12).stroke(AppTheme.line))
+                        .clipShape(RoundedRectangle(cornerRadius: 12))
+
+                        if trimmed.isEmpty {
+                            VStack(alignment: .leading, spacing: 6) {
+                                Text("Sugerencias")
+                                    .font(.caption.weight(.bold))
+                                    .foregroundStyle(AppTheme.muted)
+                                    .textCase(.uppercase)
+                                SuggestionChip("Nº pedido (ej. 9464)", icon: "shippingbox.fill")
+                                SuggestionChip("Cliente o email", icon: "person.fill")
+                                SuggestionChip("SKU o tracking", icon: "barcode")
+                            }
+                            .padding(.top, 6)
+                        }
+
+                        if !orderHits.isEmpty {
+                            SectionHeader(title: "Pedidos", subtitle: "\(orderHits.count) resultado\(orderHits.count == 1 ? "" : "s")")
+                            LazyVStack(spacing: 8) {
+                                ForEach(orderHits) { order in
+                                    NavigationLink(value: Result.order(order)) {
+                                        SearchOrderRow(order: order, query: trimmed)
+                                    }
+                                    .buttonStyle(.plain)
+                                }
+                            }
+                        }
+
+                        if !taskHits.isEmpty {
+                            SectionHeader(title: "Producción", subtitle: "\(taskHits.count) resultado\(taskHits.count == 1 ? "" : "s")")
+                            LazyVStack(spacing: 8) {
+                                ForEach(taskHits) { task in
+                                    NavigationLink(value: Result.task(task)) {
+                                        SearchTaskRow(task: task)
+                                    }
+                                    .buttonStyle(.plain)
+                                }
+                            }
+                        }
+
+                        if !stockHits.isEmpty {
+                            SectionHeader(title: "Stock", subtitle: "\(stockHits.count) resultado\(stockHits.count == 1 ? "" : "s")")
+                            LazyVStack(spacing: 8) {
+                                ForEach(stockHits) { row in
+                                    SearchStockRow(row: row)
+                                }
+                            }
+                        }
+
+                        if !trimmed.isEmpty && !hasResults {
+                            ContentUnavailableView(
+                                "Sin resultados",
+                                systemImage: "magnifyingglass",
+                                description: Text("No encontramos «\(trimmed)» en pedidos, producción o stock.")
+                            )
+                            .glassPanel()
+                        }
+                    }
+                    .padding()
+                }
+            }
+            .navigationTitle("Buscar")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Cerrar") { dismiss() }
+                }
+            }
+            .navigationDestination(for: Result.self) { result in
+                switch result {
+                case .order(let o): OrderPreparationDetailView(order: o)
+                case .task(let t): TaskDetailView(task: t)
+                case .stock: EmptyView()
+                }
+            }
+        }
+    }
+
+    private func matchesOrder(_ order: WorkshopOrder, query: String) -> Bool {
+        order.number.localizedCaseInsensitiveContains(query) ||
+        order.customer.localizedCaseInsensitiveContains(query) ||
+        order.shippingMethod.localizedCaseInsensitiveContains(query) ||
+        (order.tracking ?? "").localizedCaseInsensitiveContains(query) ||
+        order.items.contains {
+            $0.sku.localizedCaseInsensitiveContains(query) ||
+            $0.title.localizedCaseInsensitiveContains(query) ||
+            ($0.variantTitle ?? "").localizedCaseInsensitiveContains(query)
+        }
+    }
+
+    private func matchesTask(_ task: WorkshopTask, query: String) -> Bool {
+        task.orderNumber.localizedCaseInsensitiveContains(query) ||
+        task.productName.localizedCaseInsensitiveContains(query) ||
+        task.sku.localizedCaseInsensitiveContains(query)
+    }
+}
+
+struct SuggestionChip: View {
+    let text: String
+    let icon: String
+    init(_ text: String, icon: String) { self.text = text; self.icon = icon }
+    var body: some View {
+        Label(text, systemImage: icon)
+            .font(.caption.weight(.semibold))
+            .foregroundStyle(AppTheme.muted)
+            .padding(.horizontal, 12).padding(.vertical, 8)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(AppTheme.surfaceSoft)
+            .overlay(RoundedRectangle(cornerRadius: 10).stroke(AppTheme.lineSoft))
+            .clipShape(RoundedRectangle(cornerRadius: 10))
+    }
+}
+
+struct SearchOrderRow: View {
+    let order: WorkshopOrder
+    let query: String
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Image(systemName: "shippingbox.fill")
+                .foregroundStyle(order.priority.color)
+                .frame(width: 36, height: 36)
+                .background(order.priority.softColor)
+                .clipShape(RoundedRectangle(cornerRadius: 9))
+            VStack(alignment: .leading, spacing: 2) {
+                Text(order.number).font(.subheadline.weight(.heavy)).foregroundStyle(AppTheme.ink)
+                Text(order.customer).font(.caption).foregroundStyle(AppTheme.muted).lineLimit(1)
+            }
+            Spacer()
+            StatusChip(status: order.status)
+        }
+        .glassPanel(padding: 10, accent: order.priority.color)
+    }
+}
+
+struct SearchTaskRow: View {
+    let task: WorkshopTask
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Image(systemName: "hammer.fill")
+                .foregroundStyle(task.priority.color)
+                .frame(width: 36, height: 36)
+                .background(task.priority.softColor)
+                .clipShape(RoundedRectangle(cornerRadius: 9))
+            VStack(alignment: .leading, spacing: 2) {
+                Text(task.orderNumber).font(.subheadline.weight(.heavy)).foregroundStyle(AppTheme.ink)
+                Text(task.productName).font(.caption).foregroundStyle(AppTheme.muted).lineLimit(1)
+            }
+            Spacer()
+            PriorityBadge(priority: task.priority)
+        }
+        .glassPanel(padding: 10, accent: task.priority.color)
+    }
+}
+
+struct SearchStockRow: View {
+    let row: StockRow
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Image(systemName: "archivebox.fill")
+                .foregroundStyle(row.quantity <= row.minStock ? AppTheme.red : AppTheme.green)
+                .frame(width: 36, height: 36)
+                .background((row.quantity <= row.minStock ? AppTheme.redSoft : AppTheme.greenSoft))
+                .clipShape(RoundedRectangle(cornerRadius: 9))
+            VStack(alignment: .leading, spacing: 2) {
+                Text(row.name).font(.subheadline.weight(.heavy)).foregroundStyle(AppTheme.ink).lineLimit(1)
+                Text("\(row.sku) · \(row.location)").font(.caption).foregroundStyle(AppTheme.muted).lineLimit(1)
+            }
+            Spacer()
+            Text("×\(row.quantity)")
+                .font(.subheadline.weight(.heavy))
+                .foregroundStyle(row.quantity <= row.minStock ? AppTheme.red : AppTheme.ink)
+        }
+        .glassPanel(padding: 10)
+    }
+}
+
+struct GlobalSearchToolbarModifier: ViewModifier {
+    @State private var showing = false
+
+    func body(content: Content) -> some View {
+        content
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button { showing = true } label: {
+                        Image(systemName: "magnifyingglass")
+                    }
+                }
+            }
+            .sheet(isPresented: $showing) {
+                GlobalSearchSheet()
+            }
+    }
+}
+
+extension View {
+    func globalSearch() -> some View { modifier(GlobalSearchToolbarModifier()) }
 }
 
 #Preview {
