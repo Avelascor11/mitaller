@@ -1787,11 +1787,36 @@ struct RafagaErrorCard: View {
 struct ShippingView: View {
     @Environment(WorkshopStore.self) private var store
     @State private var scanningOrder: WorkshopOrder?
+    @State private var searchText = ""
 
-    var shippingOrders: [WorkshopOrder] {
+    var allShippingCandidates: [WorkshopOrder] {
         store.orders
             .filter { $0.status == .readyForLabel || $0.status == .labelCreated }
             .sorted { $0.deadline < $1.deadline }
+    }
+
+    // En envíos solo deben aparecer los que falten por crear etiqueta o por escanear.
+    // Cuando la etiqueta está creada Y escaneada (tracking ≠ nil) → al tab Finalizados.
+    var pendingShipping: [WorkshopOrder] {
+        allShippingCandidates.filter { $0.tracking == nil }
+    }
+
+    var filteredOrders: [WorkshopOrder] {
+        let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !query.isEmpty else { return pendingShipping }
+        return pendingShipping.filter { matchesSearch($0, query: query) }
+    }
+
+    private func matchesSearch(_ order: WorkshopOrder, query: String) -> Bool {
+        order.number.localizedCaseInsensitiveContains(query) ||
+        order.customer.localizedCaseInsensitiveContains(query) ||
+        order.shippingMethod.localizedCaseInsensitiveContains(query) ||
+        (order.tracking ?? "").localizedCaseInsensitiveContains(query) ||
+        order.items.contains {
+            $0.sku.localizedCaseInsensitiveContains(query) ||
+            $0.title.localizedCaseInsensitiveContains(query) ||
+            ($0.variantTitle ?? "").localizedCaseInsensitiveContains(query)
+        }
     }
 
     var body: some View {
@@ -1810,17 +1835,40 @@ struct ShippingView: View {
                     }
 
                     LazyVGrid(columns: [GridItem(.adaptive(minimum: 104), spacing: 10)], spacing: 10) {
-                        MetricTile(title: "Listos", value: shippingOrders.count, color: AppTheme.blue, icon: "shippingbox.fill")
-                        MetricTile(title: "Sin etiqueta", value: shippingOrders.filter { $0.tracking == nil }.count, color: AppTheme.amber, icon: "tag")
-                        MetricTile(title: "Imprimir", value: shippingOrders.filter { $0.printStatus == .pending }.count, color: AppTheme.magenta, icon: "printer.fill")
+                        MetricTile(title: "Pendientes", value: pendingShipping.count, color: AppTheme.blue, icon: "shippingbox.fill")
+                        MetricTile(title: "Sin etiqueta", value: pendingShipping.filter { $0.tracking == nil && $0.status == .readyForLabel }.count, color: AppTheme.amber, icon: "tag")
+                        MetricTile(title: "Imprimir", value: pendingShipping.filter { $0.printStatus == .pending }.count, color: AppTheme.magenta, icon: "printer.fill")
                     }
 
-                    if shippingOrders.isEmpty {
-                        ContentUnavailableView("Sin envios pendientes", systemImage: "checkmark.seal", description: Text("Cuando marques un pedido como preparado aparecera aqui."))
-                            .glassPanel(accent: AppTheme.green)
+                    HStack(spacing: 10) {
+                        Image(systemName: "magnifyingglass").foregroundStyle(AppTheme.muted)
+                        TextField("Buscar pedido, cliente, tracking o SKU", text: $searchText)
+                            .textInputAutocapitalization(.never)
+                        if !searchText.isEmpty {
+                            Button { searchText = "" } label: {
+                                Image(systemName: "xmark.circle.fill").foregroundStyle(AppTheme.muted)
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                    .padding(.horizontal, 12).padding(.vertical, 11)
+                    .background(AppTheme.surfaceSoft)
+                    .overlay(RoundedRectangle(cornerRadius: 12).stroke(AppTheme.line))
+                    .clipShape(RoundedRectangle(cornerRadius: 12))
+
+                    if filteredOrders.isEmpty {
+                        ContentUnavailableView(
+                            pendingShipping.isEmpty ? "Sin envíos pendientes" : "Sin resultados",
+                            systemImage: pendingShipping.isEmpty ? "checkmark.seal" : "magnifyingglass",
+                            description: Text(pendingShipping.isEmpty
+                                ? "Cuando marques un pedido como preparado aparecerá aquí. Los ya escaneados están en Finalizados."
+                                : "Ningún pedido coincide con «\(searchText)»."
+                            )
+                        )
+                        .glassPanel(accent: AppTheme.green)
                     } else {
                         LazyVStack(spacing: 14) {
-                            ForEach(shippingOrders) { order in
+                            ForEach(filteredOrders) { order in
                                 ShippingOrderCard(order: order, scanningOrder: $scanningOrder)
                             }
                         }
