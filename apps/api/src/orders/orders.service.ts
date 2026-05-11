@@ -46,11 +46,19 @@ export class OrdersService {
     });
   }
 
-  async markPrepared(id: string) {
+  async markPrepared(id: string, photoBase64?: string) {
     const existing = await this.findOne(id);
+    const photoBytes = this.decodePhoto(photoBase64);
+    const photoData = photoBytes
+      ? { packagePhoto: Uint8Array.from(photoBytes), packagePhotoAt: new Date() }
+      : {};
     const order = await this.prisma.order.update({
       where: { id: existing.id },
-      data: { operationalStatus: 'READY_FOR_LABEL' },
+      data: {
+        operationalStatus: 'READY_FOR_LABEL',
+        preparedAt: new Date(),
+        ...photoData
+      },
       include: { items: true, shipments: true }
     });
     await this.prisma.productionTask.updateMany({
@@ -60,6 +68,7 @@ export class OrdersService {
       },
       data: { status: 'DONE', completedAt: new Date() }
     });
+    await this.decrementStockFor(existing.id);
     await this.activity.log({
       entityType: 'Order',
       entityId: existing.id,
@@ -67,6 +76,59 @@ export class OrdersService {
       message: `Pedido ${existing.orderNumber} marcado como preparado`
     });
     return order;
+  }
+
+  async getPackagePhoto(id: string): Promise<Buffer | null> {
+    const order = await this.prisma.order.findFirst({
+      where: { OR: [{ id }, { orderNumber: id }, { shopifyOrderId: id }] },
+      select: { packagePhoto: true }
+    });
+    if (!order?.packagePhoto) return null;
+    return Buffer.from(order.packagePhoto as Buffer);
+  }
+
+  private decodePhoto(input?: string): Buffer | undefined {
+    if (!input) return undefined;
+    const stripped = input.replace(/^data:image\/[a-z]+;base64,/i, '');
+    try {
+      const buffer = Buffer.from(stripped, 'base64');
+      if (buffer.length < 200) return undefined;
+      return buffer;
+    } catch {
+      return undefined;
+    }
+  }
+
+  private async decrementStockFor(orderId: string) {
+    const items = await this.prisma.orderItem.findMany({ where: { orderId } });
+    for (const item of items) {
+      if (!item.sku || item.sku.startsWith('NO-SKU') || item.sku.includes('NO-STOCK')) continue;
+      const stockItem = await this.prisma.stockItem.findUnique({
+        where: { sku: item.sku },
+        include: { levels: { orderBy: { quantity: 'desc' } } }
+      });
+      if (!stockItem) continue;
+      let remaining = item.quantity;
+      for (const level of stockItem.levels) {
+        if (remaining <= 0) break;
+        const take = Math.min(level.quantity, remaining);
+        if (take <= 0) continue;
+        await this.prisma.stockLevel.update({
+          where: { id: level.id },
+          data: { quantity: level.quantity - take }
+        });
+        await this.prisma.stockMovement.create({
+          data: {
+            stockItemId: stockItem.id,
+            fromLocationId: level.locationId,
+            quantity: -take,
+            reason: 'ORDER_PREPARED',
+            relatedOrderId: orderId
+          }
+        });
+        remaining -= take;
+      }
+    }
   }
 
   async reopenPreparation(id: string) {

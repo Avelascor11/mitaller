@@ -70,10 +70,18 @@ struct APIClient {
         let _: EmptyResponse = try await perform(request)
     }
 
-    func markOrderPrepared(id: String) async throws -> WorkshopOrder {
-        let request = try jsonRequest(path: "/orders/\(id)/mark-prepared", method: "PATCH", body: EmptyBody())
+    func markOrderPrepared(id: String, photo: Data? = nil) async throws -> WorkshopOrder {
+        let request = try jsonRequest(
+            path: "/orders/\(id)/mark-prepared",
+            method: "PATCH",
+            body: MarkPreparedRequest(photoBase64: photo?.base64EncodedString())
+        )
         let response: OrderDTO = try await perform(request)
         return response.workshopOrder
+    }
+
+    func orderPackagePhotoURL(orderId: String) -> URL? {
+        URL(string: "/orders/\(Self.pathSegment(orderId))/package-photo", relativeTo: baseURL)?.absoluteURL
     }
 
     func reopenOrderPreparation(id: String) async throws -> WorkshopOrder {
@@ -214,6 +222,9 @@ private struct ManualPrintRequest: Encodable {
     let filename: String
     let pdfBase64: String
 }
+private struct MarkPreparedRequest: Encodable {
+    let photoBase64: String?
+}
 struct ManualPrintResponse: Decodable {
     let id: String
     let filename: String
@@ -299,6 +310,7 @@ struct FinalizedShipment: Decodable, Identifiable {
     let status: String
     let trackingStatus: String?
     let hasPhoto: Bool
+    let hasOrderPhoto: Bool?
     let packagePhotoAt: Date?
     let cost: Double?
     let createdAt: Date

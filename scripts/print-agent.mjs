@@ -154,12 +154,28 @@ async function markPrinted(shipmentId, result) {
   return response.json();
 }
 
+async function beep() {
+  if (DRY_RUN) return;
+  try {
+    if (process.platform === 'win32') {
+      await execFileAsync('powershell', ['-NoProfile', '-Command', '[console]::beep(1100,150); [console]::beep(1400,150)']);
+    } else if (process.platform === 'darwin') {
+      await execFileAsync('afplay', ['/System/Library/Sounds/Glass.aiff']);
+    } else {
+      process.stdout.write('\x07');
+    }
+  } catch {
+    process.stdout.write('\x07');
+  }
+}
+
 async function processShipment(shipment) {
   console.log(`Printing ${shipment.orderNumber} (${shipment.id})`);
   const file = await downloadLabel(shipment.labelUrl, shipment.orderNumber);
   const printResult = await printFile(file, shipment.orderNumber);
   await markPrinted(shipment.id, printResult);
   console.log(`Printed ${shipment.orderNumber}`);
+  await beep();
 }
 
 async function processManual(entry) {
@@ -168,6 +184,7 @@ async function processManual(entry) {
   const printResult = await printFile(file, entry.filename);
   await markManualDone(entry.id);
   console.log(`Printed manual ${entry.filename}`, printResult.dryRun ? '(dry-run)' : '');
+  await beep();
 }
 
 async function pollOnce() {

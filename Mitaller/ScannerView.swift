@@ -9,11 +9,13 @@ import UIKit
 
 struct BarcodeScannerView: UIViewControllerRepresentable {
     var capturesPhoto: Bool = false
+    var continuous: Bool = false
     var onCode: (String, Data?) -> Void
 
     func makeUIViewController(context: Context) -> ScannerViewController {
         let controller = ScannerViewController()
         controller.capturesPhoto = capturesPhoto
+        controller.continuous = continuous
         controller.onCode = onCode
         return controller
     }
@@ -23,11 +25,14 @@ struct BarcodeScannerView: UIViewControllerRepresentable {
 
 final class ScannerViewController: UIViewController, AVCaptureMetadataOutputObjectsDelegate, AVCapturePhotoCaptureDelegate {
     var capturesPhoto: Bool = false
+    var continuous: Bool = false
     var onCode: ((String, Data?) -> Void)?
     private let session = AVCaptureSession()
     private var previewLayer: AVCaptureVideoPreviewLayer?
     private let photoOutput = AVCapturePhotoOutput()
     private var pendingCode: String?
+    private var lastEmittedAt: Date = .distantPast
+    private var lastEmittedCode: String?
 
     override func viewDidLoad() {
         super.viewDidLoad()
@@ -116,9 +121,21 @@ final class ScannerViewController: UIViewController, AVCaptureMetadataOutputObje
     }
 
     func metadataOutput(_ output: AVCaptureMetadataOutput, didOutput metadataObjects: [AVMetadataObject], from connection: AVCaptureConnection) {
-        guard pendingCode == nil,
-              let object = metadataObjects.first as? AVMetadataMachineReadableCodeObject,
+        guard let object = metadataObjects.first as? AVMetadataMachineReadableCodeObject,
               let value = object.stringValue else { return }
+
+        if continuous {
+            let now = Date()
+            if value == lastEmittedCode && now.timeIntervalSince(lastEmittedAt) < 1.2 {
+                return
+            }
+            lastEmittedCode = value
+            lastEmittedAt = now
+            onCode?(value, nil)
+            return
+        }
+
+        guard pendingCode == nil else { return }
         pendingCode = value
 
         if capturesPhoto {

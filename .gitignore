@@ -10,3 +10,4 @@ coverage
 *.tsbuildinfo
 apps/api/generated
 apps/api/prisma/dev.db
+.claude/

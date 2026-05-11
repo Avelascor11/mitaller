@@ -1,5 +1,5 @@
-import { Body, Controller, Get, Headers, Param, Patch, Post, Req } from '@nestjs/common';
-import type { Request } from 'express';
+import { Body, Controller, Get, Headers, NotFoundException, Param, Patch, Post, Req, Res } from '@nestjs/common';
+import type { Request, Response } from 'express';
 import { OrdersService } from './orders.service';
 
 @Controller()
@@ -22,8 +22,17 @@ export class OrdersController {
   }
 
   @Patch('orders/:id/mark-prepared')
-  markPrepared(@Param('id') id: string) {
-    return this.orders.markPrepared(id);
+  markPrepared(@Param('id') id: string, @Body() body?: { photoBase64?: string }) {
+    return this.orders.markPrepared(id, body?.photoBase64);
+  }
+
+  @Get('orders/:id/package-photo')
+  async getPackagePhoto(@Param('id') id: string, @Res() res: Response) {
+    const photo = await this.orders.getPackagePhoto(id);
+    if (!photo) throw new NotFoundException('Sin foto');
+    res.setHeader('Content-Type', 'image/jpeg');
+    res.setHeader('Cache-Control', 'private, max-age=3600');
+    res.send(photo);
   }
 
   @Patch('orders/:id/reopen-preparation')

@@ -127,6 +127,9 @@ model Order {
   totalDiscount       Float?
   totalPrice          Float?
   currency            String?
+  packagePhoto        Bytes?
+  packagePhotoAt      DateTime?
+  preparedAt          DateTime?
   createdAt           DateTime           @default(now())
   updatedAt           DateTime           @updatedAt
   items               OrderItem[]

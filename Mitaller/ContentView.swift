@@ -6,6 +6,7 @@
 //
 
 import SwiftUI
+import UIKit
 import UniformTypeIdentifiers
 
 enum AppTheme {
@@ -759,11 +760,11 @@ final class WorkshopStore {
         }
     }
 
-    func markPreparedRemote(_ order: WorkshopOrder) async {
+    func markPreparedRemote(_ order: WorkshopOrder, photo: Data? = nil) async {
         markPrepared(order)
         guard let client = apiClient else { return }
         do {
-            let updated = try await client.markOrderPrepared(id: order.remoteID ?? order.number)
+            let updated = try await client.markOrderPrepared(id: order.remoteID ?? order.number, photo: photo)
             if let index = orders.firstIndex(where: { $0.id == order.id }) {
                 orders[index] = updated
             }
@@ -1016,41 +1017,33 @@ struct ManualPrintStep: View {
 struct DashboardView: View {
     @Environment(WorkshopStore.self) private var store
 
+    var pendingToday: [WorkshopOrder] {
+        OrderSort.smart.sort(store.pendingPreparationOrders)
+    }
+
     var body: some View {
         NavigationStack {
             ScrollView {
-                VStack(alignment: .leading, spacing: 18) {
+                VStack(alignment: .leading, spacing: 16) {
                     SyncStatusView()
-                    DashboardHeroView()
-                    if let nextOrder = store.pendingPreparationOrders.first {
-                        VStack(alignment: .leading, spacing: 10) {
-                            SectionHeader(title: "Siguiente pedido", subtitle: "La accion mas urgente ahora mismo")
-                            NavigationLink(value: nextOrder) {
-                                PendingOrderRow(order: nextOrder, showsAction: false) {}
-                                    .glassPanel(padding: 14, accent: nextOrder.priority.color)
+                    TodayHeader(remaining: pendingToday.count, critical: store.urgentPendingOrders)
+
+                    if pendingToday.isEmpty {
+                        TodayEmptyState()
+                    } else {
+                        SectionHeader(title: "A preparar hoy", subtitle: "Tap en cada uno para verlo. Empieza por el de arriba.")
+                        ForEach(pendingToday) { order in
+                            NavigationLink(value: order) {
+                                TodayOrderCard(order: order)
                             }
                             .buttonStyle(.plain)
                         }
-                    }
-                    LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 12) {
-                        MetricTile(title: "Urgentes", value: store.urgentPendingOrders, color: AppTheme.magenta, icon: "flame.fill")
-                        MetricTile(title: "Altas", value: store.highPendingOrders, color: AppTheme.amber, icon: "arrow.up.circle.fill")
-                        MetricTile(title: "Bloqueados", value: store.blockedOrders, color: .red, icon: "exclamationmark.triangle.fill")
-                        MetricTile(title: "Sin preparar", value: store.pendingPreparationOrders.count, color: AppTheme.purple, icon: "shippingbox.fill")
-                    }
-                    SectionHeader(title: "Cola urgente", subtitle: "Pedidos sin preparar ordenados por prioridad")
-                    ForEach(store.pendingPreparationOrders.prefix(4)) { order in
-                        NavigationLink(value: order) {
-                            PendingOrderRow(order: order, showsAction: false) {}
-                                .glassPanel(padding: 14, accent: order.priority.color)
-                        }
-                        .buttonStyle(.plain)
                     }
                 }
                 .padding()
             }
             .screenBackground()
-            .navigationTitle("Taller")
+            .navigationTitle("Hoy")
             .toolbar {
                 Button {
                     Task { await store.syncFromAPI() }
@@ -1069,6 +1062,123 @@ struct DashboardView: View {
                 OrderPreparationDetailView(order: order)
             }
         }
+    }
+}
+
+struct TodayHeader: View {
+    let remaining: Int
+    let critical: Int
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .firstTextBaseline) {
+                Text("Plan del día")
+                    .font(.system(size: 28, weight: .heavy, design: .rounded))
+                    .foregroundStyle(AppTheme.ink)
+                Spacer()
+                Text(Date().formatted(.dateTime.weekday(.wide).day().month(.abbreviated)))
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(AppTheme.muted)
+                    .textCase(.uppercase)
+            }
+            HStack(spacing: 8) {
+                TodayPill(value: "\(remaining)", label: "Por preparar", color: AppTheme.blue, soft: AppTheme.blueSoft, icon: "shippingbox.fill")
+                TodayPill(value: "\(critical)", label: "Críticos", color: AppTheme.red, soft: AppTheme.redSoft, icon: "flame.fill")
+            }
+        }
+        .glassPanel(padding: 18)
+    }
+}
+
+struct TodayPill: View {
+    let value: String
+    let label: String
+    let color: Color
+    let soft: Color
+    let icon: String
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Image(systemName: icon)
+                .font(.system(size: 14, weight: .bold))
+                .foregroundStyle(color)
+                .frame(width: 30, height: 30)
+                .background(soft)
+                .clipShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
+            VStack(alignment: .leading, spacing: 0) {
+                Text(value)
+                    .font(.system(size: 20, weight: .heavy, design: .rounded))
+                    .foregroundStyle(AppTheme.ink)
+                Text(label.uppercased())
+                    .font(.caption2.weight(.bold))
+                    .tracking(0.4)
+                    .foregroundStyle(AppTheme.muted)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 12).padding(.vertical, 8)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(AppTheme.surfaceSoft)
+        .overlay(RoundedRectangle(cornerRadius: 12).stroke(AppTheme.lineSoft))
+        .clipShape(RoundedRectangle(cornerRadius: 12))
+    }
+}
+
+struct TodayEmptyState: View {
+    var body: some View {
+        VStack(spacing: 12) {
+            Image(systemName: "checkmark.seal.fill")
+                .font(.system(size: 60))
+                .foregroundStyle(AppTheme.green)
+            Text("Día terminado")
+                .font(.title2.weight(.heavy))
+                .foregroundStyle(AppTheme.ink)
+            Text("No quedan pedidos por preparar. Buen trabajo.")
+                .font(.subheadline)
+                .foregroundStyle(AppTheme.muted)
+                .multilineTextAlignment(.center)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 40)
+        .glassPanel(padding: 24, accent: AppTheme.green)
+    }
+}
+
+struct TodayOrderCard: View {
+    let order: WorkshopOrder
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Image(systemName: order.shippingCategory == .premium ? "bolt.fill" : order.shippingCategory == .free ? "gift.fill" : "shippingbox.fill")
+                .font(.title3.weight(.bold))
+                .foregroundStyle(order.priority.color)
+                .frame(width: 42, height: 42)
+                .background(order.priority.softColor)
+                .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+            VStack(alignment: .leading, spacing: 3) {
+                HStack {
+                    Text(order.number)
+                        .font(.headline.weight(.heavy))
+                        .foregroundStyle(AppTheme.ink)
+                    Spacer()
+                    PriorityBadge(priority: order.priority)
+                }
+                Text(order.customer)
+                    .font(.caption)
+                    .foregroundStyle(AppTheme.muted)
+                    .lineLimit(1)
+                HStack(spacing: 6) {
+                    Label("\(order.totalUnits) ud", systemImage: "number")
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(AppTheme.muted)
+                    Text("·").foregroundStyle(AppTheme.muted)
+                    Text(order.shippingCategory.rawValue)
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(AppTheme.muted)
+                }
+            }
+        }
+        .glassPanel(padding: 12, accent: order.priority.color)
     }
 }
 
@@ -1287,6 +1397,7 @@ struct PickingView: View {
     @State private var priorityFilter: PriorityChoice = .all
     @State private var sort: OrderSort = .smart
     @State private var searchText = ""
+    @State private var rafagaActive = false
 
     var filteredOrders: [WorkshopOrder] {
         let filtered = store.pendingPreparationOrders
@@ -1443,12 +1554,19 @@ struct PickingView: View {
             .screenBackground()
             .navigationTitle("Sin preparar")
             .toolbar {
-                Button {
-                    Task { await store.syncFromAPI() }
-                } label: {
-                    Image(systemName: "arrow.clockwise")
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button { rafagaActive = true } label: {
+                        Image(systemName: "barcode.viewfinder")
+                    }
                 }
-                .disabled(store.isLoading)
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button {
+                        Task { await store.syncFromAPI() }
+                    } label: {
+                        Image(systemName: "arrow.clockwise")
+                    }
+                    .disabled(store.isLoading)
+                }
             }
             .refreshable {
                 await store.syncFromAPI()
@@ -1456,7 +1574,177 @@ struct PickingView: View {
             .navigationDestination(for: WorkshopOrder.self) { order in
                 OrderPreparationDetailView(order: order)
             }
+            .fullScreenCover(isPresented: $rafagaActive) {
+                RafagaPickingView(orders: store.pendingPreparationOrders)
+            }
         }
+    }
+}
+
+struct RafagaPickingView: View {
+    @Environment(WorkshopStore.self) private var store
+    @Environment(\.dismiss) private var dismiss
+    let orders: [WorkshopOrder]
+    @State private var preparedIDs: Set<UUID> = []
+    @State private var lastScan: String?
+    @State private var lastMatch: WorkshopOrder?
+    @State private var lastError: String?
+    @State private var locked = false
+
+    var pending: [WorkshopOrder] {
+        OrderSort.smart.sort(orders.filter { !preparedIDs.contains($0.id) })
+    }
+
+    var body: some View {
+        NavigationStack {
+            ZStack(alignment: .bottom) {
+                BarcodeScannerKey(active: !locked) { code in
+                    handleScan(code)
+                }
+                .ignoresSafeArea()
+
+                VStack(spacing: 12) {
+                    if let match = lastMatch {
+                        RafagaMatchCard(order: match)
+                            .transition(.move(edge: .top).combined(with: .opacity))
+                    } else if let err = lastError {
+                        RafagaErrorCard(message: err, scanned: lastScan ?? "")
+                    } else {
+                        VStack(spacing: 4) {
+                            Text("Modo ráfaga")
+                                .font(.headline.weight(.heavy))
+                                .foregroundStyle(.white)
+                            Text("Escanea SKUs o números de pedido. Cada acierto marca preparado.")
+                                .font(.caption)
+                                .foregroundStyle(.white.opacity(0.8))
+                                .multilineTextAlignment(.center)
+                        }
+                        .padding(.horizontal)
+                    }
+                    VStack(spacing: 6) {
+                        Text("\(pending.count) por preparar")
+                            .font(.caption.weight(.bold))
+                            .foregroundStyle(.white)
+                        if pending.isEmpty {
+                            Text("✓ Cola limpia")
+                                .font(.title3.weight(.heavy))
+                                .foregroundStyle(.white)
+                        }
+                    }
+                }
+                .padding()
+                .frame(maxWidth: .infinity)
+                .background(Color.black.opacity(0.55))
+                .padding(.bottom, 40)
+            }
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button("Salir") { dismiss() }
+                        .foregroundStyle(.white)
+                }
+            }
+            .toolbarBackground(.black, for: .navigationBar)
+            .toolbarColorScheme(.dark, for: .navigationBar)
+        }
+        .preferredColorScheme(.dark)
+    }
+
+    private func handleScan(_ code: String) {
+        guard !locked else { return }
+        let trimmed = code.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        if trimmed == lastScan { return }
+        lastScan = trimmed
+        let lowered = trimmed.lowercased()
+        if let match = pending.first(where: { order in
+            order.number.lowercased() == lowered
+                || order.number.lowercased() == "#" + lowered
+                || ("#" + order.number.lowercased()) == lowered
+                || order.items.contains { $0.sku.lowercased() == lowered }
+        }) {
+            locked = true
+            lastMatch = match
+            lastError = nil
+            UINotificationFeedbackGenerator().notificationOccurred(.success)
+            preparedIDs.insert(match.id)
+            Task {
+                await store.markPreparedRemote(match)
+                try? await Task.sleep(for: .milliseconds(900))
+                lastMatch = nil
+                locked = false
+            }
+        } else {
+            lastError = "Sin coincidencia"
+            lastMatch = nil
+            UINotificationFeedbackGenerator().notificationOccurred(.error)
+            Task {
+                try? await Task.sleep(for: .seconds(1))
+                if lastScan == trimmed { lastError = nil; lastScan = nil }
+            }
+        }
+    }
+}
+
+struct BarcodeScannerKey: View {
+    let active: Bool
+    var onCode: (String) -> Void
+
+    var body: some View {
+        BarcodeScannerView(capturesPhoto: false, continuous: true) { code, _ in
+            if active { onCode(code) }
+        }
+    }
+}
+
+struct RafagaMatchCard: View {
+    let order: WorkshopOrder
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Image(systemName: "checkmark.seal.fill")
+                .font(.title)
+                .foregroundStyle(AppTheme.green)
+            VStack(alignment: .leading) {
+                Text(order.number)
+                    .font(.title3.weight(.heavy))
+                    .foregroundStyle(.white)
+                Text(order.customer)
+                    .font(.caption)
+                    .foregroundStyle(.white.opacity(0.8))
+            }
+            Spacer()
+        }
+        .padding()
+        .background(AppTheme.green.opacity(0.35))
+        .clipShape(RoundedRectangle(cornerRadius: 14))
+        .padding(.horizontal)
+    }
+}
+
+struct RafagaErrorCard: View {
+    let message: String
+    let scanned: String
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Image(systemName: "exclamationmark.octagon.fill")
+                .font(.title)
+                .foregroundStyle(AppTheme.red)
+            VStack(alignment: .leading) {
+                Text(message)
+                    .font(.headline.weight(.heavy))
+                    .foregroundStyle(.white)
+                Text(scanned)
+                    .font(.caption)
+                    .foregroundStyle(.white.opacity(0.8))
+            }
+            Spacer()
+        }
+        .padding()
+        .background(AppTheme.red.opacity(0.35))
+        .clipShape(RoundedRectangle(cornerRadius: 14))
+        .padding(.horizontal)
     }
 }
 
@@ -2316,6 +2604,7 @@ struct FlowChips<Content: View>: View {
 struct OrderPreparationDetailView: View {
     @Environment(WorkshopStore.self) private var store
     @State private var showingPrepareConfirmation = false
+    @State private var showingPhotoCapture = false
     let order: WorkshopOrder
 
     var currentOrder: WorkshopOrder {
@@ -2445,11 +2734,76 @@ struct OrderPreparationDetailView: View {
         .navigationBarTitleDisplayMode(.inline)
         .alert("Confirmar pedido preparado", isPresented: $showingPrepareConfirmation) {
             Button("Cancelar", role: .cancel) {}
-            Button("Sí, está todo dentro") {
+            Button("Sí, hacer foto y cerrar") {
+                showingPhotoCapture = true
+            }
+            Button("Sin foto", role: .destructive) {
                 Task { await store.markPreparedRemote(currentOrder) }
             }
         } message: {
             Text(prepareConfirmationMessage)
+        }
+        .sheet(isPresented: $showingPhotoCapture) {
+            NavigationStack {
+                PackagePhotoCaptureView(order: currentOrder) { photo in
+                    showingPhotoCapture = false
+                    Task { await store.markPreparedRemote(currentOrder, photo: photo) }
+                }
+                .navigationTitle("Foto del paquete")
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    Button("Cancelar") { showingPhotoCapture = false }
+                }
+            }
+        }
+    }
+}
+
+struct PackagePhotoCaptureView: UIViewControllerRepresentable {
+    let order: WorkshopOrder
+    var onPhoto: (Data?) -> Void
+
+    func makeCoordinator() -> Coordinator { Coordinator(onPhoto: onPhoto) }
+
+    func makeUIViewController(context: Context) -> UIImagePickerController {
+        let picker = UIImagePickerController()
+        if UIImagePickerController.isSourceTypeAvailable(.camera) {
+            picker.sourceType = .camera
+            picker.cameraCaptureMode = .photo
+        } else {
+            picker.sourceType = .photoLibrary
+        }
+        picker.allowsEditing = false
+        picker.delegate = context.coordinator
+        return picker
+    }
+
+    func updateUIViewController(_ uiViewController: UIImagePickerController, context: Context) {}
+
+    final class Coordinator: NSObject, UIImagePickerControllerDelegate, UINavigationControllerDelegate {
+        let onPhoto: (Data?) -> Void
+        init(onPhoto: @escaping (Data?) -> Void) { self.onPhoto = onPhoto }
+
+        func imagePickerController(_ picker: UIImagePickerController, didFinishPickingMediaWithInfo info: [UIImagePickerController.InfoKey : Any]) {
+            let image = info[.originalImage] as? UIImage
+            let data = Self.compressedJPEG(image)
+            picker.dismiss(animated: true) { self.onPhoto(data) }
+        }
+
+        func imagePickerControllerDidCancel(_ picker: UIImagePickerController) {
+            picker.dismiss(animated: true) { self.onPhoto(nil) }
+        }
+
+        private static func compressedJPEG(_ image: UIImage?) -> Data? {
+            guard let image else { return nil }
+            let maxDimension: CGFloat = 1280
+            let scale = min(1, maxDimension / max(image.size.width, image.size.height))
+            let newSize = CGSize(width: image.size.width * scale, height: image.size.height * scale)
+            UIGraphicsBeginImageContextWithOptions(newSize, true, 1)
+            image.draw(in: CGRect(origin: .zero, size: newSize))
+            let resized = UIGraphicsGetImageFromCurrentImageContext()
+            UIGraphicsEndImageContext()
+            return (resized ?? image).jpegData(compressionQuality: 0.6)
         }
     }
 }

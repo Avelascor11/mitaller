@@ -203,7 +203,9 @@ export class ShipmentsService {
   async findFinalized() {
     const shipments = await this.prisma.shipment.findMany({
       where: { status: { in: ['LABEL_CREATED', 'PRINTED', 'IN_TRANSIT', 'DELIVERED'] } },
-      include: { order: true },
+      include: {
+        order: { select: { id: true, orderNumber: true, customerName: true, shippingMethod: true, packagePhoto: true, packagePhotoAt: true } }
+      },
       orderBy: { updatedAt: 'desc' },
       take: 200
     });
@@ -219,7 +221,8 @@ export class ShipmentsService {
       status: shipment.status,
       trackingStatus: shipment.trackingStatus,
       hasPhoto: Boolean(shipment.packagePhoto),
-      packagePhotoAt: shipment.packagePhotoAt,
+      hasOrderPhoto: Boolean(shipment.order.packagePhoto),
+      packagePhotoAt: shipment.packagePhotoAt ?? shipment.order.packagePhotoAt ?? null,
       cost: shipment.cost,
       createdAt: shipment.createdAt,
       updatedAt: shipment.updatedAt
