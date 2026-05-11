@@ -36,6 +36,17 @@ struct APIClient {
     var baseURL: URL
     var token: String? = nil
 
+    static let shared: URLSession = {
+        let config = URLSessionConfiguration.default
+        config.httpMaximumConnectionsPerHost = 8
+        config.requestCachePolicy = .useProtocolCachePolicy
+        config.urlCache = URLCache(memoryCapacity: 32 * 1024 * 1024, diskCapacity: 256 * 1024 * 1024, diskPath: "mitaller-http")
+        config.waitsForConnectivity = true
+        config.timeoutIntervalForRequest = 12
+        config.timeoutIntervalForResource = 30
+        return URLSession(configuration: config)
+    }()
+
     func fetchSnapshot() async throws -> APISnapshot {
         async let orders: [OrderDTO] = get("/orders")
         async let tasks: [TaskDTO] = get("/production/tasks/priority-queue")
@@ -179,7 +190,7 @@ struct APIClient {
     }
 
     private func perform<T: Decodable>(_ request: URLRequest) async throws -> T {
-        let (data, response) = try await URLSession.shared.data(for: request)
+        let (data, response) = try await Self.shared.data(for: request)
         guard let http = response as? HTTPURLResponse else {
             throw APIClientError.invalidResponse
         }

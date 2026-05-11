@@ -12,6 +12,11 @@ import UIKit
 struct MitallerApp: App {
     init() {
         configureAppearance()
+        configureCaches()
+    }
+
+    private func configureCaches() {
+        URLCache.shared = URLCache(memoryCapacity: 64 * 1024 * 1024, diskCapacity: 512 * 1024 * 1024, diskPath: "mitaller-shared-cache")
     }
 
     var body: some Scene {

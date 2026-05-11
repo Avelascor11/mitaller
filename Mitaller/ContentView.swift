@@ -819,6 +819,7 @@ final class WorkshopStore {
 
 struct ContentView: View {
     @State private var store = WorkshopStore()
+    @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
         MainTabView()
@@ -828,10 +829,17 @@ struct ContentView: View {
             .task {
                 await store.bootstrap()
             }
-            .task {
+            .task(id: scenePhase) {
+                guard scenePhase == .active else { return }
                 while !Task.isCancelled {
-                    try? await Task.sleep(for: .seconds(10))
+                    try? await Task.sleep(for: .seconds(25))
+                    if scenePhase != .active { break }
                     await store.syncQuietlyIfIdle()
+                }
+            }
+            .onChange(of: scenePhase) { _, new in
+                if new == .active {
+                    Task { await store.syncQuietlyIfIdle() }
                 }
             }
     }
@@ -1054,11 +1062,13 @@ struct DashboardView: View {
                         TodayEmptyState()
                     } else {
                         SectionHeader(title: "A preparar hoy", subtitle: "Tap en cada uno para verlo. Empieza por el de arriba.")
-                        ForEach(pendingToday) { order in
-                            NavigationLink(value: order) {
-                                TodayOrderCard(order: order)
+                        LazyVStack(spacing: 10) {
+                            ForEach(pendingToday) { order in
+                                NavigationLink(value: order) {
+                                    TodayOrderCard(order: order)
+                                }
+                                .buttonStyle(.plain)
                             }
-                            .buttonStyle(.plain)
                         }
                     }
                 }
@@ -1562,12 +1572,14 @@ struct PickingView: View {
                         ContentUnavailableView("Nada pendiente", systemImage: "checkmark.circle.fill", description: Text("No hay pedidos con estos filtros."))
                             .glassPanel()
                     } else {
-                        ForEach(filteredOrders) { order in
-                            NavigationLink(value: order) {
-                                PendingOrderRow(order: order, showsAction: false) {}
-                                    .glassPanel(padding: 14, accent: order.priority.color)
+                        LazyVStack(spacing: 12) {
+                            ForEach(filteredOrders) { order in
+                                NavigationLink(value: order) {
+                                    PendingOrderRow(order: order, showsAction: false) {}
+                                        .glassPanel(padding: 14, accent: order.priority.color)
+                                }
+                                .buttonStyle(.plain)
                             }
-                            .buttonStyle(.plain)
                         }
                     }
                 }
@@ -3784,11 +3796,13 @@ struct FinalizedView: View {
                         )
                         .glassPanel()
                     } else {
-                        ForEach(filtered) { shipment in
-                            NavigationLink(value: shipment) {
-                                FinalizedRow(shipment: shipment)
+                        LazyVStack(spacing: 10) {
+                            ForEach(filtered) { shipment in
+                                NavigationLink(value: shipment) {
+                                    FinalizedRow(shipment: shipment)
+                                }
+                                .buttonStyle(.plain)
                             }
-                            .buttonStyle(.plain)
                         }
                     }
 

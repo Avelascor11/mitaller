@@ -23,7 +23,7 @@ export class OrdersService {
       orderBy: [{ priorityLevel: 'asc' }, { internalDeadlineAt: 'asc' }],
       include: { items: true, shipments: true }
     });
-    return this.filterByMinimumOrderNumber(orders);
+    return this.filterByMinimumOrderNumber(orders.map((order) => this.stripBlobs(order)));
   }
 
   async findPendingPreparation() {
@@ -36,14 +36,25 @@ export class OrdersService {
       orderBy: [{ priorityLevel: 'asc' }, { internalDeadlineAt: 'asc' }, { orderedAt: 'asc' }],
       include: { items: true, shipments: true }
     });
-    return this.filterByMinimumOrderNumber(orders);
+    return this.filterByMinimumOrderNumber(orders.map((order) => this.stripBlobs(order)));
   }
 
-  findOne(id: string) {
-    return this.prisma.order.findFirstOrThrow({
+  async findOne(id: string) {
+    const order = await this.prisma.order.findFirstOrThrow({
       where: { OR: [{ id }, { orderNumber: id }, { shopifyOrderId: id }] },
       include: { items: true, productionTasks: true, shipments: true }
     });
+    return this.stripBlobs(order);
+  }
+
+  private stripBlobs<T extends { packagePhoto?: unknown; shipments?: Array<{ packagePhoto?: unknown }> }>(order: T): T {
+    if ('packagePhoto' in order) (order as { packagePhoto?: unknown }).packagePhoto = undefined;
+    if (Array.isArray(order.shipments)) {
+      for (const shipment of order.shipments) {
+        if (shipment && 'packagePhoto' in shipment) (shipment as { packagePhoto?: unknown }).packagePhoto = undefined;
+      }
+    }
+    return order;
   }
 
   async markPrepared(id: string, photoBase64?: string) {
