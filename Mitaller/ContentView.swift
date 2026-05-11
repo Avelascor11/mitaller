@@ -3882,7 +3882,7 @@ struct FinalizedRow: View {
                         .lineLimit(1)
                 }
                 if let live = shipment.trackingStatus, !live.isEmpty {
-                    Text(live)
+                    Text(translateShipmentStatus(live))
                         .font(.caption2.weight(.semibold))
                         .foregroundStyle(AppTheme.muted)
                         .lineLimit(1)
@@ -3903,20 +3903,42 @@ struct FinalizedRow: View {
     private var statusBadge: some View {
         let raw = shipment.status.uppercased()
         let color: Color
+        let label: String
         switch raw {
-        case "DELIVERED", "SHIPPED": color = AppTheme.green
-        case "IN_TRANSIT": color = AppTheme.blue
-        case "PRINTED": color = AppTheme.teal
-        default: color = AppTheme.amber
+        case "DELIVERED": label = "ENTREGADO"; color = AppTheme.green
+        case "SHIPPED": label = "ENVIADO"; color = AppTheme.green
+        case "IN_TRANSIT": label = "EN TRÁNSITO"; color = AppTheme.blue
+        case "PRINTED": label = "IMPRESA"; color = AppTheme.teal
+        case "LABEL_CREATED": label = "ETIQUETA CREADA"; color = AppTheme.amber
+        case "PARCEL_CREATED": label = "PAQUETE CREADO"; color = AppTheme.amber
+        case "PENDING": label = "PENDIENTE"; color = AppTheme.muted
+        case "CANCELLED": label = "CANCELADO"; color = AppTheme.muted
+        case "ERROR": label = "ERROR"; color = AppTheme.red
+        default: label = raw.replacingOccurrences(of: "_", with: " "); color = AppTheme.amber
         }
         return StatusPill(
-            text: raw,
+            text: label,
             systemImage: "circle.fill",
             foreground: color,
             background: color.opacity(0.18),
             border: color.opacity(0.25),
             compact: true
         )
+    }
+}
+
+func translateShipmentStatus(_ raw: String) -> String {
+    switch raw.uppercased() {
+    case "DELIVERED": return "Entregado"
+    case "SHIPPED": return "Enviado"
+    case "IN_TRANSIT": return "En tránsito"
+    case "PRINTED": return "Etiqueta impresa"
+    case "LABEL_CREATED": return "Etiqueta creada"
+    case "PARCEL_CREATED": return "Paquete creado"
+    case "PENDING": return "Pendiente"
+    case "CANCELLED": return "Cancelado"
+    case "ERROR": return "Error"
+    default: return raw.replacingOccurrences(of: "_", with: " ").capitalized
     }
 }
 
@@ -4002,7 +4024,7 @@ struct FinalizedDetailView: View {
         } else if let track = tracking {
             VStack(alignment: .leading, spacing: 10) {
                 if let status = track.status, !status.isEmpty {
-                    Label(status, systemImage: "shippingbox.fill")
+                    Label(translateShipmentStatus(status), systemImage: "shippingbox.fill")
                         .font(.headline.weight(.bold))
                         .foregroundStyle(AppTheme.ink)
                 }
@@ -4019,7 +4041,7 @@ struct FinalizedDetailView: View {
                         HStack(alignment: .top, spacing: 10) {
                             Circle().fill(AppTheme.teal).frame(width: 8, height: 8).padding(.top, 6)
                             VStack(alignment: .leading, spacing: 2) {
-                                Text(event.status ?? event.message ?? "Evento")
+                                Text(translateShipmentStatus(event.status ?? event.message ?? "Evento"))
                                     .font(.subheadline.weight(.semibold))
                                     .foregroundStyle(AppTheme.ink)
                                 if let at = event.at {
