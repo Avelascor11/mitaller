@@ -819,24 +819,164 @@ struct MainTabView: View {
         TabView {
             DashboardView()
                 .tabItem { Label("Inicio", systemImage: "house.fill") }
-            PickingView()
-                .tabItem { Label("Sin preparar", systemImage: "shippingbox.fill") }
-            ShippingView()
-                .tabItem { Label("Envios", systemImage: "truck.box.fill") }
-            StockView()
+            PedidosContainerView()
+                .tabItem { Label("Pedidos", systemImage: "shippingbox.fill") }
+            StockContainerView()
                 .tabItem { Label("Stock", systemImage: "barcode.viewfinder") }
-            PurchaseMatrixView()
-                .tabItem { Label("Compras", systemImage: "cart.badge.plus") }
-            FinalizedView()
-                .tabItem { Label("Finalizados", systemImage: "checkmark.seal.fill") }
-            ManualPrintView()
-                .tabItem { Label("Imprimir", systemImage: "printer.fill") }
             EconomicsView()
                 .tabItem { Label("Economía", systemImage: "eurosign.circle.fill") }
-            AdminView()
-                .tabItem { Label("Admin", systemImage: "chart.bar.xaxis") }
+            MasView()
+                .tabItem { Label("Más", systemImage: "square.grid.2x2.fill") }
         }
         .tint(AppTheme.blue)
+    }
+}
+
+struct PedidosContainerView: View {
+    enum Section: String, CaseIterable, Identifiable {
+        case pending = "Sin preparar"
+        case shipping = "Envíos"
+        case finalized = "Finalizados"
+        var id: String { rawValue }
+        var icon: String {
+            switch self {
+            case .pending: "shippingbox.fill"
+            case .shipping: "truck.box.fill"
+            case .finalized: "checkmark.seal.fill"
+            }
+        }
+    }
+
+    @State private var section: Section = .pending
+
+    var body: some View {
+        VStack(spacing: 0) {
+            Picker("Sección", selection: $section) {
+                ForEach(Section.allCases) { item in
+                    Label(item.rawValue, systemImage: item.icon).tag(item)
+                }
+            }
+            .pickerStyle(.segmented)
+            .padding(.horizontal)
+            .padding(.top, 8)
+
+            switch section {
+            case .pending: PickingView()
+            case .shipping: ShippingView()
+            case .finalized: FinalizedView()
+            }
+        }
+    }
+}
+
+struct StockContainerView: View {
+    enum Section: String, CaseIterable, Identifiable {
+        case stock = "Stock interno"
+        case purchases = "Compras"
+        var id: String { rawValue }
+        var icon: String {
+            switch self {
+            case .stock: "shippingbox.fill"
+            case .purchases: "cart.badge.plus"
+            }
+        }
+    }
+
+    @State private var section: Section = .stock
+
+    var body: some View {
+        VStack(spacing: 0) {
+            Picker("Sección", selection: $section) {
+                ForEach(Section.allCases) { item in
+                    Label(item.rawValue, systemImage: item.icon).tag(item)
+                }
+            }
+            .pickerStyle(.segmented)
+            .padding(.horizontal)
+            .padding(.top, 8)
+
+            switch section {
+            case .stock: StockView()
+            case .purchases: PurchaseMatrixView()
+            }
+        }
+    }
+}
+
+struct MasView: View {
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 14) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Más")
+                            .font(.system(size: 30, weight: .heavy, design: .rounded))
+                            .foregroundStyle(AppTheme.ink)
+                        Text("Herramientas y configuración.")
+                            .font(.subheadline.weight(.medium))
+                            .foregroundStyle(AppTheme.muted)
+                    }
+
+                    NavigationLink(value: MasDestination.imprimir) {
+                        MasCard(
+                            title: "Imprimir etiqueta",
+                            subtitle: "Sube un PDF y se imprime en la PC42d",
+                            icon: "printer.fill",
+                            color: AppTheme.teal
+                        )
+                    }
+                    .buttonStyle(.plain)
+
+                    NavigationLink(value: MasDestination.admin) {
+                        MasCard(
+                            title: "Admin",
+                            subtitle: "API, sincronización, configuración",
+                            icon: "gearshape.fill",
+                            color: AppTheme.purple
+                        )
+                    }
+                    .buttonStyle(.plain)
+                }
+                .padding()
+            }
+            .screenBackground()
+            .navigationTitle("Más")
+            .navigationDestination(for: MasDestination.self) { dest in
+                switch dest {
+                case .imprimir: ManualPrintView().toolbar(.hidden, for: .tabBar)
+                case .admin: AdminView().toolbar(.hidden, for: .tabBar)
+                }
+            }
+        }
+    }
+}
+
+enum MasDestination: Hashable {
+    case imprimir, admin
+}
+
+struct MasCard: View {
+    let title: String
+    let subtitle: String
+    let icon: String
+    let color: Color
+
+    var body: some View {
+        HStack(spacing: 14) {
+            Image(systemName: icon)
+                .font(.title2.weight(.bold))
+                .foregroundStyle(color)
+                .frame(width: 44, height: 44)
+                .background(color.opacity(0.18))
+                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title).font(.headline.weight(.bold)).foregroundStyle(AppTheme.ink)
+                Text(subtitle).font(.caption).foregroundStyle(AppTheme.muted).lineLimit(2)
+            }
+            Spacer()
+            Image(systemName: "chevron.right").foregroundStyle(AppTheme.mutedSoft)
+        }
+        .glassPanel(padding: 14, accent: color)
     }
 }
 
