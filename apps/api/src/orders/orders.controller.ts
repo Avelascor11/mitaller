@@ -72,5 +72,4 @@ interface SheetPendingOrderRow {
   size?: string;
   sku?: string;
   imageUrl?: string;
-  purchased?: boolean;
 }

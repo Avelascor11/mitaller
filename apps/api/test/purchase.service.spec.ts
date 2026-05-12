@@ -65,4 +65,31 @@ describe('PurchaseService', () => {
       { order: { orderNumber: '#9454', shopifyOrderId: 'gid://shopify/Order/2' } }
     ]);
   });
+
+  it('incluye lineas reservadas en compras porque comprado ya no se tiene en cuenta', async () => {
+    const service = new PurchaseService({
+      stockItem: { findMany: async () => [] },
+      orderItem: {
+        findMany: async () => [
+          {
+            quantity: 1,
+            title: 'Camiseta "Always Racing" - Navy - M',
+            sku: 'TEST-NAVY-M',
+            productType: 'Camiseta',
+            color: 'Navy',
+            size: 'M',
+            variantTitle: 'M',
+            order: { orderNumber: '#9436', shopifyOrderId: 'sheet:#9436' }
+          }
+        ]
+      },
+      supplierStock: { findMany: async () => [] },
+      productSubproductMapping: { findMany: async () => [] }
+    } as never, { get: () => '9454' } as never);
+
+    const matrix = await service.getPurchaseMatrix();
+    const navy = matrix.groups.find((group) => group.title === 'CAMISETAS NAVY');
+    expect(navy?.sizes.find((entry) => entry.size === 'M')?.pendingOrderNeed).toBe(1);
+    expect(navy?.sizes.find((entry) => entry.size === 'M')?.recommendedPurchaseQuantity).toBe(1);
+  });
 });

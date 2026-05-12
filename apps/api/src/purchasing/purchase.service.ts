@@ -48,7 +48,7 @@ export class PurchaseService {
       this.prisma.orderItem.findMany({
         where: {
           order: { operationalStatus: { in: pendingStatuses } },
-          status: { in: ['PENDING', 'BLOCKED'] }
+          status: { not: 'CANCELLED' }
         },
         include: { order: true }
       }),
@@ -165,7 +165,7 @@ export class PurchaseService {
       this.prisma.orderItem.findMany({
         where: {
           order: { operationalStatus: { in: pendingStatuses } },
-          status: { in: ['PENDING', 'BLOCKED'] }
+          status: { not: 'CANCELLED' }
         },
         include: { order: true }
       }),
