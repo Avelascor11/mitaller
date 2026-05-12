@@ -56,7 +56,7 @@ export class SendcloudAdapter {
     const payload = {
       label_details: {
         mime_type: 'application/pdf',
-        dpi: Number(this.config.get('SENDCLOUD_LABEL_DPI') ?? 203)
+        dpi: this.labelDpi()
       },
       to_address: {
         name: address.name ?? order.customerName,
@@ -446,6 +446,11 @@ export class SendcloudAdapter {
       height: this.config.get<string>('SENDCLOUD_DEFAULT_HEIGHT_CM') ?? '3.00',
       unit: 'cm'
     };
+  }
+
+  private labelDpi() {
+    const configured = Number(this.config.get('SENDCLOUD_LABEL_DPI') ?? 72);
+    return configured === 72 ? 72 : 72;
   }
 
   private async resolveFromAddress() {

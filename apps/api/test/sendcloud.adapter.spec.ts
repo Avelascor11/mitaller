@@ -64,8 +64,33 @@ describe('SendcloudAdapter', () => {
 
     expect(String(url)).toBe('https://panel.sendcloud.sc/api/v3/shipments/announce');
     expect(body.ship_with.properties.shipping_option_code).toBe('correos:standard');
+    expect(body.label_details.dpi).toBe(72);
     expect(result.carrier).toBe('Correos');
     expect(result.trackingNumber).toBe('PQ123');
+  });
+
+  it('normaliza el DPI a 72 aunque este configurado otro valor', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        data: {
+          id: 'shipment-1',
+          carrier: { code: 'correos', name: 'Correos' },
+          ship_with: { properties: { shipping_option_code: 'correos:standard' } },
+          parcels: [
+            {
+              id: 123,
+              tracking_number: 'PQ123',
+              documents: [{ type: 'label', link: 'https://panel.sendcloud.sc/api/v3/parcels/123/documents/label' }]
+            }
+          ]
+        }
+      })
+    } as Response);
+
+    await adapter({ SENDCLOUD_LABEL_DPI: '203' }).createShipment(order);
+    const body = JSON.parse(String(fetchMock.mock.calls[0][1]?.body));
+    expect(body.label_details.dpi).toBe(72);
   });
 
   it('bloquea etiquetas Unstamped letter aunque Sendcloud las devuelva como correctas', async () => {
