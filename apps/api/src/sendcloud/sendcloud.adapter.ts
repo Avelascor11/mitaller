@@ -52,10 +52,12 @@ export class SendcloudAdapter {
     const address = this.normalizeAddress(order.shippingAddressJson);
     const addressLine = this.splitAddressLine(address.address1);
     const fromAddress = await this.resolveFromAddress();
+    const shippingOptionCode = await this.resolveShippingOptionCode(order, address, fromAddress);
     const payload = {
-      apply_shipping_defaults: true,
-      apply_shipping_rules: true,
-      delivery_indicator: order.shippingMethod ?? 'Correos Estandar',
+      label_details: {
+        mime_type: 'application/pdf',
+        dpi: Number(this.config.get('SENDCLOUD_LABEL_DPI') ?? 203)
+      },
       to_address: {
         name: address.name ?? order.customerName,
         company_name: '',
@@ -69,7 +71,12 @@ export class SendcloudAdapter {
         email: order.customerEmail ?? ''
       },
       from_address: fromAddress,
-      ship_with: this.shipWithRulesFallback,
+      ship_with: {
+        type: 'shipping_option_code',
+        properties: {
+          shipping_option_code: shippingOptionCode
+        }
+      },
       order_number: order.orderNumber,
       total_order_price: {
         currency: 'EUR',
@@ -92,11 +99,12 @@ export class SendcloudAdapter {
       ]
     };
 
-    const response = await this.requestV3<SendcloudShipmentV3Response>('/shipments/announce-with-shipping-rules', {
+    const response = await this.requestV3<SendcloudShipmentV3Response>('/shipments/announce', {
       method: 'POST',
       body: JSON.stringify(payload)
     });
     const data = response.data ?? response;
+    this.assertNotUnstampedLetter(data);
     const parcel = data.parcels?.[0];
     const labelUrl = this.extractLabelUrl(data);
     const price = this.extractPrice(data, parcel);
@@ -105,7 +113,7 @@ export class SendcloudAdapter {
       shipmentId: String(data.id ?? ''),
       parcelId: String(parcel?.id ?? data.id ?? ''),
       trackingNumber: parcel?.tracking_number,
-      carrier: data.carrier?.name,
+      carrier: data.carrier?.name ?? data.carrier?.code,
       labelUrl,
       cost: price?.value,
       costCurrency: price?.currency,
@@ -242,7 +250,7 @@ export class SendcloudAdapter {
     const address1 = this.pickString(source, ['address1', 'address', 'street']);
     const city = this.pickString(source, ['city']);
     const zip = this.pickString(source, ['zip', 'postal_code', 'postalCode']);
-    const country = this.pickString(source, ['countryCodeV2', 'country_code', 'country']);
+    const country = this.normalizeCountryCode(this.pickString(source, ['countryCodeV2', 'country_code', 'country']));
     if (!address1 || !city || !zip || !country) {
       throw new BadRequestException('Direccion de envio incompleta para Sendcloud');
     }
@@ -263,6 +271,28 @@ export class SendcloudAdapter {
       if (typeof value === 'string' && value.trim()) return value.trim();
     }
     return undefined;
+  }
+
+  private normalizeCountryCode(value?: string) {
+    if (!value) return undefined;
+    const normalized = this.normalizeText(value).trim();
+    if (normalized.length === 2) return normalized.toUpperCase();
+    const aliases: Record<string, string> = {
+      spain: 'ES',
+      espana: 'ES',
+      españa: 'ES',
+      france: 'FR',
+      francia: 'FR',
+      portugal: 'PT',
+      germany: 'DE',
+      alemania: 'DE',
+      italy: 'IT',
+      italia: 'IT',
+      netherlands: 'NL',
+      paisesbajos: 'NL',
+      'paises bajos': 'NL'
+    };
+    return aliases[normalized] ?? value.trim().toUpperCase();
   }
 
   private splitAddressLine(address: string) {
@@ -300,6 +330,122 @@ export class SendcloudAdapter {
         color: item.color ?? undefined
       }
     }));
+  }
+
+  private async resolveShippingOptionCode(order: SendcloudOrderInput, toAddress: NormalizedAddress, fromAddress: SendcloudAddressPayload) {
+    const explicit = this.explicitShippingOptionCodeFor(order.shippingMethod);
+    if (explicit) return explicit;
+
+    const dimensions = this.defaultDimensions();
+    const weightKg = String(this.config.get('SENDCLOUD_DEFAULT_WEIGHT_KG') ?? '0.3');
+    const response = await this.requestV3<SendcloudShippingOptionsResponse>('/shipping-options', {
+      method: 'POST',
+      body: JSON.stringify({
+        from_country_code: fromAddress.country_code,
+        from_postal_code: fromAddress.postal_code,
+        to_country_code: toAddress.country,
+        to_postal_code: toAddress.zip,
+        carrier_code: 'correos',
+        calculate_quotes: true,
+        parcels: [
+          {
+            dimensions,
+            weight: { value: weightKg, unit: 'kg' }
+          }
+        ]
+      })
+    });
+
+    const options = response.data ?? [];
+    const preferred = this.pickShippingOption(options, order.shippingMethod);
+    const code = this.shippingOptionCodeFrom(preferred);
+    if (code) return code;
+
+    const names = options
+      .slice(0, 8)
+      .map((option) => this.shippingOptionText(option))
+      .filter(Boolean)
+      .join(' | ');
+    throw new BadRequestException(
+      `Sendcloud v3 no devolvio una opcion Correos valida para ${toAddress.country} ${toAddress.zip}. ` +
+      `Configura SENDCLOUD_STANDARD_SHIPPING_OPTION_CODE y SENDCLOUD_PREMIUM_SHIPPING_OPTION_CODE, o revisa metodos activos. Opciones: ${names || 'ninguna'}`
+    );
+  }
+
+  private explicitShippingOptionCodeFor(shippingMethod?: string | null) {
+    const premium = this.isPremiumShipping(shippingMethod);
+    const specific = premium
+      ? this.config.get<string>('SENDCLOUD_PREMIUM_SHIPPING_OPTION_CODE')?.trim()
+      : this.config.get<string>('SENDCLOUD_STANDARD_SHIPPING_OPTION_CODE')?.trim();
+    return specific || this.config.get<string>('SENDCLOUD_SHIPPING_OPTION_CODE')?.trim();
+  }
+
+  private pickShippingOption(options: SendcloudShippingOption[], shippingMethod?: string | null) {
+    const premium = this.isPremiumShipping(shippingMethod);
+    const preferredWords = premium ? ['premium', 'express', '24'] : ['estandar', 'standard', '48', '72'];
+    const usable = options.filter((option) => {
+      const text = this.normalizeText(this.shippingOptionText(option));
+      return text.includes('correos') && !text.includes('pudo') && !text.includes('service point') && !text.includes('letter');
+    });
+    return usable.find((option) => {
+      const text = this.normalizeText(this.shippingOptionText(option));
+      return preferredWords.some((word) => text.includes(word));
+    }) ?? usable[0];
+  }
+
+  private shippingOptionCodeFrom(option?: SendcloudShippingOption) {
+    if (!option) return undefined;
+    const checkout = option.checkout_identifier;
+    if (checkout?.type === 'shipping_option_code' && checkout.value) return checkout.value;
+    return option.shipping_option_code ?? option.code ?? option.shipping_product?.code;
+  }
+
+  private shippingOptionText(option: SendcloudShippingOption) {
+    return [
+      option.title,
+      option.internal_title,
+      option.name,
+      option.shipping_option_code,
+      option.code,
+      option.shipping_product?.code,
+      option.shipping_product?.name,
+      option.carrier?.code,
+      option.carrier?.name
+    ].filter(Boolean).join(' ');
+  }
+
+  private assertNotUnstampedLetter(data: SendcloudShipmentV3Data) {
+    const text = this.normalizeText(JSON.stringify({
+      carrier: data.carrier,
+      ship_with: data.ship_with,
+      shipping_option_code: data.shipping_option_code,
+      parcels: data.parcels?.map((parcel) => ({
+        tracking_number: parcel.tracking_number,
+        documents: parcel.documents,
+        shipping_option_code: parcel.shipping_option_code
+      }))
+    }));
+    if (text.includes('sendcloud:letter') || text.includes('unstamped letter') || text.includes('"sendcloud"')) {
+      throw new BadGatewayException('Sendcloud ha intentado crear una etiqueta tipo carta sin sello. Bloqueado para no generar etiquetas incorrectas. Revisa la opcion Correos v3 configurada.');
+    }
+  }
+
+  private isPremiumShipping(shippingMethod?: string | null) {
+    const normalized = this.normalizeText(shippingMethod ?? '');
+    return normalized.includes('premium') || normalized.includes('express') || normalized.includes('urgente');
+  }
+
+  private normalizeText(value: string) {
+    return value.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+  }
+
+  private defaultDimensions() {
+    return {
+      length: this.config.get<string>('SENDCLOUD_DEFAULT_LENGTH_CM') ?? '30.00',
+      width: this.config.get<string>('SENDCLOUD_DEFAULT_WIDTH_CM') ?? '20.00',
+      height: this.config.get<string>('SENDCLOUD_DEFAULT_HEIGHT_CM') ?? '3.00',
+      unit: 'cm'
+    };
   }
 
   private async resolveFromAddress() {
@@ -396,8 +542,7 @@ export class SendcloudAdapter {
   }
 
   private shipmentMethodIdFor(shippingMethod?: string | null) {
-    const normalized = (shippingMethod ?? '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
-    if (normalized.includes('premium') || normalized.includes('express') || normalized.includes('urgente')) {
+    if (this.isPremiumShipping(shippingMethod)) {
       return this.config.get<string>('SENDCLOUD_PREMIUM_SHIPMENT_METHOD_ID') || this.config.get<string>('SENDCLOUD_SHIPMENT_METHOD_ID');
     }
     return this.config.get<string>('SENDCLOUD_STANDARD_SHIPMENT_METHOD_ID') || this.config.get<string>('SENDCLOUD_SHIPMENT_METHOD_ID');
@@ -409,19 +554,6 @@ export class SendcloudAdapter {
 
   private get apiV3BaseURL() {
     return this.config.get<string>('SENDCLOUD_API_V3_BASE_URL') ?? 'https://panel.sendcloud.sc/api/v3';
-  }
-
-  private get shipWithRulesFallback() {
-    const shippingOptionCode = this.config.get<string>('SENDCLOUD_SHIPPING_OPTION_CODE')?.trim();
-    if (!shippingOptionCode) {
-      throw new BadRequestException('Falta SENDCLOUD_SHIPPING_OPTION_CODE para usar reglas Sendcloud v3. No se usara el fallback sendcloud:letter.');
-    }
-    return {
-      type: 'shipping_option_code',
-      properties: {
-        shipping_option_code: shippingOptionCode
-      }
-    };
   }
 
   private get publicKey() {
@@ -485,13 +617,15 @@ interface SendcloudShippingMethodsResponse {
 interface SendcloudShipmentV3Response {
   data?: SendcloudShipmentV3Data;
   id?: string;
-  carrier?: { name?: string };
+  carrier?: { code?: string; name?: string };
   parcels?: SendcloudShipmentV3Parcel[];
 }
 
 interface SendcloudShipmentV3Data {
   id?: string;
-  carrier?: { name?: string };
+  carrier?: { code?: string; name?: string };
+  ship_with?: unknown;
+  shipping_option_code?: string;
   parcels?: SendcloudShipmentV3Parcel[];
   total_price?: { value?: string | number; currency?: string };
   price?: { value?: string | number; currency?: string };
@@ -500,12 +634,51 @@ interface SendcloudShipmentV3Data {
 interface SendcloudShipmentV3Parcel {
   id?: number | string;
   tracking_number?: string;
+  shipping_option_code?: string;
   documents?: Array<{
     type?: string;
     link?: string;
   }>;
   total_price?: { value?: string | number; currency?: string };
   price?: { value?: string | number; currency?: string };
+}
+
+interface SendcloudShippingOptionsResponse {
+  data?: SendcloudShippingOption[];
+  message?: string | null;
+}
+
+interface SendcloudShippingOption {
+  title?: string;
+  internal_title?: string;
+  name?: string;
+  code?: string;
+  shipping_option_code?: string;
+  checkout_identifier?: {
+    type?: string;
+    value?: string;
+  };
+  shipping_product?: {
+    code?: string;
+    name?: string;
+  };
+  carrier?: {
+    code?: string;
+    name?: string;
+  };
+}
+
+interface SendcloudAddressPayload {
+  name: string;
+  company_name: string;
+  address_line_1: string;
+  address_line_2: string;
+  house_number: string;
+  postal_code: string;
+  city: string;
+  country_code: string;
+  phone_number: string;
+  email: string;
 }
 
 interface SendcloudSenderAddressesResponse {
