@@ -120,6 +120,11 @@ struct APIClient {
         return try await perform(request)
     }
 
+    func finalizeCreatedLabel(orderId: String) async throws -> ShipmentDTO {
+        let request = try jsonRequest(path: "/shipments/\(Self.pathSegment(orderId))/finalize-created-label", method: "POST", body: EmptyBody())
+        return try await perform(request)
+    }
+
     func finalizedShipments() async throws -> [FinalizedShipment] {
         try await get("/shipments/finalized")
     }
@@ -518,6 +523,7 @@ private struct OrderDTO: Decodable {
     let operationalStatus: String
     let priorityLevel: String
     let orderedAt: Date?
+    let preparedAt: Date?
     let internalDeadlineAt: Date?
     let items: [OrderItemDTO]?
     let shipments: [ShipmentDTO]?
@@ -535,7 +541,8 @@ private struct OrderDTO: Decodable {
             tracking: shipments?.compactMap(\.trackingNumber).first,
             source: (shopifyOrderId ?? "").hasPrefix("sheet:") ? .sheet : .shopify,
             printStatus: WorkshopOrder.PrintStatus(shipments: shipments ?? []),
-            createdAt: orderedAt
+            createdAt: orderedAt,
+            preparedAt: preparedAt
         )
     }
 }

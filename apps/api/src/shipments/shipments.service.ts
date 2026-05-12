@@ -144,6 +144,48 @@ export class ShipmentsService {
     return { ...shipment, order: { ...order, operationalStatus: 'SHIPPED', fulfillmentStatus: 'fulfilled' } };
   }
 
+  async finalizeCreatedLabel(orderId: string) {
+    const order = await this.prisma.order.findFirstOrThrow({
+      where: { OR: [{ id: orderId }, { orderNumber: orderId }] },
+      include: { shipments: { orderBy: { createdAt: 'desc' } } }
+    });
+    const existing = order.shipments.find((shipment) =>
+      shipment.provider === 'SENDCLOUD' && ['LABEL_CREATED', 'PRINTED'].includes(shipment.status)
+    );
+    if (!existing) throw new BadRequestException('Este pedido no tiene una etiqueta creada para finalizar.');
+
+    const shipment = await this.prisma.shipment.update({
+      where: { id: existing.id },
+      data: { status: 'IN_TRANSIT' }
+    });
+
+    await this.prisma.order.update({
+      where: { id: order.id },
+      data: {
+        operationalStatus: 'SHIPPED',
+        fulfillmentStatus: 'fulfilled'
+      }
+    });
+
+    const shopifyResult = shipment.trackingNumber
+      ? await this.shopify.updateFulfillmentTracking(
+        order.shopifyOrderId,
+        shipment.trackingNumber,
+        shipment.carrier ?? 'Correos'
+      )
+      : { mode: 'skipped', note: 'Etiqueta finalizada manualmente sin tracking escaneado.' };
+
+    await this.activity.log({
+      entityType: 'Shipment',
+      entityId: shipment.id,
+      action: 'FINALIZED_CREATED_LABEL',
+      message: `Pedido ${order.orderNumber} finalizado con etiqueta creada`,
+      metadataJson: { shopifyResult }
+    });
+
+    return { ...shipment, order: { ...order, operationalStatus: 'SHIPPED', fulfillmentStatus: 'fulfilled' }, shopifyResult };
+  }
+
   async confirmLabelScan(orderId: string, barcode?: string, photoBase64?: string) {
     const cleanBarcode = barcode?.trim();
     if (!cleanBarcode) {

@@ -247,6 +247,7 @@ struct WorkshopOrder: Identifiable, Hashable {
     let source: Source
     var printStatus: PrintStatus
     let createdAt: Date?
+    let preparedAt: Date?
 
     var hasMultipleItems: Bool { items.count > 1 }
     var totalUnits: Int { items.reduce(0) { $0 + $1.quantity } }
@@ -283,6 +284,11 @@ struct WorkshopOrder: Identifiable, Hashable {
         return formatter.localizedString(for: createdAt, relativeTo: Date())
     }
 
+    var preparedAtShort: String? {
+        guard let preparedAt else { return nil }
+        return preparedAt.formatted(.dateTime.day().month(.abbreviated).hour().minute())
+    }
+
     init(
         remoteID: String? = nil,
         number: String,
@@ -295,7 +301,8 @@ struct WorkshopOrder: Identifiable, Hashable {
         tracking: String? = nil,
         source: Source = .shopify,
         printStatus: PrintStatus = .none,
-        createdAt: Date? = nil
+        createdAt: Date? = nil,
+        preparedAt: Date? = nil
     ) {
         self.remoteID = remoteID
         self.number = number
@@ -309,6 +316,7 @@ struct WorkshopOrder: Identifiable, Hashable {
         self.source = source
         self.printStatus = printStatus
         self.createdAt = createdAt
+        self.preparedAt = preparedAt
     }
 }
 
@@ -316,6 +324,41 @@ enum ShippingCategory: String {
     case free = "Gratis"
     case standard = "Estandar"
     case premium = "Premium"
+}
+
+enum ShippingQueueSort: String, CaseIterable, Identifiable {
+    case preparedOldest
+    case preparedNewest
+    case urgency
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .preparedOldest: "Preparados primero"
+        case .preparedNewest: "Preparados recientes"
+        case .urgency: "Urgencia"
+        }
+    }
+
+    func sort(_ orders: [WorkshopOrder]) -> [WorkshopOrder] {
+        switch self {
+        case .preparedOldest:
+            orders.sorted {
+                let left = $0.preparedAt ?? $0.createdAt ?? .distantFuture
+                let right = $1.preparedAt ?? $1.createdAt ?? .distantFuture
+                return left == right ? $0.number < $1.number : left < right
+            }
+        case .preparedNewest:
+            orders.sorted {
+                let left = $0.preparedAt ?? $0.createdAt ?? .distantPast
+                let right = $1.preparedAt ?? $1.createdAt ?? .distantPast
+                return left == right ? $0.number > $1.number : left > right
+            }
+        case .urgency:
+            OrderSort.smart.sort(orders)
+        }
+    }
 }
 
 enum ShippingFilter: String, CaseIterable, Identifiable {
@@ -837,6 +880,25 @@ final class WorkshopStore {
             await syncFromAPI()
         } catch {
             syncError = "No se pudo finalizar sin etiqueta: \(error.localizedDescription)"
+            await syncFromAPI()
+        }
+    }
+
+    func finalizeCreatedLabelRemote(for order: WorkshopOrder) async {
+        guard let client = apiClient else { return }
+        labelCreationOrderID = order.id
+        syncError = nil
+        defer { labelCreationOrderID = nil }
+
+        do {
+            let shipment = try await client.finalizeCreatedLabel(orderId: order.remoteID ?? order.number)
+            if let index = orders.firstIndex(where: { $0.id == order.id }) {
+                orders[index].status = .shipped
+                orders[index].tracking = shipment.trackingNumber ?? orders[index].tracking
+            }
+            await syncFromAPI()
+        } catch {
+            syncError = "No se pudo finalizar etiqueta creada: \(error.localizedDescription)"
             await syncFromAPI()
         }
     }
@@ -1881,11 +1943,10 @@ struct ShippingView: View {
     @Environment(WorkshopStore.self) private var store
     @State private var scanningOrder: WorkshopOrder?
     @State private var searchText = ""
+    @State private var queueSort: ShippingQueueSort = .preparedOldest
 
     var allShippingCandidates: [WorkshopOrder] {
-        store.orders
-            .filter { $0.status == .readyForLabel || $0.status == .labelCreated }
-            .sorted { $0.deadline < $1.deadline }
+        queueSort.sort(store.orders.filter { $0.status == .readyForLabel || $0.status == .labelCreated })
     }
 
     // En envíos deben seguir apareciendo los pedidos con etiqueta creada aunque Sendcloud ya devuelva tracking.
@@ -1948,6 +2009,13 @@ struct ShippingView: View {
                     .background(AppTheme.surfaceSoft)
                     .overlay(RoundedRectangle(cornerRadius: 12).stroke(AppTheme.line))
                     .clipShape(RoundedRectangle(cornerRadius: 12))
+
+                    Picker("Orden", selection: $queueSort) {
+                        ForEach(ShippingQueueSort.allCases) { option in
+                            Text(option.title).tag(option)
+                        }
+                    }
+                    .pickerStyle(.segmented)
 
                     if filteredOrders.isEmpty {
                         ContentUnavailableView(
@@ -2036,7 +2104,13 @@ struct ShippingOrderCard: View {
                     .font(.footnote.weight(.semibold))
                     .foregroundStyle(AppTheme.muted)
                     .lineLimit(1)
-                if let created = order.createdAtShort {
+                if let prepared = order.preparedAtShort {
+                    Spacer(minLength: 0)
+                    Label("Preparado \(prepared)", systemImage: "checkmark.circle")
+                        .font(.footnote.weight(.semibold))
+                        .foregroundStyle(AppTheme.green)
+                        .lineLimit(1)
+                } else if let created = order.createdAtShort {
                     Spacer(minLength: 0)
                     Label(created, systemImage: "calendar")
                         .font(.footnote.weight(.semibold))
@@ -2115,6 +2189,22 @@ struct ShippingOrderCard: View {
                         }
                     }
                     .buttonStyle(.bordered)
+                    .tint(AppTheme.green)
+                    .disabled(store.labelCreationOrderID != nil)
+                }
+
+                if order.status == .labelCreated || order.printStatus != .none {
+                    Button {
+                        Task { await store.finalizeCreatedLabelRemote(for: order) }
+                    } label: {
+                        if store.labelCreationOrderID == order.id {
+                            ProgressView().frame(maxWidth: .infinity)
+                        } else {
+                            Label("Finalizar etiqueta", systemImage: "checkmark.seal.fill")
+                                .frame(maxWidth: .infinity)
+                        }
+                    }
+                    .buttonStyle(.borderedProminent)
                     .tint(AppTheme.green)
                     .disabled(store.labelCreationOrderID != nil)
                 }
