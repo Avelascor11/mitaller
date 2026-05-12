@@ -329,6 +329,7 @@ export class OrdersService {
       where: { shopifyOrderId: input.shopifyOrderId },
       include: { shipments: true }
     });
+    const isSheetImport = input.shopifyOrderId.startsWith('sheet:');
     const hasMissingStock = input.items.some((item) => item.sku.includes('NO-STOCK'));
     const hasIncident = input.operationalStatus === 'BLOCKED';
     const calculated = this.priority.calculate({
@@ -346,6 +347,8 @@ export class OrdersService {
     const isCancelled = input.operationalStatus === 'CANCELLED';
     const operationalStatus = isCancelled
       ? 'CANCELLED'
+      : isSheetImport
+      ? calculated.operationalStatus
       : hasCreatedLabel
       ? 'LABEL_CREATED'
       : existingOrder && locallyAdvancedStatuses.includes(existingOrder.operationalStatus)
