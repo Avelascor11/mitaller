@@ -84,6 +84,7 @@ describe('PurchaseService', () => {
         ]
       },
       supplierStock: { findMany: async () => [] },
+      purchaseNeed: { findMany: async () => [] },
       productSubproductMapping: { findMany: async () => [] }
     } as never, { get: () => '9454' } as never);
 

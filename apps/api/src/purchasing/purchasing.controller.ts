@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Post } from '@nestjs/common';
+import { Body, Controller, Get, Param, Post } from '@nestjs/common';
 import { PurchaseService } from './purchase.service';
 
 @Controller('purchase-needs')
@@ -18,6 +18,21 @@ export class PurchasingController {
   @Post('generate')
   generate() {
     return this.purchase.generateDailyPurchaseNeeds();
+  }
+
+  @Post('mark-ordered')
+  markOrdered() {
+    return this.purchase.markRecommendedAsOrdered();
+  }
+
+  @Post('receive')
+  receive(@Body() body: { lines?: Array<{ stockItemId: string; quantity: number }> }) {
+    return this.purchase.receivePurchaseLines(body.lines ?? []);
+  }
+
+  @Get('order/:orderId/picking-list')
+  orderPickingList(@Param('orderId') orderId: string) {
+    return this.purchase.getOrderPickingList(orderId);
   }
 
   @Post('import-product-mappings')

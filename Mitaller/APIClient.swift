@@ -156,6 +156,20 @@ struct APIClient {
         return try await perform(request)
     }
 
+    func orderPickingList(orderId: String) async throws -> OrderPickingList {
+        try await get("/purchase-needs/order/\(Self.pathSegment(orderId))/picking-list")
+    }
+
+    func markRecommendedPurchasesOrdered() async throws -> PurchaseOrderResponse {
+        let request = try jsonRequest(path: "/purchase-needs/mark-ordered", method: "POST", body: EmptyBody())
+        return try await perform(request)
+    }
+
+    func receivePurchase(lines: [ReceivePurchaseLineRequest]) async throws -> ReceivePurchaseResponse {
+        let request = try jsonRequest(path: "/purchase-needs/receive", method: "POST", body: ReceivePurchaseRequest(lines: lines))
+        return try await perform(request)
+    }
+
     func uploadManualLabel(filename: String, pdfData: Data) async throws -> ManualPrintResponse {
         let request = try jsonRequest(
             path: "/manual-print",
@@ -308,6 +322,59 @@ struct UnmappedProduct: Decodable, Identifiable {
     let variantTitle: String?
     let pendingQuantity: Int
     let orderNumbers: [String]
+}
+
+struct OrderPickingList: Decodable {
+    let orderId: String
+    let orderNumber: String
+    let lines: [OrderPickingLine]
+    let unmapped: [OrderPickingUnmapped]
+}
+
+struct OrderPickingLine: Decodable, Identifiable {
+    var id: String { key }
+    let key: String
+    let kind: String
+    let color: String
+    let size: String
+    let subproductName: String
+    let sku: String?
+    let stockItemId: String?
+    let stockAvailable: Int
+    let quantity: Int
+    let orderItems: [OrderPickingSourceItem]
+}
+
+struct OrderPickingSourceItem: Decodable, Identifiable {
+    let id: String
+    let title: String
+    let sku: String
+    let quantity: Int
+}
+
+struct OrderPickingUnmapped: Decodable, Identifiable {
+    var id: String { orderItemId }
+    let orderItemId: String
+    let title: String
+    let sku: String
+    let quantity: Int
+}
+
+struct ReceivePurchaseLineRequest: Encodable {
+    let stockItemId: String
+    let quantity: Int
+}
+
+private struct ReceivePurchaseRequest: Encodable {
+    let lines: [ReceivePurchaseLineRequest]
+}
+
+struct PurchaseOrderResponse: Decodable {
+    let ordered: Int
+}
+
+struct ReceivePurchaseResponse: Decodable {
+    let received: Int
 }
 
 struct ManualPrintResponse: Decodable {
@@ -616,9 +683,11 @@ private struct PurchaseMatrixEntryDTO: Decodable {
     let subproductName: String?
     let sku: String?
     let supplierSku: String?
+    let stockItemId: String?
     let pendingOrderNeed: Int
     let currentInternalStock: Int
     let minStockTarget: Int
+    let alreadyOrderedQuantity: Int?
     let recommendedPurchaseQuantity: Int
     let supplierAvailableQuantity: Int?
 
@@ -628,9 +697,11 @@ private struct PurchaseMatrixEntryDTO: Decodable {
             subproductName: subproductName ?? size,
             sku: sku,
             supplierSku: supplierSku,
+            stockItemId: stockItemId,
             pendingOrderNeed: pendingOrderNeed,
             currentInternalStock: currentInternalStock,
             minStockTarget: minStockTarget,
+            alreadyOrderedQuantity: alreadyOrderedQuantity ?? 0,
             recommendedPurchaseQuantity: recommendedPurchaseQuantity,
             supplierAvailableQuantity: supplierAvailableQuantity
         )

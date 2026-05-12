@@ -510,9 +510,11 @@ struct PurchaseMatrixEntry: Identifiable {
     let subproductName: String
     let sku: String?
     let supplierSku: String?
+    let stockItemId: String?
     let pendingOrderNeed: Int
     let currentInternalStock: Int
     let minStockTarget: Int
+    let alreadyOrderedQuantity: Int
     let recommendedPurchaseQuantity: Int
     let supplierAvailableQuantity: Int?
 }
@@ -556,6 +558,7 @@ final class WorkshopStore {
     var purchaseNeeds: [PurchaseNeed] = []
     var purchaseMatrix: [PurchaseMatrixGroup] = []
     var mappingWorkbench: MappingWorkbench?
+    var orderPickingLists: [String: OrderPickingList] = [:]
 
     var priorityQueue: [WorkshopTask] {
         tasks
@@ -666,6 +669,45 @@ final class WorkshopStore {
             try await loadSnapshot(from: client)
         } catch {
             syncError = "No se pudo guardar el mapeo: \(error.localizedDescription)"
+        }
+    }
+
+    func loadPickingList(for order: WorkshopOrder) async {
+        guard let client = apiClient else { return }
+        do {
+            let list = try await client.orderPickingList(orderId: order.remoteID ?? order.number)
+            orderPickingLists[order.remoteID ?? order.number] = list
+        } catch {
+            syncError = "No se pudo cargar que coger: \(error.localizedDescription)"
+        }
+    }
+
+    func markRecommendedPurchasesOrdered() async {
+        guard let client = apiClient else { return }
+        syncError = nil
+        do {
+            _ = try await client.markRecommendedPurchasesOrdered()
+            try await loadSnapshot(from: client)
+        } catch {
+            syncError = "No se pudo marcar compra pendiente: \(error.localizedDescription)"
+        }
+    }
+
+    func receiveAllOrderedPurchases() async {
+        guard let client = apiClient else { return }
+        let lines = purchaseMatrix.flatMap { group in
+            group.entries.compactMap { entry -> ReceivePurchaseLineRequest? in
+                guard let stockItemId = entry.stockItemId, entry.alreadyOrderedQuantity > 0 else { return nil }
+                return ReceivePurchaseLineRequest(stockItemId: stockItemId, quantity: entry.alreadyOrderedQuantity)
+            }
+        }
+        guard !lines.isEmpty else { return }
+        syncError = nil
+        do {
+            _ = try await client.receivePurchase(lines: lines)
+            try await loadSnapshot(from: client)
+        } catch {
+            syncError = "No se pudo recibir compra: \(error.localizedDescription)"
         }
     }
 
@@ -2394,9 +2436,36 @@ struct PurchaseMatrixView: View {
                         MetricTile(title: "Comprar", value: store.purchaseMatrix.reduce(0) { $0 + $1.totalRecommended }, color: AppTheme.magenta, icon: "cart.badge.plus")
                         MetricTile(title: "Pedidos", value: store.purchaseMatrix.reduce(0) { $0 + $1.totalPending }, color: AppTheme.blue, icon: "shippingbox.fill")
                         MetricTile(title: "Stock", value: store.purchaseMatrix.reduce(0) { $0 + $1.totalStock }, color: AppTheme.green, icon: "archivebox.fill")
+                        MetricTile(title: "Por recibir", value: store.purchaseMatrix.reduce(0) { total, group in total + group.entries.reduce(0) { $0 + $1.alreadyOrderedQuantity } }, color: AppTheme.amber, icon: "tray.and.arrow.down.fill")
                     }
 
                     let groups = store.purchaseMatrix.filter { $0.totalRecommended > 0 }
+                    let hasIncoming = store.purchaseMatrix.contains { group in
+                        group.entries.contains { $0.alreadyOrderedQuantity > 0 }
+                    }
+                    HStack(spacing: 10) {
+                        Button {
+                            Task { await store.markRecommendedPurchasesOrdered() }
+                        } label: {
+                            Label("Marcar compra hecha", systemImage: "cart.fill.badge.plus")
+                                .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .tint(AppTheme.magenta)
+                        .disabled(store.purchaseMatrix.reduce(0) { $0 + $1.totalRecommended } == 0)
+
+                        Button {
+                            Task { await store.receiveAllOrderedPurchases() }
+                        } label: {
+                            Label("Recibir todo", systemImage: "tray.and.arrow.down.fill")
+                                .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.bordered)
+                        .tint(AppTheme.green)
+                        .disabled(!hasIncoming)
+                    }
+                    .glassPanel(padding: 12)
+
                     if groups.isEmpty {
                         ContentUnavailableView("No hay compras pendientes", systemImage: "checkmark.seal", description: Text("El stock actual cubre los pedidos sin preparar."))
                             .glassPanel(accent: AppTheme.green)
@@ -2516,6 +2585,11 @@ struct MatrixQuantityCell: View {
                 Text("ped \(entry.pendingOrderNeed) · stk \(entry.currentInternalStock) · ss \(entry.minStockTarget)")
                     .font(.caption2.weight(.semibold))
                     .foregroundStyle(AppTheme.muted)
+            }
+            if mode == .recommended && entry.alreadyOrderedQuantity > 0 {
+                Text("por recibir \(entry.alreadyOrderedQuantity)")
+                    .font(.caption2.weight(.bold))
+                    .foregroundStyle(AppTheme.amber)
             }
             if mode != .recommended {
                 Text(entry.subproductName.replacingOccurrences(of: "Camiseta ", with: "").replacingOccurrences(of: "Sudadera ", with: ""))
@@ -2921,6 +2995,10 @@ struct OrderPreparationDetailView: View {
         currentOrder.items.filter { $0.quantity > 1 }
     }
 
+    var pickingList: OrderPickingList? {
+        store.orderPickingLists[currentOrder.remoteID ?? currentOrder.number]
+    }
+
     var quantityWarningMessage: String {
         repeatedQuantityItems
             .map { "\($0.displayTitle): x\($0.quantity)" }
@@ -2977,6 +3055,39 @@ struct OrderPreparationDetailView: View {
                         .foregroundStyle(AppTheme.muted)
                 }
                 .glassPanel(accent: currentOrder.priority.color)
+
+                SectionHeader(title: "Qué coger", subtitle: "La app traduce cada producto Shopify a ropa base del taller")
+
+                if let pickingList {
+                    if !pickingList.unmapped.isEmpty {
+                        VStack(alignment: .leading, spacing: 8) {
+                            Label("Faltan mapeos", systemImage: "exclamationmark.triangle.fill")
+                                .font(.headline.weight(.black))
+                                .foregroundStyle(AppTheme.amber)
+                            ForEach(pickingList.unmapped) { item in
+                                Text("\(item.title) · x\(item.quantity)")
+                                    .font(.subheadline.weight(.semibold))
+                            }
+                            Text("Asigna estos productos en Admin > Mapeos para que Compras sea exacto.")
+                                .font(.caption)
+                                .foregroundStyle(AppTheme.muted)
+                        }
+                        .glassPanel(accent: AppTheme.amber)
+                    }
+
+                    if pickingList.lines.isEmpty {
+                        ContentUnavailableView("Sin ropa base", systemImage: "shippingbox", description: Text("Este pedido no tiene camisetas o sudaderas mapeadas."))
+                            .glassPanel()
+                    } else {
+                        ForEach(pickingList.lines) { line in
+                            PickingBaseLineCard(line: line)
+                        }
+                    }
+                } else {
+                    ProgressView("Calculando qué coger...")
+                        .frame(maxWidth: .infinity)
+                        .glassPanel()
+                }
 
                 SectionHeader(title: "Contenido del pedido", subtitle: "Revisa unidades y prendas antes de marcarlo preparado")
 
@@ -3038,6 +3149,9 @@ struct OrderPreparationDetailView: View {
         .screenBackground()
         .navigationTitle(currentOrder.number)
         .navigationBarTitleDisplayMode(.inline)
+        .task(id: currentOrder.remoteID ?? currentOrder.number) {
+            await store.loadPickingList(for: currentOrder)
+        }
         .alert("Confirmar pedido preparado", isPresented: $showingPrepareConfirmation) {
             Button("Cancelar", role: .cancel) {}
             Button("Sí, hacer foto y cerrar") {
@@ -3076,6 +3190,50 @@ struct OrderPreparationDetailView: View {
         } message: {
             Text("Pedido marcado como preparado.\n¿Crear etiqueta de envío e imprimirla ahora?")
         }
+    }
+}
+
+struct PickingBaseLineCard: View {
+    let line: OrderPickingLine
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .firstTextBaseline) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(line.subproductName)
+                        .font(.title3.weight(.black))
+                        .foregroundStyle(AppTheme.ink)
+                    Text("Stock ahora: \(line.stockAvailable)")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(line.stockAvailable >= line.quantity ? AppTheme.green : AppTheme.red)
+                }
+                Spacer()
+                Text("x\(line.quantity)")
+                    .font(.system(size: 34, weight: .black, design: .rounded))
+                    .foregroundStyle(AppTheme.blue)
+            }
+            FlowChips {
+                Tag(text: line.color, systemImage: "paintpalette.fill")
+                Tag(text: line.size, systemImage: "ruler.fill")
+                if let sku = line.sku {
+                    Tag(text: sku, systemImage: "barcode")
+                }
+            }
+            VStack(alignment: .leading, spacing: 4) {
+                ForEach(line.orderItems) { item in
+                    Text("\(item.title) · x\(item.quantity)")
+                        .font(.caption)
+                        .foregroundStyle(AppTheme.muted)
+                        .lineLimit(2)
+                }
+            }
+            if line.quantity > 1 {
+                Label("Revisa: hay \(line.quantity) unidades de esta prenda base", systemImage: "exclamationmark.triangle.fill")
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(AppTheme.amber)
+            }
+        }
+        .glassPanel(accent: line.stockAvailable >= line.quantity ? AppTheme.blue : AppTheme.red)
     }
 }
 

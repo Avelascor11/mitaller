@@ -28,6 +28,132 @@ export class PurchaseService {
     });
   }
 
+  async markRecommendedAsOrdered() {
+    const matrix = await this.getPurchaseMatrix();
+    const opened = [];
+    for (const group of matrix.groups) {
+      for (const entry of group.sizes) {
+        if (!entry.stockItemId || entry.recommendedPurchaseQuantity <= 0) continue;
+        opened.push(await this.prisma.purchaseNeed.create({
+          data: {
+            stockItemId: entry.stockItemId,
+            supplierSku: entry.supplierSku,
+            neededForPendingOrders: entry.pendingOrderNeed,
+            minStockTarget: entry.minStockTarget,
+            currentInternalStock: entry.currentInternalStock,
+            alreadyOrderedQuantity: entry.alreadyOrderedQuantity,
+            recommendedPurchaseQuantity: entry.recommendedPurchaseQuantity,
+            supplierAvailableQuantity: entry.supplierAvailableQuantity,
+            status: 'ORDERED'
+          }
+        }));
+      }
+    }
+    return { ordered: opened.length, lines: opened };
+  }
+
+  async receivePurchaseLines(lines: Array<{ stockItemId: string; quantity: number }>) {
+    const cleanLines = lines.filter((line) => line.stockItemId && Number.isInteger(line.quantity) && line.quantity > 0);
+    if (!cleanLines.length) throw new BadRequestException('No hay lineas validas para recibir');
+    const location = await this.prisma.stockLocation.findUniqueOrThrow({ where: { code: 'EST-A-01' } });
+
+    return this.prisma.$transaction(async (tx) => {
+      const received = [];
+      for (const line of cleanLines) {
+        const stockItem = await tx.stockItem.findUniqueOrThrow({ where: { id: line.stockItemId } });
+        await tx.stockLevel.upsert({
+          where: { stockItemId_locationId: { stockItemId: line.stockItemId, locationId: location.id } },
+          create: { stockItemId: line.stockItemId, locationId: location.id, quantity: line.quantity },
+          update: { quantity: { increment: line.quantity } }
+        });
+        await tx.stockMovement.create({
+          data: {
+            stockItemId: line.stockItemId,
+            toLocationId: location.id,
+            quantity: line.quantity,
+            reason: 'COMPRA_RECIBIDA'
+          }
+        });
+        await tx.activityLog.create({
+          data: {
+            entityType: 'StockItem',
+            entityId: line.stockItemId,
+            action: 'PURCHASE_RECEIVED',
+            message: `${line.quantity} unidades recibidas de ${stockItem.name}`,
+            metadataJson: { stockItemId: line.stockItemId, sku: stockItem.sku, quantity: line.quantity }
+          }
+        });
+        received.push({ stockItemId: line.stockItemId, sku: stockItem.sku, name: stockItem.name, quantity: line.quantity });
+      }
+
+      for (const line of cleanLines) {
+        const ordered = await tx.purchaseNeed.findMany({
+          where: { stockItemId: line.stockItemId, status: 'ORDERED' },
+          orderBy: { generatedAt: 'asc' }
+        });
+        let remaining = line.quantity;
+        for (const need of ordered) {
+          if (remaining <= 0) break;
+          await tx.purchaseNeed.update({ where: { id: need.id }, data: { status: 'RECEIVED' } });
+          remaining -= need.recommendedPurchaseQuantity;
+        }
+      }
+
+      return { received: received.length, lines: received };
+    });
+  }
+
+  async getOrderPickingList(orderId: string) {
+    const [order, productMappings, stockItems] = await Promise.all([
+      this.prisma.order.findFirstOrThrow({
+        where: { OR: [{ id: orderId }, { orderNumber: orderId }, { shopifyOrderId: orderId }] },
+        include: { items: true }
+      }),
+      this.prisma.productSubproductMapping.findMany(),
+      this.prisma.stockItem.findMany({ where: { type: 'BLANK_GARMENT' }, include: { levels: true } })
+    ]);
+    const mappingIndex = this.buildMappingIndex(productMappings);
+    const stockIndex = new Map<string, StockItemWithLevels>();
+    for (const item of stockItems) {
+      const kind = this.inferGarmentKind(`${item.name} ${item.sku} ${item.supplierSku ?? ''}`);
+      const color = this.normalizeColor(item.color ?? item.name);
+      const size = this.normalizeSize(item.size ?? item.name);
+      if (kind && color && size) stockIndex.set(this.matrixKey(kind, color, size), item);
+    }
+    const lines = new Map<string, PickingListLine>();
+    const unmapped = [];
+    for (const item of order.items) {
+      const mapped = this.mapOrderItemToBlankGarment(item, mappingIndex);
+      if (!mapped) {
+        unmapped.push({ orderItemId: item.id, title: item.title, sku: item.sku, quantity: item.quantity });
+        continue;
+      }
+      const key = this.matrixKey(mapped.kind, mapped.color, mapped.size);
+      const stockItem = stockIndex.get(key);
+      const current = lines.get(key) ?? {
+        key,
+        kind: mapped.kind,
+        color: mapped.color,
+        size: mapped.size,
+        subproductName: mapped.subproductName,
+        sku: stockItem?.sku ?? null,
+        stockItemId: stockItem?.id ?? null,
+        stockAvailable: stockItem?.levels.reduce((sum, level) => sum + level.quantity, 0) ?? 0,
+        quantity: 0,
+        orderItems: []
+      };
+      current.quantity += item.quantity;
+      current.orderItems.push({ id: item.id, title: item.title, quantity: item.quantity, sku: item.sku });
+      lines.set(key, current);
+    }
+    return {
+      orderId: order.id,
+      orderNumber: order.orderNumber,
+      lines: [...lines.values()].sort((left, right) => left.subproductName.localeCompare(right.subproductName)),
+      unmapped
+    };
+  }
+
   async importProductMappings(mappings: ProductSubproductMappingInput[]) {
     const cleanMappings = mappings
       .map((mapping) => ({
@@ -193,7 +319,7 @@ export class PurchaseService {
       OperationalStatus.PICKED,
       OperationalStatus.BLOCKED
     ];
-    const [stockItems, orderItems, supplierStocks, productMappings] = await Promise.all([
+    const [stockItems, orderItems, supplierStocks, productMappings, orderedNeeds] = await Promise.all([
       this.prisma.stockItem.findMany({
         where: { type: 'BLANK_GARMENT' },
         include: { levels: true }
@@ -206,7 +332,8 @@ export class PurchaseService {
         include: { order: true }
       }),
       this.prisma.supplierStock.findMany(),
-      this.prisma.productSubproductMapping.findMany()
+      this.prisma.productSubproductMapping.findMany(),
+      this.prisma.purchaseNeed.findMany({ where: { status: 'ORDERED' } })
     ]);
     const mappingIndex = this.buildMappingIndex(productMappings);
 
@@ -241,11 +368,16 @@ export class PurchaseService {
       const currentInternalStock = stockItem?.levels.reduce((sum, level) => sum + level.quantity, 0) ?? 0;
       const minStockTarget = stockItem?.minStock ?? 0;
       const pendingOrderNeed = need?.quantity ?? 0;
+      const alreadyOrderedQuantity = stockItem
+        ? orderedNeeds
+          .filter((ordered) => ordered.stockItemId === stockItem.id)
+          .reduce((sum, ordered) => sum + ordered.recommendedPurchaseQuantity, 0)
+        : 0;
       const recommendedPurchaseQuantity = this.calculateRecommendedPurchaseQuantity({
         pendingOrderNeed,
         minStockTarget,
         currentInternalStock,
-        alreadyOrderedQuantity: 0
+        alreadyOrderedQuantity
       });
       const supplierAvailableQuantity = supplierStocks.find((stock) => stock.supplierSku === stockItem?.supplierSku)?.availableQuantity ?? null;
       const groupKey = this.matrixKey(kind, color, '');
@@ -262,9 +394,11 @@ export class PurchaseService {
         subproductName: `${kind === 'SUDADERA' ? 'Sudadera' : 'Camiseta'} ${this.colorSingularLabel(color)} - ${size}`,
         sku: stockItem?.sku ?? null,
         supplierSku: stockItem?.supplierSku ?? null,
+        stockItemId: stockItem?.id ?? null,
         pendingOrderNeed,
         currentInternalStock,
         minStockTarget,
+        alreadyOrderedQuantity,
         recommendedPurchaseQuantity,
         supplierAvailableQuantity
       });
@@ -279,9 +413,11 @@ export class PurchaseService {
           subproductName: `${group.garmentType === 'SUDADERA' ? 'Sudadera' : 'Camiseta'} ${this.colorSingularLabel(group.color)} - ${size}`,
           sku: null,
           supplierSku: null,
+          stockItemId: null,
           pendingOrderNeed: 0,
           currentInternalStock: 0,
           minStockTarget: 0,
+          alreadyOrderedQuantity: 0,
           recommendedPurchaseQuantity: 0,
           supplierAvailableQuantity: null
         })
@@ -529,6 +665,19 @@ interface MatrixDemand {
   quantity: number;
 }
 
+interface PickingListLine {
+  key: string;
+  kind: string;
+  color: string;
+  size: string;
+  subproductName: string;
+  sku: string | null;
+  stockItemId: string | null;
+  stockAvailable: number;
+  quantity: number;
+  orderItems: Array<{ id: string; title: string; sku: string; quantity: number }>;
+}
+
 interface ProductSubproductMappingInput {
   productName: string;
   productType?: string;
@@ -562,9 +711,11 @@ interface PurchaseMatrixGroup {
     subproductName: string;
     sku: string | null;
     supplierSku: string | null;
+    stockItemId: string | null;
     pendingOrderNeed: number;
     currentInternalStock: number;
     minStockTarget: number;
+    alreadyOrderedQuantity: number;
     recommendedPurchaseQuantity: number;
     supplierAvailableQuantity: number | null;
   }>;
