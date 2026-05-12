@@ -195,6 +195,7 @@ export class OrdersService {
       current.push({ ...row, orderNumber });
       grouped.set(orderNumber, current);
     }
+    const pendingOrderNumbers = new Set(grouped.keys());
 
     const imported = [];
     const skipped = [];
@@ -242,7 +243,55 @@ export class OrdersService {
       imported.push(order);
     }
 
-    return { receivedRows: rows.length, imported: imported.length, skipped: skipped.length, skippedOrders: skipped, orders: imported };
+    const archived = await this.archivePreparedSheetOrders(pendingOrderNumbers);
+
+    return {
+      receivedRows: rows.length,
+      imported: imported.length,
+      skipped: skipped.length,
+      archivedPrepared: archived.length,
+      skippedOrders: skipped,
+      archivedOrders: archived,
+      orders: imported
+    };
+  }
+
+  private async archivePreparedSheetOrders(pendingOrderNumbers: Set<string>) {
+    const staleOrders = await this.prisma.order.findMany({
+      where: {
+        shopifyOrderId: { startsWith: 'sheet:' },
+        orderNumber: { notIn: [...pendingOrderNumbers] },
+        operationalStatus: { notIn: ['SHIPPED', 'CANCELLED'] }
+      },
+      select: { id: true, orderNumber: true }
+    });
+
+    if (!staleOrders.length) return [];
+
+    const now = new Date();
+    await this.prisma.order.updateMany({
+      where: { id: { in: staleOrders.map((order) => order.id) } },
+      data: {
+        operationalStatus: 'SHIPPED',
+        fulfillmentStatus: 'fulfilled',
+        preparedAt: now
+      }
+    });
+    await this.prisma.productionTask.updateMany({
+      where: { orderId: { in: staleOrders.map((order) => order.id) } },
+      data: { status: 'DONE', completedAt: now }
+    });
+
+    for (const order of staleOrders) {
+      await this.activity.log({
+        entityType: 'Order',
+        entityId: order.id,
+        action: 'SHEET_IMPORT_ARCHIVED_PREPARED',
+        message: `Pedido ${order.orderNumber} archivado porque ya aparece preparado en la hoja`
+      });
+    }
+
+    return staleOrders;
   }
 
   async handleShopifyOrderCreated(payload: unknown, hmac?: string, rawBody?: Buffer) {
