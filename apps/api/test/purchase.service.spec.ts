@@ -21,4 +21,33 @@ describe('PurchaseService', () => {
       alreadyOrderedQuantity: 0
     })).toBe(0);
   });
+
+  it('prioriza tipo/color/talla del producto como la hoja de compras', () => {
+    const service = new PurchaseService({} as never, { get: () => undefined } as never) as unknown as {
+      mapOrderItemToBlankGarment: (item: {
+        productType?: string;
+        title: string;
+        sku: string;
+        color?: string;
+        size?: string;
+        variantTitle?: string;
+      }, mappingIndex?: Map<string, string>) => { kind: string; color: string; size: string; subproductName: string } | null;
+    };
+    const mappingIndex = new Map([
+      ['name:camiseta \"test\" - m', 'Camiseta Negra - M']
+    ]);
+
+    expect(service.mapOrderItemToBlankGarment({
+      productType: 'Camiseta',
+      title: 'Camiseta "Test" - M',
+      sku: 'TEST-M',
+      color: 'Blanca',
+      size: 'M'
+    }, mappingIndex)).toMatchObject({
+      kind: 'CAMISETA',
+      color: 'BLANCA',
+      size: 'M',
+      subproductName: 'Camiseta Blanca - M'
+    });
+  });
 });

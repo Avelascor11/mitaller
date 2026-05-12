@@ -228,7 +228,8 @@ export class OrdersService {
           imageUrlsJson: row.imageUrl ? [row.imageUrl] : [],
           color: row.color || undefined,
           size: row.size || undefined,
-          productType: row.productType || undefined
+          productType: row.productType || undefined,
+          status: row.purchased ? 'RESERVED' : 'PENDING'
         }))
       });
 
@@ -445,6 +446,7 @@ export interface ImportedOrder {
     productType?: string;
     unitPrice?: number;
     lineDiscount?: number;
+    status?: 'PENDING' | 'RESERVED' | 'IN_PRODUCTION' | 'PRODUCED' | 'PICKED' | 'BLOCKED' | 'CANCELLED';
   }>;
 }
 
@@ -459,4 +461,5 @@ interface SheetPendingOrderRow {
   size?: string;
   sku?: string;
   imageUrl?: string;
+  purchased?: boolean;
 }
