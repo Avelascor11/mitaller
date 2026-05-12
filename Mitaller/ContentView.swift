@@ -810,7 +810,7 @@ final class WorkshopStore {
             let shipment = try await client.scanLabel(orderId: order.remoteID ?? order.number, barcode: barcode, photo: photo)
             if let index = orders.firstIndex(where: { $0.id == order.id }) {
                 orders[index].tracking = shipment.trackingNumber ?? barcode
-                orders[index].status = .labelCreated
+                orders[index].status = .shipped
                 if orders[index].printStatus == .none {
                     orders[index].printStatus = shipment.labelUrl == nil ? .none : .pending
                 }
@@ -1888,10 +1888,10 @@ struct ShippingView: View {
             .sorted { $0.deadline < $1.deadline }
     }
 
-    // En envíos solo deben aparecer los que falten por crear etiqueta o por escanear.
-    // Cuando la etiqueta está creada Y escaneada (tracking ≠ nil) → al tab Finalizados.
+    // En envíos deben seguir apareciendo los pedidos con etiqueta creada aunque Sendcloud ya devuelva tracking.
+    // Solo salen de aquí cuando se escanea la etiqueta o se finalizan sin etiqueta.
     var pendingShipping: [WorkshopOrder] {
-        allShippingCandidates.filter { $0.tracking == nil }
+        allShippingCandidates
     }
 
     var filteredOrders: [WorkshopOrder] {
@@ -1929,7 +1929,7 @@ struct ShippingView: View {
 
                     LazyVGrid(columns: [GridItem(.adaptive(minimum: 104), spacing: 10)], spacing: 10) {
                         MetricTile(title: "Pendientes", value: pendingShipping.count, color: AppTheme.blue, icon: "shippingbox.fill")
-                        MetricTile(title: "Sin etiqueta", value: pendingShipping.filter { $0.tracking == nil && $0.status == .readyForLabel }.count, color: AppTheme.amber, icon: "tag")
+                        MetricTile(title: "Sin etiqueta", value: pendingShipping.filter { $0.status == .readyForLabel && $0.printStatus == .none }.count, color: AppTheme.amber, icon: "tag")
                         MetricTile(title: "Imprimir", value: pendingShipping.filter { $0.printStatus == .pending }.count, color: AppTheme.magenta, icon: "printer.fill")
                     }
 
@@ -1954,7 +1954,7 @@ struct ShippingView: View {
                             pendingShipping.isEmpty ? "Sin envíos pendientes" : "Sin resultados",
                             systemImage: pendingShipping.isEmpty ? "checkmark.seal" : "magnifyingglass",
                             description: Text(pendingShipping.isEmpty
-                                ? "Cuando marques un pedido como preparado aparecerá aquí. Los ya escaneados están en Finalizados."
+                                ? "Cuando marques un pedido como preparado aparecerá aquí. Los escaneados pasan a Finalizados."
                                 : "Ningún pedido coincide con «\(searchText)»."
                             )
                         )
@@ -2059,7 +2059,11 @@ struct ShippingOrderCard: View {
             .background(AppTheme.surfaceSoft)
             .clipShape(RoundedRectangle(cornerRadius: 14))
 
-            if let tracking = order.tracking {
+            if let tracking = order.tracking, order.status == .labelCreated {
+                Label("Tracking generado: \(tracking). Falta escanear la etiqueta.", systemImage: "barcode.viewfinder")
+                    .font(.subheadline.weight(.bold))
+                    .foregroundStyle(AppTheme.amber)
+            } else if let tracking = order.tracking {
                 Label(tracking, systemImage: "barcode.viewfinder")
                     .font(.subheadline.weight(.bold))
                     .foregroundStyle(AppTheme.teal)
@@ -2074,7 +2078,7 @@ struct ShippingOrderCard: View {
             }
 
             VStack(spacing: 9) {
-                if order.tracking == nil {
+                if order.status == .readyForLabel && order.printStatus == .none {
                     Button { Task { await store.createLabelRemote(for: order) } } label: {
                         if store.labelCreationOrderID == order.id {
                             ProgressView().frame(maxWidth: .infinity)
@@ -2091,7 +2095,7 @@ struct ShippingOrderCard: View {
                     if store.labelScanOrderID == order.id {
                         ProgressView().frame(maxWidth: .infinity)
                     } else {
-                        Label(order.tracking == nil ? "Escanear codigo de etiqueta" : "Releer codigo de etiqueta", systemImage: "barcode.viewfinder")
+                        Label("Escanear codigo de etiqueta", systemImage: "barcode.viewfinder")
                             .frame(maxWidth: .infinity)
                     }
                 }

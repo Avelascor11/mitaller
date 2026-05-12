@@ -164,7 +164,7 @@ export class ShipmentsService {
         where: { id: existingShipment.id },
         data: {
           trackingNumber: cleanBarcode,
-          status: 'LABEL_CREATED',
+          status: 'IN_TRANSIT',
           ...photoData
         }
       })
@@ -173,7 +173,7 @@ export class ShipmentsService {
           orderId: order.id,
           provider: 'SENDCLOUD',
           trackingNumber: cleanBarcode,
-          status: 'LABEL_CREATED',
+          status: 'IN_TRANSIT',
           ...photoData
         }
       });
@@ -181,7 +181,7 @@ export class ShipmentsService {
     await this.prisma.order.update({
       where: { id: order.id },
       data: {
-        operationalStatus: 'LABEL_CREATED',
+        operationalStatus: 'SHIPPED',
         fulfillmentStatus: 'fulfilled'
       }
     });
@@ -205,7 +205,7 @@ export class ShipmentsService {
       trackingNumber: cleanBarcode,
       order: {
         ...order,
-        operationalStatus: 'LABEL_CREATED',
+        operationalStatus: 'SHIPPED',
         fulfillmentStatus: 'fulfilled'
       },
       shopifyResult
