@@ -22,7 +22,7 @@ describe('PurchaseService', () => {
     })).toBe(0);
   });
 
-  it('prioriza tipo/color/talla del producto como la hoja de compras', () => {
+  it('prioriza el subproducto mapeado porque es la ropa base a comprar', () => {
     const service = new PurchaseService({} as never, { get: () => undefined } as never) as unknown as {
       mapOrderItemToBlankGarment: (item: {
         productType?: string;
@@ -45,9 +45,9 @@ describe('PurchaseService', () => {
       size: 'M'
     }, mappingIndex)).toMatchObject({
       kind: 'CAMISETA',
-      color: 'BLANCA',
+      color: 'NEGRA',
       size: 'M',
-      subproductName: 'Camiseta Blanca - M'
+      subproductName: 'Camiseta Negra - M'
     });
   });
 

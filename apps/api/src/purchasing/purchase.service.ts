@@ -225,14 +225,15 @@ export class PurchaseService {
   }
 
   private mapOrderItemToBlankGarment(item: { productType?: string | null; title: string; sku: string; color?: string | null; size?: string | null; variantTitle?: string | null }, mappingIndex?: Map<string, string>) {
-    const direct = this.mapDirectProductAttributes(item);
-    if (direct) return direct;
-
     const mappedSubproduct = mappingIndex?.get(`name:${this.normalizeText(item.title)}`) ?? (this.isReliableSku(item.sku) ? mappingIndex?.get(`sku:${item.sku}`) : undefined);
     if (mappedSubproduct) {
       const mapped = this.mapSubproductName(mappedSubproduct);
       if (mapped) return mapped;
     }
+
+    const direct = this.mapDirectProductAttributes(item);
+    if (direct) return direct;
+
     const kind = this.inferGarmentKind(`${item.productType ?? ''} ${item.title} ${item.sku}`);
     const color = this.normalizeColor(`${item.color ?? ''} ${item.variantTitle ?? ''} ${item.title}`);
     const size = this.normalizeSize(`${item.size ?? ''} ${item.variantTitle ?? ''} ${item.title}`);
