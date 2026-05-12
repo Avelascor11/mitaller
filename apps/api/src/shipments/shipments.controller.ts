@@ -16,6 +16,11 @@ export class ShipmentsController {
     return this.shipments.confirmLabelScan(orderId, body.barcode, body.photoBase64);
   }
 
+  @Post(':orderId/finalize-without-label')
+  finalizeWithoutLabel(@Param('orderId') orderId: string) {
+    return this.shipments.finalizeWithoutLabel(orderId);
+  }
+
   @Post(':orderId/package-photo')
   packagePhoto(@Param('orderId') orderId: string, @Body() body: { photoBase64?: string }) {
     return this.shipments.savePackagePhoto(orderId, body.photoBase64 ?? '');

@@ -106,6 +106,44 @@ export class ShipmentsService {
     return { ...shipment, printResult };
   }
 
+  async finalizeWithoutLabel(orderId: string) {
+    const order = await this.prisma.order.findFirstOrThrow({
+      where: { OR: [{ id: orderId }, { orderNumber: orderId }] },
+      include: { shipments: { orderBy: { createdAt: 'desc' } } }
+    });
+    const existing = order.shipments.find((shipment) => shipment.provider === 'MANUAL' && shipment.status === 'DELIVERED');
+    const shipment = existing
+      ? await this.prisma.shipment.update({
+        where: { id: existing.id },
+        data: { status: 'DELIVERED' }
+      })
+      : await this.prisma.shipment.create({
+        data: {
+          orderId: order.id,
+          provider: 'MANUAL',
+          carrier: 'Sin etiqueta',
+          status: 'DELIVERED'
+        }
+      });
+
+    await this.prisma.order.update({
+      where: { id: order.id },
+      data: {
+        operationalStatus: 'SHIPPED',
+        fulfillmentStatus: 'fulfilled'
+      }
+    });
+
+    await this.activity.log({
+      entityType: 'Shipment',
+      entityId: shipment.id,
+      action: 'FINALIZED_WITHOUT_LABEL',
+      message: `Pedido ${order.orderNumber} finalizado sin etiqueta`
+    });
+
+    return { ...shipment, order: { ...order, operationalStatus: 'SHIPPED', fulfillmentStatus: 'fulfilled' } };
+  }
+
   async confirmLabelScan(orderId: string, barcode?: string, photoBase64?: string) {
     const cleanBarcode = barcode?.trim();
     if (!cleanBarcode) {

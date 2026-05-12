@@ -748,6 +748,26 @@ final class WorkshopStore {
         }
     }
 
+    func finalizeWithoutLabelRemote(for order: WorkshopOrder) async {
+        guard let client = apiClient else { return }
+        labelCreationOrderID = order.id
+        syncError = nil
+        defer { labelCreationOrderID = nil }
+
+        do {
+            _ = try await client.finalizeWithoutLabel(orderId: order.remoteID ?? order.number)
+            if let index = orders.firstIndex(where: { $0.id == order.id }) {
+                orders[index].status = .shipped
+                orders[index].tracking = nil
+                orders[index].printStatus = .none
+            }
+            await syncFromAPI()
+        } catch {
+            syncError = "No se pudo finalizar sin etiqueta: \(error.localizedDescription)"
+            await syncFromAPI()
+        }
+    }
+
     func setStockQuantity(sku: String, quantity: Int) async {
         guard let client = apiClient else { return }
         syncError = nil
@@ -2005,6 +2025,22 @@ struct ShippingOrderCard: View {
                 .buttonStyle(.borderedProminent)
                 .tint(AppTheme.teal)
                 .disabled(store.labelScanOrderID != nil)
+
+                if order.tracking == nil && order.printStatus == .none {
+                    Button {
+                        Task { await store.finalizeWithoutLabelRemote(for: order) }
+                    } label: {
+                        if store.labelCreationOrderID == order.id {
+                            ProgressView().frame(maxWidth: .infinity)
+                        } else {
+                            Label("Finalizar sin etiqueta", systemImage: "checkmark.seal.fill")
+                                .frame(maxWidth: .infinity)
+                        }
+                    }
+                    .buttonStyle(.bordered)
+                    .tint(AppTheme.green)
+                    .disabled(store.labelCreationOrderID != nil)
+                }
 
                 if order.tracking != nil || order.printStatus != .none {
                     Button {

@@ -115,6 +115,11 @@ struct APIClient {
         return try await perform(request)
     }
 
+    func finalizeWithoutLabel(orderId: String) async throws -> ShipmentDTO {
+        let request = try jsonRequest(path: "/shipments/\(Self.pathSegment(orderId))/finalize-without-label", method: "POST", body: EmptyBody())
+        return try await perform(request)
+    }
+
     func finalizedShipments() async throws -> [FinalizedShipment] {
         try await get("/shipments/finalized")
     }
