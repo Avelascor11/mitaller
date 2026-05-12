@@ -555,6 +555,7 @@ final class WorkshopStore {
     var stock: [StockRow] = []
     var purchaseNeeds: [PurchaseNeed] = []
     var purchaseMatrix: [PurchaseMatrixGroup] = []
+    var mappingWorkbench: MappingWorkbench?
 
     var priorityQueue: [WorkshopTask] {
         tasks
@@ -636,6 +637,36 @@ final class WorkshopStore {
     func syncQuietlyIfIdle() async {
         guard labelCreationOrderID == nil, labelScanOrderID == nil, !isLoading else { return }
         await syncFromAPI()
+    }
+
+    func loadMappingWorkbench() async {
+        guard let client = apiClient else { return }
+        syncError = nil
+        do {
+            mappingWorkbench = try await client.mappingWorkbench()
+        } catch {
+            syncError = "No se pudieron cargar los mapeos: \(error.localizedDescription)"
+        }
+    }
+
+    func saveMapping(for product: UnmappedProduct, subproductName: String) async {
+        guard let client = apiClient else { return }
+        syncError = nil
+        do {
+            _ = try await client.saveProductMapping(ProductMappingSaveRequest(
+                productName: product.productName,
+                productType: product.productType,
+                color: product.color,
+                size: product.size ?? product.variantTitle,
+                sku: product.sku.isEmpty ? nil : product.sku,
+                subproductName: subproductName,
+                imageRef: nil
+            ))
+            mappingWorkbench = try await client.mappingWorkbench()
+            try await loadSnapshot(from: client)
+        } catch {
+            syncError = "No se pudo guardar el mapeo: \(error.localizedDescription)"
+        }
     }
 
     private func loadSnapshot(from client: APIClient) async throws {
@@ -2576,12 +2607,153 @@ struct AdminView: View {
                     Label("Sendcloud real obligatorio para etiquetas", systemImage: "tag.fill")
                     Label("Falk & Ross CSV/XML preparado", systemImage: "tray.and.arrow.down.fill")
                 }
+                Section("Mapeos internos") {
+                    NavigationLink {
+                        MappingAdminView()
+                    } label: {
+                        Label("Productos Shopify -> ropa base", systemImage: "link.badge.plus")
+                    }
+                    Text("La hoja ya no manda: si falta un producto, se asigna aqui y Compras recalcula.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
             }
             .listStyle(.insetGrouped)
             .scrollContentBackground(.hidden)
             .screenBackground()
             .navigationTitle("Admin")
         }
+    }
+}
+
+struct MappingAdminView: View {
+    @Environment(WorkshopStore.self) private var store
+    @State private var selections: [String: String] = [:]
+
+    var body: some View {
+        List {
+            Section {
+                Button {
+                    Task { await store.loadMappingWorkbench() }
+                } label: {
+                    Label("Actualizar mapeos", systemImage: "arrow.clockwise")
+                }
+                if let syncError = store.syncError {
+                    Text(syncError)
+                        .font(.footnote)
+                        .foregroundStyle(.orange)
+                }
+            } footer: {
+                Text("Shopify y la base de datos son la fuente real. La hoja no se usa para trabajar a diario.")
+            }
+
+            if let workbench = store.mappingWorkbench {
+                Section("Sin mapear (\(workbench.unmapped.count))") {
+                    if workbench.unmapped.isEmpty {
+                        Label("Todo lo pendiente tiene subproducto asignado", systemImage: "checkmark.seal.fill")
+                            .foregroundStyle(AppTheme.green)
+                    } else {
+                        ForEach(workbench.unmapped) { product in
+                            MappingProductRow(
+                                product: product,
+                                options: workbench.stockItems,
+                                selection: Binding(
+                                    get: { selections[product.key] ?? "" },
+                                    set: { selections[product.key] = $0 }
+                                )
+                            ) {
+                                guard let selected = selections[product.key], !selected.isEmpty else { return }
+                                Task { await store.saveMapping(for: product, subproductName: selected) }
+                            }
+                        }
+                    }
+                }
+
+                Section("Mapeos guardados") {
+                    ForEach(workbench.mappings.prefix(40)) { mapping in
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(mapping.productName)
+                                .font(.subheadline.weight(.semibold))
+                            Text(mapping.subproductName)
+                                .font(.caption.weight(.bold))
+                                .foregroundStyle(AppTheme.blue)
+                            if !mapping.sku.isEmpty {
+                                Text(mapping.sku)
+                                    .font(.caption2.monospaced())
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+                }
+            } else {
+                Section {
+                    ContentUnavailableView("Mapeos no cargados", systemImage: "link", description: Text("Pulsa Actualizar mapeos para revisar productos pendientes."))
+                }
+            }
+        }
+        .listStyle(.insetGrouped)
+        .scrollContentBackground(.hidden)
+        .screenBackground()
+        .navigationTitle("Mapeos")
+        .task {
+            if store.mappingWorkbench == nil {
+                await store.loadMappingWorkbench()
+            }
+        }
+        .refreshable {
+            await store.loadMappingWorkbench()
+        }
+    }
+}
+
+struct MappingProductRow: View {
+    let product: UnmappedProduct
+    let options: [BlankSubproductOption]
+    @Binding var selection: String
+    var onSave: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            VStack(alignment: .leading, spacing: 4) {
+                HStack {
+                    Text(product.productName)
+                        .font(.headline)
+                    Spacer()
+                    Text("\(product.pendingQuantity) ud.")
+                        .font(.caption.weight(.black))
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                        .background(AppTheme.amber.opacity(0.18))
+                        .clipShape(RoundedRectangle(cornerRadius: 8))
+                }
+                Text(product.orderNumbers.joined(separator: ", "))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                if !product.sku.isEmpty {
+                    Text(product.sku)
+                        .font(.caption2.monospaced())
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            Picker("Ropa base", selection: $selection) {
+                Text("Elegir subproducto").tag("")
+                ForEach(options) { option in
+                    Text(option.name).tag(option.name)
+                }
+            }
+
+            Button {
+                onSave()
+            } label: {
+                Label("Guardar mapeo", systemImage: "checkmark.circle.fill")
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.borderedProminent)
+            .tint(AppTheme.blue)
+            .disabled(selection.isEmpty)
+        }
+        .padding(.vertical, 6)
     }
 }
 

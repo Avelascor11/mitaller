@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { BadRequestException, Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Cron } from '@nestjs/schedule';
 import { OperationalStatus, Prisma, StockItem } from '@prisma/client';
@@ -68,6 +68,117 @@ export class PurchaseService {
     }
 
     return { received: mappings.length, imported: imported.length };
+  }
+
+  getProductMappings() {
+    return this.prisma.productSubproductMapping.findMany({
+      orderBy: [{ productName: 'asc' }]
+    });
+  }
+
+  async saveProductMapping(mapping: ProductSubproductMappingInput) {
+    const clean = this.cleanProductMapping(mapping);
+    if (!clean.productName || !clean.subproductName) {
+      throw new BadRequestException('productName y subproductName son obligatorios');
+    }
+    return this.prisma.productSubproductMapping.upsert({
+      where: { productName: clean.productName },
+      update: {
+        productType: clean.productType,
+        color: clean.color,
+        size: clean.size,
+        sku: clean.sku,
+        subproductName: clean.subproductName,
+        imageRef: clean.imageRef,
+        source: 'APP'
+      },
+      create: {
+        productName: clean.productName,
+        productType: clean.productType,
+        color: clean.color,
+        size: clean.size,
+        sku: clean.sku,
+        subproductName: clean.subproductName,
+        imageRef: clean.imageRef,
+        source: 'APP'
+      }
+    });
+  }
+
+  async getMappingWorkbench() {
+    const pendingStatuses: OperationalStatus[] = [
+      OperationalStatus.NEW,
+      OperationalStatus.WAITING_STOCK,
+      OperationalStatus.WAITING_PRODUCTION,
+      OperationalStatus.IN_PRODUCTION,
+      OperationalStatus.PRODUCED,
+      OperationalStatus.WAITING_PICKING,
+      OperationalStatus.PICKED,
+      OperationalStatus.BLOCKED
+    ];
+    const [mappings, stockItems, orderItems] = await Promise.all([
+      this.prisma.productSubproductMapping.findMany({ orderBy: [{ productName: 'asc' }] }),
+      this.prisma.stockItem.findMany({
+        where: { type: 'BLANK_GARMENT' },
+        orderBy: [{ name: 'asc' }]
+      }),
+      this.prisma.orderItem.findMany({
+        where: {
+          order: { operationalStatus: { in: pendingStatuses } },
+          status: { not: 'CANCELLED' }
+        },
+        include: { order: true }
+      })
+    ]);
+    const mappingIndex = this.buildMappingIndex(mappings);
+    const unmapped = new Map<string, UnmappedProduct>();
+
+    for (const item of this.filterByMinimumOrderNumber(orderItems)) {
+      const titleKey = `name:${this.normalizeText(item.title)}`;
+      const skuKey = this.isReliableSku(item.sku) ? `sku:${item.sku}` : '';
+      if (mappingIndex.has(titleKey) || (skuKey && mappingIndex.has(skuKey))) continue;
+
+      const key = this.isReliableSku(item.sku) ? `sku:${item.sku}` : `name:${this.normalizeText(item.title)}`;
+      const current = unmapped.get(key) ?? {
+        key,
+        productName: item.title,
+        sku: this.isReliableSku(item.sku) ? item.sku : '',
+        productType: item.productType,
+        color: item.color,
+        size: item.size,
+        variantTitle: item.variantTitle,
+        pendingQuantity: 0,
+        orderNumbers: []
+      };
+      current.pendingQuantity += item.quantity;
+      if (!current.orderNumbers.includes(item.order.orderNumber)) current.orderNumbers.push(item.order.orderNumber);
+      unmapped.set(key, current);
+    }
+
+    return {
+      mappings,
+      stockItems: stockItems.map((item) => ({
+        id: item.id,
+        sku: item.sku,
+        name: item.name,
+        color: item.color,
+        size: item.size,
+        supplierSku: item.supplierSku
+      })),
+      unmapped: [...unmapped.values()].sort((left, right) => right.pendingQuantity - left.pendingQuantity)
+    };
+  }
+
+  private cleanProductMapping(mapping: ProductSubproductMappingInput) {
+    return {
+      productName: mapping.productName?.trim(),
+      productType: mapping.productType?.trim() || null,
+      color: mapping.color?.trim() || null,
+      size: mapping.size?.trim() || null,
+      sku: mapping.sku?.trim() || '',
+      subproductName: mapping.subproductName?.trim(),
+      imageRef: mapping.imageRef?.trim() || null
+    };
   }
 
   async getPurchaseMatrix() {
@@ -426,6 +537,18 @@ interface ProductSubproductMappingInput {
   sku?: string;
   subproductName: string;
   imageRef?: string;
+}
+
+interface UnmappedProduct {
+  key: string;
+  productName: string;
+  sku: string;
+  productType?: string | null;
+  color?: string | null;
+  size?: string | null;
+  variantTitle?: string | null;
+  pendingQuantity: number;
+  orderNumbers: string[];
 }
 
 interface PurchaseMatrixGroup {

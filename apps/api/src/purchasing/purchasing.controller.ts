@@ -24,6 +24,21 @@ export class PurchasingController {
   importProductMappings(@Body() body: { mappings?: ProductSubproductMappingInput[] }) {
     return this.purchase.importProductMappings(body.mappings ?? []);
   }
+
+  @Get('product-mappings')
+  productMappings() {
+    return this.purchase.getProductMappings();
+  }
+
+  @Get('mapping-workbench')
+  mappingWorkbench() {
+    return this.purchase.getMappingWorkbench();
+  }
+
+  @Post('product-mappings')
+  saveProductMapping(@Body() body: ProductSubproductMappingInput) {
+    return this.purchase.saveProductMapping(body);
+  }
 }
 
 interface ProductSubproductMappingInput {

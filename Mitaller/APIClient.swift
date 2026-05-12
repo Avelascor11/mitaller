@@ -147,6 +147,15 @@ struct APIClient {
         let _: StockDTO = try await perform(request)
     }
 
+    func mappingWorkbench() async throws -> MappingWorkbench {
+        try await get("/purchase-needs/mapping-workbench")
+    }
+
+    func saveProductMapping(_ mapping: ProductMappingSaveRequest) async throws -> ProductMapping {
+        let request = try jsonRequest(path: "/purchase-needs/product-mappings", method: "POST", body: mapping)
+        return try await perform(request)
+    }
+
     func uploadManualLabel(filename: String, pdfData: Data) async throws -> ManualPrintResponse {
         let request = try jsonRequest(
             path: "/manual-print",
@@ -251,6 +260,56 @@ private struct ManualPrintRequest: Encodable {
 private struct MarkPreparedRequest: Encodable {
     let photoBase64: String?
 }
+
+struct ProductMappingSaveRequest: Encodable {
+    let productName: String
+    let productType: String?
+    let color: String?
+    let size: String?
+    let sku: String?
+    let subproductName: String
+    let imageRef: String?
+}
+
+struct MappingWorkbench: Decodable {
+    let mappings: [ProductMapping]
+    let stockItems: [BlankSubproductOption]
+    let unmapped: [UnmappedProduct]
+}
+
+struct ProductMapping: Decodable, Identifiable {
+    let id: String
+    let productName: String
+    let productType: String?
+    let color: String?
+    let size: String?
+    let sku: String
+    let subproductName: String
+    let imageRef: String?
+}
+
+struct BlankSubproductOption: Decodable, Identifiable {
+    let id: String
+    let sku: String
+    let name: String
+    let color: String?
+    let size: String?
+    let supplierSku: String?
+}
+
+struct UnmappedProduct: Decodable, Identifiable {
+    var id: String { key }
+    let key: String
+    let productName: String
+    let sku: String
+    let productType: String?
+    let color: String?
+    let size: String?
+    let variantTitle: String?
+    let pendingQuantity: Int
+    let orderNumbers: [String]
+}
+
 struct ManualPrintResponse: Decodable {
     let id: String
     let filename: String
