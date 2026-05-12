@@ -275,10 +275,13 @@ export class PurchaseService {
     return Boolean(normalized) && !normalized.startsWith('WRONG-') && !normalized.startsWith('NO-SKU');
   }
 
-  private filterByMinimumOrderNumber<T extends { order: { orderNumber: string } }>(items: T[]) {
+  private filterByMinimumOrderNumber<T extends { order: { orderNumber: string; shopifyOrderId?: string } }>(items: T[]) {
     const minimum = Number(this.config.get('SHOPIFY_MIN_ORDER_NUMBER') ?? 0);
     if (!minimum) return items;
-    return items.filter((item) => this.orderNumberValue(item.order.orderNumber) >= minimum);
+    return items.filter((item) =>
+      item.order.shopifyOrderId?.startsWith('sheet:') ||
+      this.orderNumberValue(item.order.orderNumber) >= minimum
+    );
   }
 
   private orderNumberValue(orderNumber: string) {

@@ -50,4 +50,19 @@ describe('PurchaseService', () => {
       subproductName: 'Camiseta Blanca - M'
     });
   });
+
+  it('no filtra pedidos importados desde hoja aunque sean anteriores al mínimo Shopify', () => {
+    const service = new PurchaseService({} as never, { get: () => '9454' } as never) as unknown as {
+      filterByMinimumOrderNumber: <T extends { order: { orderNumber: string; shopifyOrderId?: string } }>(items: T[]) => T[];
+    };
+
+    expect(service.filterByMinimumOrderNumber([
+      { order: { orderNumber: '#9436', shopifyOrderId: 'sheet:#9436' } },
+      { order: { orderNumber: '#9437', shopifyOrderId: 'gid://shopify/Order/1' } },
+      { order: { orderNumber: '#9454', shopifyOrderId: 'gid://shopify/Order/2' } }
+    ])).toEqual([
+      { order: { orderNumber: '#9436', shopifyOrderId: 'sheet:#9436' } },
+      { order: { orderNumber: '#9454', shopifyOrderId: 'gid://shopify/Order/2' } }
+    ]);
+  });
 });
