@@ -80,7 +80,8 @@ export class ShipmentsService {
       where: { OR: [{ id: orderId }, { orderNumber: orderId }] },
       include: { items: true }
     });
-    const label = await this.sendcloud.createShipment(order);
+    const parcel = await this.sendcloud.createParcel(order);
+    const label = await this.sendcloud.createLabel(parcel.parcelId);
     const shipment = await this.prisma.shipment.create({
       data: {
         orderId: order.id,
@@ -89,8 +90,8 @@ export class ShipmentsService {
         trackingNumber: label.trackingNumber,
         carrier: label.carrier,
         labelUrl: label.labelUrl,
-        cost: label.cost ?? null,
-        costCurrency: label.costCurrency ?? null,
+        cost: null,
+        costCurrency: null,
         status: 'LABEL_CREATED'
       }
     });
@@ -101,7 +102,7 @@ export class ShipmentsService {
       entityId: shipment.id,
       action: 'LABEL_CREATED',
       message: `Etiqueta creada para ${order.orderNumber}`,
-      metadataJson: { label, printResult }
+      metadataJson: { parcel, label, printResult }
     });
     return { ...shipment, printResult };
   }

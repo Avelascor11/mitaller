@@ -412,10 +412,14 @@ export class SendcloudAdapter {
   }
 
   private get shipWithRulesFallback() {
+    const shippingOptionCode = this.config.get<string>('SENDCLOUD_SHIPPING_OPTION_CODE')?.trim();
+    if (!shippingOptionCode) {
+      throw new BadRequestException('Falta SENDCLOUD_SHIPPING_OPTION_CODE para usar reglas Sendcloud v3. No se usara el fallback sendcloud:letter.');
+    }
     return {
       type: 'shipping_option_code',
       properties: {
-        shipping_option_code: this.config.get<string>('SENDCLOUD_SHIPPING_OPTION_CODE') ?? 'sendcloud:letter'
+        shipping_option_code: shippingOptionCode
       }
     };
   }
