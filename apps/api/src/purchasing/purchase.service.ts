@@ -28,6 +28,48 @@ export class PurchaseService {
     });
   }
 
+  async importProductMappings(mappings: ProductSubproductMappingInput[]) {
+    const cleanMappings = mappings
+      .map((mapping) => ({
+        productName: mapping.productName?.trim(),
+        productType: mapping.productType?.trim() || null,
+        color: mapping.color?.trim() || null,
+        size: mapping.size?.trim() || null,
+        sku: mapping.sku?.trim() || '',
+        subproductName: mapping.subproductName?.trim(),
+        imageRef: mapping.imageRef?.trim() || null
+      }))
+      .filter((mapping) => mapping.productName && mapping.subproductName);
+
+    const imported = [];
+    for (const mapping of cleanMappings) {
+      imported.push(await this.prisma.productSubproductMapping.upsert({
+        where: { productName: mapping.productName },
+        update: {
+          productType: mapping.productType,
+          color: mapping.color,
+          size: mapping.size,
+          sku: mapping.sku,
+          subproductName: mapping.subproductName,
+          imageRef: mapping.imageRef,
+          source: 'MEJOR PRODUCCION/PRODUCTOS'
+        },
+        create: {
+          productName: mapping.productName,
+          productType: mapping.productType,
+          color: mapping.color,
+          size: mapping.size,
+          sku: mapping.sku,
+          subproductName: mapping.subproductName,
+          imageRef: mapping.imageRef,
+          source: 'MEJOR PRODUCCION/PRODUCTOS'
+        }
+      }));
+    }
+
+    return { received: mappings.length, imported: imported.length };
+  }
+
   async getPurchaseMatrix() {
     const sizes = ['S', 'M', 'L', 'XL', 'XXL'];
     const pendingStatuses: OperationalStatus[] = [
@@ -374,6 +416,16 @@ interface MatrixDemand {
   color: string;
   size: string;
   quantity: number;
+}
+
+interface ProductSubproductMappingInput {
+  productName: string;
+  productType?: string;
+  color?: string;
+  size?: string;
+  sku?: string;
+  subproductName: string;
+  imageRef?: string;
 }
 
 interface PurchaseMatrixGroup {
