@@ -86,7 +86,7 @@ export class ShipmentsService {
         orderId: order.id,
         provider: 'SENDCLOUD',
         sendcloudParcelId: label.parcelId,
-        trackingNumber: label.trackingNumber,
+        trackingNumber: null,
         carrier: label.carrier,
         labelUrl: label.labelUrl,
         cost: label.cost ?? null,
@@ -268,7 +268,7 @@ export class ShipmentsService {
 
   async findFinalized() {
     const shipments = await this.prisma.shipment.findMany({
-      where: { status: { in: ['LABEL_CREATED', 'PRINTED', 'IN_TRANSIT', 'DELIVERED'] } },
+      where: { status: { in: ['IN_TRANSIT', 'DELIVERED'] } },
       include: {
         order: { select: { id: true, orderNumber: true, customerName: true, shippingMethod: true, packagePhoto: true, packagePhotoAt: true } }
       },

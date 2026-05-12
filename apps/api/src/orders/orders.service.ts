@@ -341,14 +341,19 @@ export class OrdersService {
       hasIncident
     });
     const locallyAdvancedStatuses = ['READY_FOR_LABEL', 'LABEL_CREATED', 'SHIPPED'];
+    const hasShipped = existingOrder?.shipments.some((shipment) =>
+      ['IN_TRANSIT', 'DELIVERED'].includes(shipment.status)
+    );
     const hasCreatedLabel = existingOrder?.shipments.some((shipment) =>
-      shipment.status === 'LABEL_CREATED' || Boolean(shipment.trackingNumber)
+      ['LABEL_CREATED', 'PRINTED'].includes(shipment.status)
     );
     const isCancelled = input.operationalStatus === 'CANCELLED';
     const operationalStatus = isCancelled
       ? 'CANCELLED'
       : isSheetImport
       ? calculated.operationalStatus
+      : hasShipped
+      ? 'SHIPPED'
       : hasCreatedLabel
       ? 'LABEL_CREATED'
       : existingOrder && locallyAdvancedStatuses.includes(existingOrder.operationalStatus)

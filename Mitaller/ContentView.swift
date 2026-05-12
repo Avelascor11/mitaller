@@ -790,7 +790,7 @@ final class WorkshopStore {
         do {
             let shipment = try await client.createLabel(orderId: order.remoteID ?? order.number)
             if let index = orders.firstIndex(where: { $0.id == order.id }) {
-                orders[index].tracking = shipment.trackingNumber
+                orders[index].tracking = nil
                 orders[index].status = .labelCreated
                 orders[index].printStatus = shipment.labelUrl == nil ? .none : .pending
             }
@@ -2103,7 +2103,7 @@ struct ShippingOrderCard: View {
                 .tint(AppTheme.teal)
                 .disabled(store.labelScanOrderID != nil)
 
-                if order.tracking == nil && order.printStatus == .none {
+                if order.status == .readyForLabel && order.printStatus == .none {
                     Button {
                         Task { await store.finalizeWithoutLabelRemote(for: order) }
                     } label: {
