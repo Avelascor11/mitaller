@@ -64,6 +64,7 @@ export class ShopifyAdapter {
                   id
                   title
                   quantity
+                  currentQuantity
                   sku
                   variantTitle
                   originalUnitPriceSet { shopMoney { amount } }
@@ -225,7 +226,7 @@ export class ShopifyAdapter {
           shippingLine { title code }
           lineItems(first: 100) {
             nodes {
-              id title quantity sku variantTitle
+              id title quantity currentQuantity sku variantTitle
               originalUnitPriceSet { shopMoney { amount } }
               discountedUnitPriceSet { shopMoney { amount } }
               totalDiscountSet { shopMoney { amount } }
@@ -274,7 +275,9 @@ export class ShopifyAdapter {
       fulfillmentStatus: order.fulfillment_status ?? 'unfulfilled',
       operationalStatus: order.cancelled_at ? 'CANCELLED' : undefined,
       orderedAt: order.created_at ? new Date(order.created_at) : new Date(),
-      items: lineItems.map((item) => this.mapWebhookLineItem(item))
+      items: lineItems
+        .map((item) => this.mapWebhookLineItem(item))
+        .filter((item) => item.quantity > 0)
     };
   }
 
@@ -343,7 +346,9 @@ export class ShopifyAdapter {
       totalTax: ShopifyAdapter.parseMoney(order.currentTotalTaxSet),
       totalShipping: ShopifyAdapter.parseMoney(order.totalShippingPriceSet),
       currency: order.currencyCode ?? order.currentTotalPriceSet?.shopMoney?.currencyCode,
-      items: order.lineItems.nodes.map((item) => this.mapGraphqlLineItem(item))
+      items: order.lineItems.nodes
+        .map((item) => this.mapGraphqlLineItem(item))
+        .filter((item) => item.quantity > 0)
     };
   }
 
@@ -365,7 +370,7 @@ export class ShopifyAdapter {
       sku: item.sku || item.variant?.sku || `NO-SKU-${item.id.split('/').pop()}`,
       title: item.title,
       variantTitle: item.variantTitle ?? item.variant?.title,
-      quantity: item.quantity,
+      quantity: item.currentQuantity ?? item.quantity,
       imageUrl: imageUrls[0],
       imageUrlsJson: imageUrls,
       color: getOption('color') ?? getOption('colour'),
@@ -386,7 +391,7 @@ export class ShopifyAdapter {
       sku: item.sku || `NO-SKU-${item.id}`,
       title: item.title ?? item.name ?? 'Producto Shopify',
       variantTitle: item.variant_title,
-      quantity: item.quantity ?? 1,
+      quantity: item.current_quantity ?? item.quantity ?? 1,
       imageUrl: undefined,
       imageUrlsJson: [],
       color: getProperty('Color') ?? getProperty('color'),
@@ -485,6 +490,7 @@ interface ShopifyLineItemNode {
   id: string;
   title: string;
   quantity: number;
+  currentQuantity?: number;
   sku?: string;
   variantTitle?: string;
   originalUnitPriceSet?: ShopifyMoneySet;
@@ -554,6 +560,7 @@ interface ShopifyWebhookLineItem {
   name?: string;
   variant_title?: string;
   quantity?: number;
+  current_quantity?: number;
   product_type?: string;
   properties?: Array<{ name?: string; value?: string }>;
 }
