@@ -1,9 +1,10 @@
 import { Body, Controller, Get, Param, Patch, Post } from '@nestjs/common';
+import { StockReceiptsService } from './stock-receipts.service';
 import { StockService } from './stock.service';
 
 @Controller('stock')
 export class StockController {
-  constructor(private readonly stock: StockService) {}
+  constructor(private readonly stock: StockService, private readonly receipts: StockReceiptsService) {}
 
   @Get()
   findAll() {
@@ -13,6 +14,21 @@ export class StockController {
   @Get('locations')
   locations() {
     return this.stock.locations();
+  }
+
+  @Get('receipts/recent')
+  recentReceipts() {
+    return this.receipts.recent();
+  }
+
+  @Post('receipts/scan')
+  scanReceipt(@Body() body: { rawText?: string; photoBase64?: string; supplier?: string }) {
+    return this.receipts.scanReceipt(body);
+  }
+
+  @Post('receipts/:id/confirm')
+  confirmReceipt(@Param('id') id: string, @Body() body: { lines?: Array<{ id?: string; stockItemId?: string; quantity?: number; detectedName?: string }> }) {
+    return this.receipts.confirmReceipt(id, body.lines ?? []);
   }
 
   @Get(':sku')

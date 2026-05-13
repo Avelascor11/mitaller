@@ -175,6 +175,20 @@ struct APIClient {
         return try await perform(request)
     }
 
+    func scanStockReceipt(rawText: String, photo: Data? = nil) async throws -> StockReceipt {
+        let request = try jsonRequest(
+            path: "/stock/receipts/scan",
+            method: "POST",
+            body: ScanStockReceiptRequest(rawText: rawText, photoBase64: photo?.base64EncodedString(), supplier: nil)
+        )
+        return try await perform(request)
+    }
+
+    func confirmStockReceipt(id: String, lines: [StockReceiptConfirmLine]) async throws -> StockReceipt {
+        let request = try jsonRequest(path: "/stock/receipts/\(Self.pathSegment(id))/confirm", method: "POST", body: ConfirmStockReceiptRequest(lines: lines))
+        return try await perform(request)
+    }
+
     func uploadManualLabel(filename: String, pdfData: Data) async throws -> ManualPrintResponse {
         let request = try jsonRequest(
             path: "/manual-print",
@@ -372,6 +386,16 @@ struct ReceivePurchaseLineRequest: Encodable {
 
 private struct ReceivePurchaseRequest: Encodable {
     let lines: [ReceivePurchaseLineRequest]
+}
+
+private struct ScanStockReceiptRequest: Encodable {
+    let rawText: String
+    let photoBase64: String?
+    let supplier: String?
+}
+
+private struct ConfirmStockReceiptRequest: Encodable {
+    let lines: [StockReceiptConfirmLine]
 }
 
 struct PurchaseOrderResponse: Decodable {

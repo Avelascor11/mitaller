@@ -93,6 +93,12 @@ enum ShipmentStatus {
   ERROR
 }
 
+enum StockReceiptStatus {
+  DRAFT
+  CONFIRMED
+  CANCELLED
+}
+
 model User {
   id              String           @id @default(cuid())
   name            String
@@ -201,6 +207,7 @@ model StockItem {
   updatedAt          DateTime           @updatedAt
   levels             StockLevel[]
   movements          StockMovement[]
+  receiptLines       StockReceiptLine[]
   recipeComponents   RecipeComponent[]
   purchaseNeeds      PurchaseNeed[]
 }
@@ -246,6 +253,36 @@ model StockMovement {
   relatedOrder    Order?         @relation(fields: [relatedOrderId], references: [id], onDelete: SetNull)
   relatedTask     ProductionTask? @relation(fields: [relatedTaskId], references: [id], onDelete: SetNull)
   user            User?          @relation(fields: [userId], references: [id], onDelete: SetNull)
+}
+
+model StockReceipt {
+  id             String              @id @default(cuid())
+  supplier       String?
+  source         String              @default("ALBARAN_OCR")
+  rawText        String?
+  photo          Bytes?
+  photoMimeType  String?
+  status         StockReceiptStatus  @default(DRAFT)
+  confirmedAt    DateTime?
+  createdAt      DateTime            @default(now())
+  updatedAt      DateTime            @updatedAt
+  lines          StockReceiptLine[]
+}
+
+model StockReceiptLine {
+  id               String        @id @default(cuid())
+  receiptId        String
+  stockItemId      String?
+  detectedName     String
+  matchedName      String?
+  sku              String?
+  supplierSku      String?
+  quantity         Int
+  confidence       Float         @default(0)
+  rawLine          String?
+  createdAt        DateTime      @default(now())
+  receipt          StockReceipt  @relation(fields: [receiptId], references: [id], onDelete: Cascade)
+  stockItem        StockItem?    @relation(fields: [stockItemId], references: [id], onDelete: SetNull)
 }
 
 model Recipe {

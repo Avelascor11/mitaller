@@ -8,6 +8,7 @@
 import SwiftUI
 import UIKit
 import UniformTypeIdentifiers
+@preconcurrency import Vision
 
 enum AppTheme {
     // Canvas: deep ink with subtle indigo/teal washes — dark SaaS (Linear/Vercel feel)
@@ -320,6 +321,18 @@ struct WorkshopOrder: Identifiable, Hashable {
     }
 }
 
+extension WorkshopOrder {
+    static let placeholderForPhoto = WorkshopOrder(
+        number: "ALBARAN",
+        customer: "Entrada de stock",
+        shippingMethod: "",
+        status: .new,
+        priority: .normal,
+        deadline: "",
+        items: []
+    )
+}
+
 enum ShippingCategory: String {
     case free = "Gratis"
     case standard = "Estandar"
@@ -597,6 +610,35 @@ struct PurchaseMatrixGroup: Identifiable {
     }
 }
 
+struct StockReceipt: Decodable, Identifiable {
+    let id: String
+    let status: String
+    let createdAt: Date?
+    let confirmedAt: Date?
+    let lines: [StockReceiptLine]
+}
+
+struct StockReceiptLine: Decodable, Identifiable, Hashable {
+    let id: String
+    let stockItemId: String?
+    let detectedName: String
+    let matchedName: String?
+    let sku: String?
+    let supplierSku: String?
+    let quantity: Int
+    let confidence: Double?
+    let rawLine: String?
+}
+
+struct StockReceiptConfirmLine: Encodable, Hashable {
+    let id: String?
+    let stockItemId: String?
+    var quantity: Int
+    let detectedName: String?
+
+    var stableId: String { id ?? "\(stockItemId ?? "manual")-\(detectedName ?? "")" }
+}
+
 @Observable
 final class WorkshopStore {
     var apiBaseURL = "https://mitaller-production-4755.up.railway.app"
@@ -763,6 +805,29 @@ final class WorkshopStore {
             try await loadSnapshot(from: client)
         } catch {
             syncError = "No se pudo recibir compra: \(error.localizedDescription)"
+        }
+    }
+
+    func scanStockReceipt(rawText: String, photo: Data?) async throws -> StockReceipt {
+        guard let client = apiClient else { throw APIClientError.invalidURL }
+        syncError = nil
+        do {
+            return try await client.scanStockReceipt(rawText: rawText, photo: photo)
+        } catch {
+            syncError = "No se pudo leer el albaran: \(error.localizedDescription)"
+            throw error
+        }
+    }
+
+    func confirmStockReceipt(_ receipt: StockReceipt, lines: [StockReceiptConfirmLine]) async throws {
+        guard let client = apiClient else { throw APIClientError.invalidURL }
+        syncError = nil
+        do {
+            _ = try await client.confirmStockReceipt(id: receipt.id, lines: lines)
+            try await loadSnapshot(from: client)
+        } catch {
+            syncError = "No se pudo confirmar la entrada de stock: \(error.localizedDescription)"
+            throw error
         }
     }
 
@@ -2303,6 +2368,8 @@ struct StockView: View {
     @Environment(WorkshopStore.self) private var store
     @State private var query = ""
     @State private var showingScanner = false
+    @State private var showingReceiptCamera = false
+    @State private var receiptReview: StockReceiptReviewState?
     @State private var stockEdit: StockEditSelection?
 
     var filteredGroups: [PurchaseMatrixGroup] {
@@ -2342,12 +2409,21 @@ struct StockView: View {
                     VStack(spacing: 10) {
                         TextField("Buscar camiseta, sudadera, color o talla", text: $query)
                             .textFieldStyle(.roundedBorder)
-                        Button { showingScanner = true } label: {
-                            Label("Escanear QR / codigo de barras", systemImage: "barcode.viewfinder")
-                                .frame(maxWidth: .infinity)
+                        HStack(spacing: 10) {
+                            Button { showingScanner = true } label: {
+                                Label("Escanear QR", systemImage: "barcode.viewfinder")
+                                    .frame(maxWidth: .infinity)
+                            }
+                            .buttonStyle(.bordered)
+                            .tint(AppTheme.blue)
+
+                            Button { showingReceiptCamera = true } label: {
+                                Label("Escanear albaran", systemImage: "doc.viewfinder")
+                                    .frame(maxWidth: .infinity)
+                            }
+                            .buttonStyle(.borderedProminent)
+                            .tint(AppTheme.green)
                         }
-                        .buttonStyle(.bordered)
-                        .tint(AppTheme.blue)
                     }
                     .glassPanel(padding: 12)
 
@@ -2398,6 +2474,16 @@ struct StockView: View {
                     stockEdit = nil
                     Task { await store.setStockQuantity(sku: edit.sku, quantity: quantity) }
                 }
+            }
+            .sheet(isPresented: $showingReceiptCamera) {
+                PackagePhotoCaptureView(order: WorkshopOrder.placeholderForPhoto) { photo in
+                    showingReceiptCamera = false
+                    guard let photo else { return }
+                    receiptReview = StockReceiptReviewState(photo: photo)
+                }
+            }
+            .sheet(item: $receiptReview) { review in
+                StockReceiptReviewView(state: review)
             }
         }
     }
@@ -2517,6 +2603,243 @@ struct StockEditSheet: View {
                     }
                     .tint(AppTheme.green)
                 }
+            }
+        }
+    }
+}
+
+struct StockReceiptReviewState: Identifiable {
+    let id = UUID()
+    let photo: Data
+}
+
+struct EditableReceiptLine: Identifiable, Hashable {
+    let id: String
+    let stockItemId: String?
+    let detectedName: String
+    let matchedName: String
+    let sku: String?
+    let rawLine: String?
+    var quantityText: String
+
+    init(line: StockReceiptLine) {
+        id = line.id
+        stockItemId = line.stockItemId
+        detectedName = line.detectedName
+        matchedName = line.matchedName ?? line.detectedName
+        sku = line.sku
+        rawLine = line.rawLine
+        quantityText = "\(line.quantity)"
+    }
+
+    var quantity: Int { max(0, Int(quantityText) ?? 0) }
+}
+
+struct StockReceiptReviewView: View {
+    @Environment(WorkshopStore.self) private var store
+    @Environment(\.dismiss) private var dismiss
+    let state: StockReceiptReviewState
+    @State private var rawText = ""
+    @State private var receipt: StockReceipt?
+    @State private var lines: [EditableReceiptLine] = []
+    @State private var isReading = true
+    @State private var isConfirming = false
+    @State private var error: String?
+
+    var validLines: [EditableReceiptLine] {
+        lines.filter { $0.stockItemId != nil && $0.quantity > 0 }
+    }
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 14) {
+                    if let image = UIImage(data: state.photo) {
+                        Image(uiImage: image)
+                            .resizable()
+                            .scaledToFit()
+                            .frame(maxWidth: .infinity, maxHeight: 260)
+                            .clipShape(RoundedRectangle(cornerRadius: 16))
+                            .glassPanel(padding: 0)
+                    }
+
+                    if isReading {
+                        VStack(spacing: 10) {
+                            ProgressView()
+                            Text("Leyendo albaran...")
+                                .font(.subheadline.weight(.bold))
+                                .foregroundStyle(AppTheme.muted)
+                        }
+                        .frame(maxWidth: .infinity)
+                        .glassPanel()
+                    } else {
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text("Revisa antes de sumar stock")
+                                .font(.title2.weight(.black))
+                                .foregroundStyle(AppTheme.ink)
+                            Text("La app propone las prendas detectadas. Cambia cantidades si hace falta y confirma.")
+                                .font(.subheadline.weight(.medium))
+                                .foregroundStyle(AppTheme.muted)
+                        }
+
+                        if lines.isEmpty {
+                            ContentUnavailableView(
+                                "No he encontrado prendas",
+                                systemImage: "doc.text.magnifyingglass",
+                                description: Text("Prueba con una foto mas recta, o mete el stock a mano desde la pantalla Stock.")
+                            )
+                            .glassPanel()
+                        } else {
+                            ForEach($lines) { $line in
+                                StockReceiptLineEditor(line: $line)
+                            }
+                        }
+
+                        if !rawText.isEmpty {
+                            DisclosureGroup("Texto leido del albaran") {
+                                Text(rawText)
+                                    .font(.caption.monospaced())
+                                    .foregroundStyle(AppTheme.muted)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                    .padding(.top, 8)
+                            }
+                            .font(.subheadline.weight(.bold))
+                            .foregroundStyle(AppTheme.ink)
+                            .glassPanel(padding: 14)
+                        }
+                    }
+
+                    if let error {
+                        Label(error, systemImage: "exclamationmark.triangle.fill")
+                            .font(.caption.weight(.bold))
+                            .foregroundStyle(AppTheme.red)
+                            .glassPanel(padding: 12, accent: AppTheme.red)
+                    }
+                }
+                .padding()
+            }
+            .screenBackground()
+            .navigationTitle("Recibir albaran")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cerrar") { dismiss() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button(isConfirming ? "Guardando..." : "Confirmar") {
+                        Task { await confirm() }
+                    }
+                    .disabled(isReading || isConfirming || receipt == nil || validLines.isEmpty)
+                    .tint(AppTheme.green)
+                }
+            }
+            .task { await readReceipt() }
+        }
+    }
+
+    private func readReceipt() async {
+        guard rawText.isEmpty, receipt == nil else { return }
+        isReading = true
+        error = nil
+        defer { isReading = false }
+        do {
+            let text = try await recognizeReceiptText(from: state.photo)
+            rawText = text
+            let draft = try await store.scanStockReceipt(rawText: text, photo: state.photo)
+            receipt = draft
+            lines = draft.lines.map(EditableReceiptLine.init)
+        } catch {
+            self.error = error.localizedDescription
+        }
+    }
+
+    private func confirm() async {
+        guard let receipt else { return }
+        isConfirming = true
+        error = nil
+        defer { isConfirming = false }
+        do {
+            let payload = validLines.map {
+                StockReceiptConfirmLine(id: $0.id, stockItemId: $0.stockItemId, quantity: $0.quantity, detectedName: $0.detectedName)
+            }
+            try await store.confirmStockReceipt(receipt, lines: payload)
+            dismiss()
+        } catch {
+            self.error = error.localizedDescription
+        }
+    }
+}
+
+struct StockReceiptLineEditor: View {
+    @Binding var line: EditableReceiptLine
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .firstTextBaseline) {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(line.matchedName)
+                        .font(.headline.weight(.black))
+                        .foregroundStyle(AppTheme.ink)
+                    if let sku = line.sku {
+                        Text(sku)
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(AppTheme.muted)
+                    }
+                }
+                Spacer()
+                TextField("0", text: $line.quantityText)
+                    .keyboardType(.numberPad)
+                    .multilineTextAlignment(.center)
+                    .font(.system(size: 28, weight: .black, design: .rounded))
+                    .frame(width: 72)
+                    .padding(.vertical, 8)
+                    .background(AppTheme.surfaceStrong)
+                    .clipShape(RoundedRectangle(cornerRadius: 12))
+            }
+            if let rawLine = line.rawLine, rawLine != line.matchedName {
+                Text(rawLine)
+                    .font(.caption2)
+                    .foregroundStyle(AppTheme.muted)
+                    .lineLimit(2)
+            }
+            Stepper("Unidades: \(line.quantity)", value: Binding(
+                get: { line.quantity },
+                set: { line.quantityText = "\($0)" }
+            ), in: 0...999)
+            .font(.caption.weight(.bold))
+            .foregroundStyle(AppTheme.muted)
+        }
+        .glassPanel(padding: 14, accent: line.stockItemId == nil ? AppTheme.amber : AppTheme.green)
+    }
+}
+
+func recognizeReceiptText(from imageData: Data) async throws -> String {
+    guard let image = UIImage(data: imageData), let cgImage = image.cgImage else {
+        throw APIClientError.invalidResponse
+    }
+    return try await withCheckedThrowingContinuation { continuation in
+        let request = VNRecognizeTextRequest { request, error in
+            if let error {
+                continuation.resume(throwing: error)
+                return
+            }
+            let text = (request.results as? [VNRecognizedTextObservation])?
+                .compactMap { $0.topCandidates(1).first?.string }
+                .joined(separator: "\n") ?? ""
+            if text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                continuation.resume(throwing: APIClientError.server(422, "No se ha podido leer texto en la foto."))
+            } else {
+                continuation.resume(returning: text)
+            }
+        }
+        request.recognitionLevel = .accurate
+        request.usesLanguageCorrection = true
+        request.recognitionLanguages = ["es-ES", "en-US"]
+        DispatchQueue.global(qos: .userInitiated).async {
+            do {
+                try VNImageRequestHandler(cgImage: cgImage, orientation: .up).perform([request])
+            } catch {
+                continuation.resume(throwing: error)
             }
         }
     }
