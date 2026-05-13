@@ -2944,11 +2944,24 @@ struct PurchaseMatrixCard: View {
     let group: PurchaseMatrixGroup
     let mode: PurchaseMatrixMode
 
+    private var visibleEntries: [PurchaseMatrixEntry] {
+        switch mode {
+        case .recommended:
+            group.entries.filter { $0.recommendedPurchaseQuantity > 0 }
+        case .pending:
+            group.entries.filter { $0.pendingOrderNeed > 0 }
+        case .stock:
+            group.entries
+        }
+    }
+
     var body: some View {
-        VStack(spacing: 0) {
+        VStack(alignment: .leading, spacing: 0) {
             HStack {
                 Text(group.title)
                     .font(.headline.weight(.black))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.75)
                 Spacer()
                 Text(headerTotal)
                     .font(.subheadline.weight(.black))
@@ -2961,43 +2974,38 @@ struct PurchaseMatrixCard: View {
             .padding(.horizontal, 12)
             .padding(.vertical, 9)
             .background(group.backgroundColor)
-            HStack(spacing: 0) {
-                ForEach(group.entries) { entry in
-                    Text(entry.size)
-                        .font(.subheadline.weight(.black))
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 8)
-                        .background(group.backgroundColor.opacity(0.88))
-                        .foregroundStyle(group.foregroundColor)
-                        .overlay(alignment: .trailing) {
-                            Divider()
-                        }
-                }
-            }
-            HStack(spacing: 0) {
-                ForEach(group.entries) { entry in
-                    MatrixQuantityCell(entry: entry, mode: mode)
-                }
-            }
+
             if mode == .recommended {
-                let entriesWithOrders = group.entries.filter { $0.pendingOrderNeed > 0 && !$0.demandOrders.isEmpty }
-                if !entriesWithOrders.isEmpty {
-                    VStack(alignment: .leading, spacing: 10) {
-                        Text("Pedidos que necesitan estas prendas")
-                            .font(.caption.weight(.black))
-                            .foregroundStyle(AppTheme.muted)
-                        ForEach(entriesWithOrders) { entry in
-                            PurchaseDemandLine(entry: entry)
-                        }
+                VStack(spacing: 10) {
+                    ForEach(visibleEntries) { entry in
+                        PurchaseBuyRow(entry: entry, accent: group.backgroundColor)
                     }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(12)
-                    .background(AppTheme.surfaceSoft)
+                }
+                .padding(12)
+                .background(AppTheme.surfaceSoft)
+            } else {
+                HStack(spacing: 0) {
+                    ForEach(group.entries) { entry in
+                        Text(entry.size)
+                            .font(.subheadline.weight(.black))
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 8)
+                            .background(group.backgroundColor.opacity(0.88))
+                            .foregroundStyle(group.foregroundColor)
+                            .overlay(alignment: .trailing) {
+                                Divider()
+                            }
+                        }
+                }
+                HStack(spacing: 0) {
+                    ForEach(group.entries) { entry in
+                        MatrixQuantityCell(entry: entry, mode: mode)
+                    }
                 }
             }
         }
-        .clipShape(RoundedRectangle(cornerRadius: 14))
-        .overlay(RoundedRectangle(cornerRadius: 14).stroke(AppTheme.line, lineWidth: 1))
+        .clipShape(RoundedRectangle(cornerRadius: 16))
+        .overlay(RoundedRectangle(cornerRadius: 16).stroke(AppTheme.line, lineWidth: 1))
         .glassPanel(padding: 0)
     }
 
@@ -3007,6 +3015,97 @@ struct PurchaseMatrixCard: View {
         case .pending: "Pedidos \(group.totalPending)"
         case .stock: "Stock \(group.totalStock)"
         }
+    }
+}
+
+struct PurchaseBuyRow: View {
+    let entry: PurchaseMatrixEntry
+    let accent: Color
+    @State private var showOrders = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .center, spacing: 12) {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(entry.subproductName)
+                        .font(.headline.weight(.black))
+                        .foregroundStyle(AppTheme.ink)
+                        .lineLimit(2)
+                    HStack(spacing: 8) {
+                        MiniMetric(label: "ped", value: entry.pendingOrderNeed, color: AppTheme.blue)
+                        MiniMetric(label: "stk", value: entry.currentInternalStock, color: AppTheme.green)
+                        if entry.minStockTarget > 0 {
+                            MiniMetric(label: "ss", value: entry.minStockTarget, color: AppTheme.amber)
+                        }
+                    }
+                }
+                Spacer(minLength: 8)
+                VStack(spacing: 1) {
+                    Text("\(entry.recommendedPurchaseQuantity)")
+                        .font(.system(size: 38, weight: .black, design: .rounded))
+                        .foregroundStyle(AppTheme.magenta)
+                    Text("comprar")
+                        .font(.caption2.weight(.heavy))
+                        .foregroundStyle(AppTheme.muted)
+                }
+                .frame(width: 76)
+                .padding(.vertical, 8)
+                .background(AppTheme.magentaSoft)
+                .clipShape(RoundedRectangle(cornerRadius: 14))
+            }
+
+            if entry.alreadyOrderedQuantity > 0 {
+                Label("Por recibir: \(entry.alreadyOrderedQuantity)", systemImage: "tray.and.arrow.down.fill")
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(AppTheme.amber)
+            }
+
+            if !entry.demandOrders.isEmpty {
+                Button {
+                    withAnimation(.snappy) { showOrders.toggle() }
+                } label: {
+                    HStack {
+                        Label("\(entry.demandOrders.count) pedido\(entry.demandOrders.count == 1 ? "" : "s") origen", systemImage: "list.bullet.rectangle")
+                        Spacer()
+                        Image(systemName: showOrders ? "chevron.up" : "chevron.down")
+                    }
+                    .font(.caption.weight(.heavy))
+                    .foregroundStyle(AppTheme.inkSoft)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 8)
+                    .background(AppTheme.surfaceTinted)
+                    .clipShape(RoundedRectangle(cornerRadius: 10))
+                }
+                .buttonStyle(.plain)
+
+                if showOrders {
+                    PurchaseDemandLine(entry: entry)
+                        .transition(.opacity.combined(with: .move(edge: .top)))
+                }
+            }
+        }
+        .padding(12)
+        .background(AppTheme.surfaceStrong)
+        .overlay(RoundedRectangle(cornerRadius: 14).stroke(accent.opacity(0.32), lineWidth: 1))
+        .clipShape(RoundedRectangle(cornerRadius: 14))
+    }
+}
+
+struct MiniMetric: View {
+    let label: String
+    let value: Int
+    let color: Color
+
+    var body: some View {
+        Text("\(label) \(value)")
+            .font(.caption2.weight(.black))
+            .foregroundStyle(color)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
+            .background(color.opacity(0.16))
+            .clipShape(Capsule())
+            .lineLimit(1)
+            .minimumScaleFactor(0.75)
     }
 }
 
@@ -3026,36 +3125,25 @@ struct PurchaseDemandLine: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 7) {
-            HStack {
-                Text(entry.subproductName)
-                    .font(.subheadline.weight(.black))
-                    .foregroundStyle(AppTheme.ink)
-                Spacer()
-                Text("ped \(entry.pendingOrderNeed) · comprar \(entry.recommendedPurchaseQuantity)")
-                    .font(.caption.weight(.bold))
-                    .foregroundStyle(AppTheme.magenta)
-            }
-            FlowChips {
-                ForEach(groupedOrders, id: \.orderNumber) { order in
-                    Tag(text: "\(order.orderNumber) x\(order.quantity)", systemImage: "cart.fill")
+        VStack(alignment: .leading, spacing: 8) {
+            ForEach(groupedOrders, id: \.orderNumber) { order in
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("\(order.orderNumber) x\(order.quantity)")
+                        .font(.caption.weight(.black))
+                        .foregroundStyle(AppTheme.blue)
+                    Text(order.titles.prefix(2).joined(separator: " · "))
+                        .font(.caption2.weight(.medium))
+                        .foregroundStyle(AppTheme.muted)
+                        .lineLimit(2)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
-            }
-            ForEach(groupedOrders.prefix(3), id: \.orderNumber) { order in
-                Text("\(order.orderNumber): \(order.titles.prefix(2).joined(separator: " · "))")
-                    .font(.caption2.weight(.medium))
-                    .foregroundStyle(AppTheme.muted)
-                    .lineLimit(2)
-            }
-            if groupedOrders.count > 3 {
-                Text("+\(groupedOrders.count - 3) pedidos mas")
-                    .font(.caption2.weight(.bold))
-                    .foregroundStyle(AppTheme.amber)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 8)
+                .background(AppTheme.surfaceSoft)
+                .clipShape(RoundedRectangle(cornerRadius: 10))
             }
         }
-        .padding(10)
-        .background(AppTheme.surfaceStrong)
-        .clipShape(RoundedRectangle(cornerRadius: 12))
     }
 }
 
