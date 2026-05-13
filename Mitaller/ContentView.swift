@@ -1090,6 +1090,8 @@ struct MainTabView: View {
                 .tabItem { Label("Envios", systemImage: "truck.box.fill") }
             StockView()
                 .tabItem { Label("Stock", systemImage: "barcode.viewfinder") }
+            DTFView()
+                .tabItem { Label("DTF", systemImage: "photo.on.rectangle.angled") }
             PurchaseMatrixView()
                 .tabItem { Label("Compras", systemImage: "cart.badge.plus") }
             FinalizedView()
@@ -2373,9 +2375,13 @@ struct StockView: View {
     @State private var receiptReview: StockReceiptReviewState?
     @State private var stockEdit: StockEditSelection?
 
+    var garmentGroups: [PurchaseMatrixGroup] {
+        store.purchaseMatrix.filter { $0.garmentType != "DTF" }
+    }
+
     var filteredGroups: [PurchaseMatrixGroup] {
-        guard !query.isEmpty else { return store.purchaseMatrix }
-        return store.purchaseMatrix.filter { group in
+        guard !query.isEmpty else { return garmentGroups }
+        return garmentGroups.filter { group in
             group.title.localizedCaseInsensitiveContains(query) ||
             group.color.localizedCaseInsensitiveContains(query) ||
             group.garmentType.localizedCaseInsensitiveContains(query) ||
@@ -2396,19 +2402,19 @@ struct StockView: View {
                         Text("Stock")
                             .font(.system(size: 38, weight: .black))
                             .foregroundStyle(AppTheme.ink)
-                        Text("Stock real del taller y DTF externo. Toca una talla o diseño para modificar unidades.")
+                        Text("Stock real de camisetas y sudaderas. Toca una talla para modificar unidades.")
                             .font(.subheadline.weight(.medium))
                             .foregroundStyle(AppTheme.muted)
                     }
 
                     LazyVGrid(columns: [GridItem(.adaptive(minimum: 104), spacing: 10)], spacing: 10) {
-                        MetricTile(title: "Stock", value: store.purchaseMatrix.reduce(0) { $0 + $1.totalStock }, color: AppTheme.green, icon: "archivebox.fill")
-                        MetricTile(title: "Con stock", value: store.purchaseMatrix.reduce(0) { $0 + $1.entries.filter { $0.currentInternalStock > 0 }.count }, color: AppTheme.blue, icon: "checkmark.circle.fill")
-                        MetricTile(title: "Sin stock", value: store.purchaseMatrix.reduce(0) { $0 + $1.entries.filter { $0.currentInternalStock == 0 }.count }, color: AppTheme.amber, icon: "exclamationmark.circle.fill")
+                        MetricTile(title: "Stock", value: garmentGroups.reduce(0) { $0 + $1.totalStock }, color: AppTheme.green, icon: "archivebox.fill")
+                        MetricTile(title: "Con stock", value: garmentGroups.reduce(0) { $0 + $1.entries.filter { $0.currentInternalStock > 0 }.count }, color: AppTheme.blue, icon: "checkmark.circle.fill")
+                        MetricTile(title: "Sin stock", value: garmentGroups.reduce(0) { $0 + $1.entries.filter { $0.currentInternalStock == 0 }.count }, color: AppTheme.amber, icon: "exclamationmark.circle.fill")
                     }
 
                     VStack(spacing: 10) {
-                        TextField("Buscar prenda, color, talla o DTF", text: $query)
+                        TextField("Buscar prenda, color o talla", text: $query)
                             .textFieldStyle(.roundedBorder)
                         HStack(spacing: 10) {
                             Button { showingScanner = true } label: {
@@ -2609,6 +2615,133 @@ struct StockMatrixCard: View {
         .clipShape(RoundedRectangle(cornerRadius: 14))
         .overlay(RoundedRectangle(cornerRadius: 14).stroke(AppTheme.line, lineWidth: 1))
         .glassPanel(padding: 0)
+    }
+}
+
+struct DTFView: View {
+    @Environment(WorkshopStore.self) private var store
+    @State private var query = ""
+    @State private var stockEdit: StockEditSelection?
+
+    private var dtfGroup: PurchaseMatrixGroup? {
+        store.purchaseMatrix.first { $0.garmentType == "DTF" }
+    }
+
+    private var dtfEntries: [PurchaseMatrixEntry] {
+        let entries = dtfGroup?.entries ?? []
+        let filtered = query.isEmpty ? entries : entries.filter {
+            $0.subproductName.localizedCaseInsensitiveContains(query) ||
+            ($0.sku ?? "").localizedCaseInsensitiveContains(query)
+        }
+        return filtered.sorted {
+            if $0.recommendedPurchaseQuantity == $1.recommendedPurchaseQuantity {
+                return $0.subproductName.localizedCaseInsensitiveCompare($1.subproductName) == .orderedAscending
+            }
+            return $0.recommendedPurchaseQuantity > $1.recommendedPurchaseQuantity
+        }
+    }
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 16) {
+                    SyncStatusView()
+
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("DTF")
+                            .font(.system(size: 38, weight: .black))
+                            .foregroundStyle(AppTheme.ink)
+                        Text("Diseños externos: stock, pendientes y unidades a pedir.")
+                            .font(.subheadline.weight(.medium))
+                            .foregroundStyle(AppTheme.muted)
+                    }
+
+                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 104), spacing: 10)], spacing: 10) {
+                        MetricTile(title: "Pedir", value: dtfGroup?.totalRecommended ?? 0, color: AppTheme.magenta, icon: "cart.badge.plus")
+                        MetricTile(title: "Pedidos", value: dtfGroup?.totalPending ?? 0, color: AppTheme.blue, icon: "shippingbox.fill")
+                        MetricTile(title: "Stock", value: dtfGroup?.totalStock ?? 0, color: AppTheme.green, icon: "archivebox.fill")
+                    }
+
+                    TextField("Buscar diseño DTF", text: $query)
+                        .textFieldStyle(.roundedBorder)
+                        .glassPanel(padding: 12)
+
+                    if dtfEntries.isEmpty {
+                        ContentUnavailableView("Sin DTF", systemImage: "photo.on.rectangle.angled", description: Text("No hay diseños DTF que coincidan con la busqueda."))
+                            .glassPanel()
+                    } else {
+                        LazyVGrid(columns: [GridItem(.adaptive(minimum: 330), spacing: 14)], spacing: 14) {
+                            ForEach(dtfEntries) { entry in
+                                DTFDesignCard(entry: entry) {
+                                    guard let group = dtfGroup, let sku = entry.sku else { return }
+                                    stockEdit = StockEditSelection(group: group, entry: entry, sku: sku)
+                                }
+                            }
+                        }
+                    }
+                }
+                .padding()
+            }
+            .screenBackground()
+            .globalSearch()
+            .navigationTitle("DTF")
+            .toolbar {
+                Button {
+                    Task { await store.syncFromAPI() }
+                } label: {
+                    Image(systemName: "arrow.clockwise")
+                }
+                .disabled(store.isLoading)
+            }
+            .refreshable {
+                await store.syncFromAPI()
+            }
+            .sheet(item: $stockEdit) { edit in
+                StockEditSheet(selection: edit) { quantity in
+                    stockEdit = nil
+                    Task { await store.setStockQuantity(sku: edit.sku, quantity: quantity) }
+                }
+            }
+        }
+    }
+}
+
+struct DTFDesignCard: View {
+    let entry: PurchaseMatrixEntry
+    let onEditStock: () -> Void
+
+    var body: some View {
+        Button(action: onEditStock) {
+            HStack(spacing: 12) {
+                DTFThumbnail(entry: entry, size: 74)
+                VStack(alignment: .leading, spacing: 8) {
+                    Text(entry.subproductName.replacingOccurrences(of: "DTF ", with: ""))
+                        .font(.headline.weight(.black))
+                        .foregroundStyle(AppTheme.ink)
+                        .lineLimit(2)
+                    HStack(spacing: 8) {
+                        MiniMetric(label: "ped", value: entry.pendingOrderNeed, color: AppTheme.blue)
+                        MiniMetric(label: "stk", value: entry.currentInternalStock, color: AppTheme.green)
+                    }
+                    if entry.recommendedPurchaseQuantity > 0 {
+                        Label("Pedir \(entry.recommendedPurchaseQuantity)", systemImage: "cart.badge.plus")
+                            .font(.caption.weight(.black))
+                            .foregroundStyle(AppTheme.magenta)
+                    }
+                }
+                Spacer()
+                Text("\(entry.currentInternalStock)")
+                    .font(.system(size: 34, weight: .black))
+                    .foregroundStyle(entry.currentInternalStock > 0 ? AppTheme.green : AppTheme.ink)
+                    .frame(minWidth: 48)
+            }
+            .padding(12)
+            .background(AppTheme.surfaceStrong)
+            .overlay(RoundedRectangle(cornerRadius: 16).stroke(entry.recommendedPurchaseQuantity > 0 ? AppTheme.magenta.opacity(0.38) : AppTheme.line, lineWidth: 1))
+            .clipShape(RoundedRectangle(cornerRadius: 16))
+        }
+        .buttonStyle(.plain)
+        .disabled(entry.sku == nil)
     }
 }
 
@@ -2917,6 +3050,10 @@ func recognizeReceiptText(from imageData: Data) async throws -> String {
 struct PurchaseMatrixView: View {
     @Environment(WorkshopStore.self) private var store
 
+    private var garmentGroups: [PurchaseMatrixGroup] {
+        store.purchaseMatrix.filter { $0.garmentType != "DTF" }
+    }
+
     var body: some View {
         NavigationStack {
             ScrollView {
@@ -2932,14 +3069,14 @@ struct PurchaseMatrixView: View {
                     }
 
                     LazyVGrid(columns: [GridItem(.adaptive(minimum: 104), spacing: 10)], spacing: 10) {
-                        MetricTile(title: "Comprar", value: store.purchaseMatrix.reduce(0) { $0 + $1.totalRecommended }, color: AppTheme.magenta, icon: "cart.badge.plus")
-                        MetricTile(title: "Pedidos", value: store.purchaseMatrix.reduce(0) { $0 + $1.totalPending }, color: AppTheme.blue, icon: "shippingbox.fill")
-                        MetricTile(title: "Stock", value: store.purchaseMatrix.reduce(0) { $0 + $1.totalStock }, color: AppTheme.green, icon: "archivebox.fill")
-                        MetricTile(title: "Por recibir", value: store.purchaseMatrix.reduce(0) { total, group in total + group.entries.reduce(0) { $0 + $1.alreadyOrderedQuantity } }, color: AppTheme.amber, icon: "tray.and.arrow.down.fill")
+                        MetricTile(title: "Comprar", value: garmentGroups.reduce(0) { $0 + $1.totalRecommended }, color: AppTheme.magenta, icon: "cart.badge.plus")
+                        MetricTile(title: "Pedidos", value: garmentGroups.reduce(0) { $0 + $1.totalPending }, color: AppTheme.blue, icon: "shippingbox.fill")
+                        MetricTile(title: "Stock", value: garmentGroups.reduce(0) { $0 + $1.totalStock }, color: AppTheme.green, icon: "archivebox.fill")
+                        MetricTile(title: "Por recibir", value: garmentGroups.reduce(0) { total, group in total + group.entries.reduce(0) { $0 + $1.alreadyOrderedQuantity } }, color: AppTheme.amber, icon: "tray.and.arrow.down.fill")
                     }
 
-                    let groups = store.purchaseMatrix.filter { $0.totalRecommended > 0 }
-                    let hasIncoming = store.purchaseMatrix.contains { group in
+                    let groups = garmentGroups.filter { $0.totalRecommended > 0 }
+                    let hasIncoming = garmentGroups.contains { group in
                         group.entries.contains { $0.alreadyOrderedQuantity > 0 }
                     }
                     HStack(spacing: 10) {
@@ -2951,7 +3088,7 @@ struct PurchaseMatrixView: View {
                         }
                         .buttonStyle(.borderedProminent)
                         .tint(AppTheme.magenta)
-                        .disabled(store.purchaseMatrix.reduce(0) { $0 + $1.totalRecommended } == 0)
+                        .disabled(garmentGroups.reduce(0) { $0 + $1.totalRecommended } == 0)
 
                         Button {
                             Task { await store.receiveAllOrderedPurchases() }
