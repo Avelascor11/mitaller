@@ -555,11 +555,23 @@ struct PurchaseMatrixEntry: Identifiable {
     let supplierSku: String?
     let stockItemId: String?
     let pendingOrderNeed: Int
+    let demandOrders: [PurchaseDemandOrder]
     let currentInternalStock: Int
     let minStockTarget: Int
     let alreadyOrderedQuantity: Int
     let recommendedPurchaseQuantity: Int
     let supplierAvailableQuantity: Int?
+}
+
+struct PurchaseDemandOrder: Identifiable, Hashable {
+    var id: String { orderItemId }
+    let orderId: String
+    let orderNumber: String
+    let customerName: String
+    let orderItemId: String
+    let title: String
+    let sku: String
+    let quantity: Int
 }
 
 struct PurchaseMatrixGroup: Identifiable {
@@ -2644,6 +2656,22 @@ struct PurchaseMatrixCard: View {
                     MatrixQuantityCell(entry: entry, mode: mode)
                 }
             }
+            if mode == .recommended {
+                let entriesWithOrders = group.entries.filter { $0.pendingOrderNeed > 0 && !$0.demandOrders.isEmpty }
+                if !entriesWithOrders.isEmpty {
+                    VStack(alignment: .leading, spacing: 10) {
+                        Text("Pedidos que necesitan estas prendas")
+                            .font(.caption.weight(.black))
+                            .foregroundStyle(AppTheme.muted)
+                        ForEach(entriesWithOrders) { entry in
+                            PurchaseDemandLine(entry: entry)
+                        }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(12)
+                    .background(AppTheme.surfaceSoft)
+                }
+            }
         }
         .clipShape(RoundedRectangle(cornerRadius: 14))
         .overlay(RoundedRectangle(cornerRadius: 14).stroke(AppTheme.line, lineWidth: 1))
@@ -2656,6 +2684,55 @@ struct PurchaseMatrixCard: View {
         case .pending: "Pedidos \(group.totalPending)"
         case .stock: "Stock \(group.totalStock)"
         }
+    }
+}
+
+struct PurchaseDemandLine: View {
+    let entry: PurchaseMatrixEntry
+
+    var groupedOrders: [(orderNumber: String, quantity: Int, titles: [String])] {
+        let grouped = Dictionary(grouping: entry.demandOrders, by: \.orderNumber)
+        return grouped.map { orderNumber, rows in
+            (
+                orderNumber: orderNumber,
+                quantity: rows.reduce(0) { $0 + $1.quantity },
+                titles: Array(Set(rows.map(\.title))).sorted()
+            )
+        }
+        .sorted { $0.orderNumber < $1.orderNumber }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 7) {
+            HStack {
+                Text(entry.subproductName)
+                    .font(.subheadline.weight(.black))
+                    .foregroundStyle(AppTheme.ink)
+                Spacer()
+                Text("ped \(entry.pendingOrderNeed) · comprar \(entry.recommendedPurchaseQuantity)")
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(AppTheme.magenta)
+            }
+            FlowChips {
+                ForEach(groupedOrders, id: \.orderNumber) { order in
+                    Tag(text: "\(order.orderNumber) x\(order.quantity)", systemImage: "cart.fill")
+                }
+            }
+            ForEach(groupedOrders.prefix(3), id: \.orderNumber) { order in
+                Text("\(order.orderNumber): \(order.titles.prefix(2).joined(separator: " · "))")
+                    .font(.caption2.weight(.medium))
+                    .foregroundStyle(AppTheme.muted)
+                    .lineLimit(2)
+            }
+            if groupedOrders.count > 3 {
+                Text("+\(groupedOrders.count - 3) pedidos mas")
+                    .font(.caption2.weight(.bold))
+                    .foregroundStyle(AppTheme.amber)
+            }
+        }
+        .padding(10)
+        .background(AppTheme.surfaceStrong)
+        .clipShape(RoundedRectangle(cornerRadius: 12))
     }
 }
 

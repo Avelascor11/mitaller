@@ -692,6 +692,7 @@ private struct PurchaseMatrixEntryDTO: Decodable {
     let supplierSku: String?
     let stockItemId: String?
     let pendingOrderNeed: Int
+    let demandOrders: [PurchaseDemandOrderDTO]?
     let currentInternalStock: Int
     let minStockTarget: Int
     let alreadyOrderedQuantity: Int?
@@ -706,11 +707,34 @@ private struct PurchaseMatrixEntryDTO: Decodable {
             supplierSku: supplierSku,
             stockItemId: stockItemId,
             pendingOrderNeed: pendingOrderNeed,
+            demandOrders: demandOrders?.map(\.purchaseDemandOrder) ?? [],
             currentInternalStock: currentInternalStock,
             minStockTarget: minStockTarget,
             alreadyOrderedQuantity: alreadyOrderedQuantity ?? 0,
             recommendedPurchaseQuantity: recommendedPurchaseQuantity,
             supplierAvailableQuantity: supplierAvailableQuantity
+        )
+    }
+}
+
+private struct PurchaseDemandOrderDTO: Decodable {
+    let orderId: String
+    let orderNumber: String
+    let customerName: String
+    let orderItemId: String
+    let title: String
+    let sku: String?
+    let quantity: Int
+
+    var purchaseDemandOrder: PurchaseDemandOrder {
+        PurchaseDemandOrder(
+            orderId: orderId,
+            orderNumber: orderNumber,
+            customerName: customerName,
+            orderItemId: orderItemId,
+            title: title,
+            sku: sku ?? "",
+            quantity: quantity
         )
     }
 }

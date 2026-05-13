@@ -352,8 +352,17 @@ export class PurchaseService {
       if (!mapped) continue;
       const { kind, color, size } = mapped;
       const key = this.matrixKey(kind, color, size);
-      const current = demand.get(key) ?? { kind, color, size, quantity: 0 };
+      const current = demand.get(key) ?? { kind, color, size, quantity: 0, orders: [] };
       current.quantity += item.quantity;
+      current.orders.push({
+        orderId: item.orderId,
+        orderNumber: item.order.orderNumber,
+        customerName: item.order.customerName,
+        orderItemId: item.id,
+        title: item.title,
+        sku: item.sku,
+        quantity: item.quantity
+      });
       demand.set(key, current);
     }
 
@@ -396,6 +405,7 @@ export class PurchaseService {
         supplierSku: stockItem?.supplierSku ?? null,
         stockItemId: stockItem?.id ?? null,
         pendingOrderNeed,
+        demandOrders: need?.orders ?? [],
         currentInternalStock,
         minStockTarget,
         alreadyOrderedQuantity,
@@ -415,6 +425,7 @@ export class PurchaseService {
           supplierSku: null,
           stockItemId: null,
           pendingOrderNeed: 0,
+          demandOrders: [],
           currentInternalStock: 0,
           minStockTarget: 0,
           alreadyOrderedQuantity: 0,
@@ -663,6 +674,17 @@ interface MatrixDemand {
   color: string;
   size: string;
   quantity: number;
+  orders: PurchaseMatrixDemandOrder[];
+}
+
+interface PurchaseMatrixDemandOrder {
+  orderId: string;
+  orderNumber: string;
+  customerName: string;
+  orderItemId: string;
+  title: string;
+  sku: string;
+  quantity: number;
 }
 
 interface PickingListLine {
@@ -713,6 +735,7 @@ interface PurchaseMatrixGroup {
     supplierSku: string | null;
     stockItemId: string | null;
     pendingOrderNeed: number;
+    demandOrders: PurchaseMatrixDemandOrder[];
     currentInternalStock: number;
     minStockTarget: number;
     alreadyOrderedQuantity: number;
