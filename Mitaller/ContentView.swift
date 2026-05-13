@@ -561,7 +561,7 @@ struct PurchaseNeed: Identifiable {
 }
 
 struct PurchaseMatrixEntry: Identifiable {
-    var id: String { size }
+    var id: String { stockItemId ?? "\(sku ?? "")-\(subproductName)-\(size)" }
     let size: String
     let subproductName: String
     let sku: String?
@@ -2395,7 +2395,7 @@ struct StockView: View {
                         Text("Stock")
                             .font(.system(size: 38, weight: .black))
                             .foregroundStyle(AppTheme.ink)
-                        Text("Stock real del taller. Toca una talla para modificar unidades.")
+                        Text("Stock real del taller y DTF externo. Toca una talla o diseño para modificar unidades.")
                             .font(.subheadline.weight(.medium))
                             .foregroundStyle(AppTheme.muted)
                     }
@@ -2407,7 +2407,7 @@ struct StockView: View {
                     }
 
                     VStack(spacing: 10) {
-                        TextField("Buscar camiseta, sudadera, color o talla", text: $query)
+                        TextField("Buscar prenda, color, talla o DTF", text: $query)
                             .textFieldStyle(.roundedBorder)
                         HStack(spacing: 10) {
                             Button { showingScanner = true } label: {
@@ -2494,6 +2494,14 @@ struct StockMatrixCard: View {
     var onEditStock: (PurchaseMatrixEntry) -> Void
 
     var body: some View {
+        if group.garmentType == "DTF" {
+            dtfBody
+        } else {
+            garmentBody
+        }
+    }
+
+    private var garmentBody: some View {
         VStack(spacing: 0) {
             Text(group.title)
                 .font(.headline.weight(.black))
@@ -2532,6 +2540,65 @@ struct StockMatrixCard: View {
                     .buttonStyle(.plain)
                     .disabled(entry.sku == nil)
                     .overlay(alignment: .trailing) {
+                        Divider()
+                    }
+                }
+            }
+        }
+        .clipShape(RoundedRectangle(cornerRadius: 14))
+        .overlay(RoundedRectangle(cornerRadius: 14).stroke(AppTheme.line, lineWidth: 1))
+        .glassPanel(padding: 0)
+    }
+
+    private var dtfBody: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack {
+                Text("DTF externo")
+                    .font(.headline.weight(.black))
+                    .foregroundStyle(group.foregroundColor)
+                Spacer()
+                Text("\(group.totalStock) en stock")
+                    .font(.caption.weight(.black))
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 6)
+                    .foregroundStyle(group.foregroundColor)
+                    .background(Color.white.opacity(0.22))
+                    .clipShape(RoundedRectangle(cornerRadius: 8))
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 12)
+            .background(group.backgroundColor)
+
+            VStack(spacing: 0) {
+                ForEach(group.entries.sorted { $0.subproductName.localizedCaseInsensitiveCompare($1.subproductName) == .orderedAscending }) { entry in
+                    Button {
+                        onEditStock(entry)
+                    } label: {
+                        HStack(spacing: 12) {
+                            VStack(alignment: .leading, spacing: 5) {
+                                Text(entry.subproductName)
+                                    .font(.subheadline.weight(.black))
+                                    .foregroundStyle(AppTheme.ink)
+                                    .lineLimit(2)
+                                Text("ped \(entry.pendingOrderNeed) · comprar \(entry.recommendedPurchaseQuantity)")
+                                    .font(.caption.weight(.semibold))
+                                    .foregroundStyle(AppTheme.muted)
+                                    .lineLimit(1)
+                            }
+                            Spacer()
+                            Text("\(entry.currentInternalStock)")
+                                .font(.system(size: 28, weight: .black))
+                                .foregroundStyle(entry.currentInternalStock > 0 ? AppTheme.green : AppTheme.ink)
+                                .frame(minWidth: 48)
+                        }
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 12)
+                        .background(AppTheme.surfaceStrong)
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(entry.sku == nil)
+
+                    if entry.id != group.entries.last?.id {
                         Divider()
                     }
                 }

@@ -33,7 +33,7 @@ export class StockReceiptsService {
     if (!rawText) throw new BadRequestException('No se ha detectado texto en el albaran.');
 
     const stockItems = await this.prisma.stockItem.findMany({
-      where: { type: StockItemType.BLANK_GARMENT },
+      where: { type: { in: [StockItemType.BLANK_GARMENT, StockItemType.TRANSFER] } },
       orderBy: [{ name: 'asc' }]
     });
     const lines = this.parseLines(rawText, stockItems);

@@ -319,9 +319,13 @@ export class PurchaseService {
       OperationalStatus.PICKED,
       OperationalStatus.BLOCKED
     ];
-    const [stockItems, orderItems, supplierStocks, productMappings, orderedNeeds] = await Promise.all([
+    const [blankStockItems, transferStockItems, orderItems, supplierStocks, productMappings, orderedNeeds] = await Promise.all([
       this.prisma.stockItem.findMany({
         where: { type: 'BLANK_GARMENT' },
+        include: { levels: true }
+      }),
+      this.prisma.stockItem.findMany({
+        where: { type: 'TRANSFER' },
         include: { levels: true }
       }),
       this.prisma.orderItem.findMany({
@@ -338,7 +342,7 @@ export class PurchaseService {
     const mappingIndex = this.buildMappingIndex(productMappings);
 
     const stockIndex = new Map<string, StockItemWithLevels>();
-    for (const item of stockItems) {
+    for (const item of blankStockItems) {
       const kind = this.inferGarmentKind(`${item.name} ${item.sku} ${item.supplierSku ?? ''}`);
       const color = this.normalizeColor(item.color ?? item.name);
       const size = this.normalizeSize(item.size ?? item.name);
@@ -347,6 +351,7 @@ export class PurchaseService {
     }
 
     const demand = new Map<string, MatrixDemand>();
+    const dtfDemand = new Map<string, MatrixDemand>();
     for (const item of this.filterByMinimumOrderNumber(orderItems)) {
       const mapped = this.mapOrderItemToBlankGarment(item, mappingIndex);
       if (!mapped) continue;
@@ -364,7 +369,33 @@ export class PurchaseService {
         quantity: item.quantity
       });
       demand.set(key, current);
+
+      const dtfDesign = this.mapOrderItemToDtfDesign(item, mapped);
+      if (dtfDesign) {
+        const dtfKey = this.dtfKey(dtfDesign.slug);
+        const dtfCurrent = dtfDemand.get(dtfKey) ?? {
+          kind: 'DTF',
+          color: 'EXTERNO',
+          size: dtfDesign.slug,
+          quantity: 0,
+          orders: [],
+          label: dtfDesign.label
+        };
+        dtfCurrent.quantity += item.quantity;
+        dtfCurrent.orders.push({
+          orderId: item.orderId,
+          orderNumber: item.order.orderNumber,
+          customerName: item.order.customerName,
+          orderItemId: item.id,
+          title: item.title,
+          sku: item.sku,
+          quantity: item.quantity
+        });
+        dtfDemand.set(dtfKey, dtfCurrent);
+      }
     }
+
+    const transferIndex = await this.ensureDtfStockItems(dtfDemand, transferStockItems);
 
     const groups = new Map<string, PurchaseMatrixGroup>();
     const allKeys = new Set([...stockIndex.keys(), ...demand.keys()]);
@@ -415,10 +446,13 @@ export class PurchaseService {
       groups.set(groupKey, group);
     }
 
+    const dtfGroup = this.buildDtfGroup(dtfDemand, transferIndex, orderedNeeds, supplierStocks);
+    if (dtfGroup.sizes.length) groups.set(dtfGroup.key, dtfGroup);
+
     const result = [...groups.values()]
       .map((group) => ({
         ...group,
-        sizes: sizes.map((size) => group.sizes.find((entry) => entry.size === size) ?? {
+        sizes: group.garmentType === 'DTF' ? group.sizes.sort((left, right) => left.subproductName.localeCompare(right.subproductName)) : sizes.map((size) => group.sizes.find((entry) => entry.size === size) ?? {
           size,
           subproductName: `${group.garmentType === 'SUDADERA' ? 'Sudadera' : 'Camiseta'} ${this.colorSingularLabel(group.color)} - ${size}`,
           sku: null,
@@ -434,6 +468,8 @@ export class PurchaseService {
         })
       }))
       .sort((left, right) => {
+        if (left.garmentType === 'DTF') return 1;
+        if (right.garmentType === 'DTF') return -1;
         if (left.garmentType === right.garmentType) return left.color.localeCompare(right.color);
         return left.garmentType.localeCompare(right.garmentType);
       });
@@ -567,6 +603,127 @@ export class PurchaseService {
     return { kind, color, size, subproductName };
   }
 
+  private mapOrderItemToDtfDesign(
+    item: { title: string; sku: string },
+    mapped: { kind: string; color: string; size: string }
+  ) {
+    const externalDtfColors = new Set(['NEGRA', 'NAVY', 'AZUL', 'CHARCOAL']);
+    if (mapped.kind !== 'CAMISETA' || !externalDtfColors.has(mapped.color)) return null;
+    const label = this.cleanDtfDesignLabel(item.title);
+    const slug = this.slugifyDtf(label || item.sku || item.title);
+    if (!slug) return null;
+    return { label: label || slug, slug };
+  }
+
+  private cleanDtfDesignLabel(title: string) {
+    let cleaned = title
+      .replace(/^camiseta\s*/i, '')
+      .replace(/^t-?shirt\s*/i, '')
+      .replace(/[“”]/g, '"')
+      .trim();
+    cleaned = cleaned.replace(/\s*[-/]\s*(blanco|blanca|negro|negra|black|white|navy|azul|blue|charcoal|sand|arena)\s*$/i, '');
+    cleaned = cleaned.replace(/\s*[-/]\s*(xxl|xl|l|m|s)\s*$/i, '');
+    cleaned = cleaned.replace(/\s*[-/]\s*(blanco|blanca|negro|negra|black|white|navy|azul|blue|charcoal|sand|arena)\s*$/i, '');
+    cleaned = cleaned.replace(/^"|"$/g, '').trim();
+    return cleaned || title.trim();
+  }
+
+  private slugifyDtf(value: string) {
+    return this.normalizeText(value)
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '')
+      .slice(0, 48)
+      .toUpperCase();
+  }
+
+  private dtfKey(slug: string) {
+    return `DTF:${slug}`;
+  }
+
+  private async ensureDtfStockItems(dtfDemand: Map<string, MatrixDemand>, existingTransfers: StockItemWithLevels[]) {
+    const existingBySku = new Map(existingTransfers.map((item) => [item.sku, item]));
+    const missing = [...dtfDemand.values()]
+      .map((need) => ({ sku: this.dtfSku(need.size), name: `DTF ${need.label ?? need.size}` }))
+      .filter((item) => !existingBySku.has(item.sku));
+
+    if (missing.length && typeof this.prisma.stockItem.upsert === 'function') {
+      for (const item of missing) {
+        await this.prisma.stockItem.upsert({
+          where: { sku: item.sku },
+          update: { name: item.name, type: 'TRANSFER', supplierSku: item.sku },
+          create: {
+            sku: item.sku,
+            name: item.name,
+            type: 'TRANSFER',
+            supplierSku: item.sku,
+            minStock: 0
+          }
+        });
+      }
+    }
+
+    const stockItems = await this.prisma.stockItem.findMany({
+      where: { type: 'TRANSFER', sku: { startsWith: 'DTF-' } },
+      include: { levels: true }
+    });
+    return new Map(stockItems.map((item) => [item.sku, item]));
+  }
+
+  private dtfSku(slug: string) {
+    return `DTF-${slug}`;
+  }
+
+  private buildDtfGroup(
+    dtfDemand: Map<string, MatrixDemand>,
+    transferIndex: Map<string, StockItemWithLevels>,
+    orderedNeeds: Array<{ stockItemId: string; recommendedPurchaseQuantity: number }>,
+    supplierStocks: Array<{ supplierSku: string; availableQuantity: number }>
+  ): PurchaseMatrixGroup {
+    const group: PurchaseMatrixGroup = {
+      key: 'DTF:EXTERNO:',
+      garmentType: 'DTF',
+      color: 'EXTERNO',
+      title: 'DTF EXTERNO',
+      theme: { background: '#7C3AED', foreground: '#FFFFFF' },
+      sizes: []
+    };
+
+    for (const need of dtfDemand.values()) {
+      const sku = this.dtfSku(need.size);
+      const stockItem = transferIndex.get(sku);
+      const currentInternalStock = stockItem?.levels.reduce((sum, level) => sum + level.quantity, 0) ?? 0;
+      const minStockTarget = stockItem?.minStock ?? 0;
+      const pendingOrderNeed = need.quantity;
+      const alreadyOrderedQuantity = stockItem
+        ? orderedNeeds
+          .filter((ordered) => ordered.stockItemId === stockItem.id)
+          .reduce((sum, ordered) => sum + ordered.recommendedPurchaseQuantity, 0)
+        : 0;
+      const recommendedPurchaseQuantity = this.calculateRecommendedPurchaseQuantity({
+        pendingOrderNeed,
+        minStockTarget,
+        currentInternalStock,
+        alreadyOrderedQuantity
+      });
+      group.sizes.push({
+        size: need.size,
+        subproductName: `DTF ${need.label ?? need.size}`,
+        sku: stockItem?.sku ?? sku,
+        supplierSku: stockItem?.supplierSku ?? sku,
+        stockItemId: stockItem?.id ?? null,
+        pendingOrderNeed,
+        demandOrders: need.orders,
+        currentInternalStock,
+        minStockTarget,
+        alreadyOrderedQuantity,
+        recommendedPurchaseQuantity,
+        supplierAvailableQuantity: supplierStocks.find((stock) => stock.supplierSku === sku)?.availableQuantity ?? null
+      });
+    }
+
+    return group;
+  }
+
   private matrixKey(kind: string, color: string, size: string) {
     return `${kind}:${color}:${size}`;
   }
@@ -675,6 +832,7 @@ interface MatrixDemand {
   size: string;
   quantity: number;
   orders: PurchaseMatrixDemandOrder[];
+  label?: string;
 }
 
 interface PurchaseMatrixDemandOrder {

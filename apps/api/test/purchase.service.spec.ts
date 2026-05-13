@@ -93,4 +93,46 @@ describe('PurchaseService', () => {
     expect(navy?.sizes.find((entry) => entry.size === 'M')?.pendingOrderNeed).toBe(1);
     expect(navy?.sizes.find((entry) => entry.size === 'M')?.recommendedPurchaseQuantity).toBe(1);
   });
+
+  it('genera compras DTF solo para camisetas de colores externos', async () => {
+    const service = new PurchaseService({
+      stockItem: { findMany: async () => [] },
+      orderItem: {
+        findMany: async () => [
+          {
+            quantity: 2,
+            title: 'Camiseta "Always Racing" - Navy - M',
+            sku: 'ALWAYS-NAVY-M',
+            productType: 'Camiseta',
+            color: 'Navy',
+            size: 'M',
+            variantTitle: 'M',
+            order: { orderNumber: '#9436', shopifyOrderId: 'sheet:#9436' }
+          },
+          {
+            quantity: 3,
+            title: 'Camiseta "Delta" - Blanca - L',
+            sku: 'DELTA-BLANCA-L',
+            productType: 'Camiseta',
+            color: 'Blanca',
+            size: 'L',
+            variantTitle: 'L',
+            order: { orderNumber: '#9454', shopifyOrderId: 'gid://shopify/Order/1' }
+          }
+        ]
+      },
+      supplierStock: { findMany: async () => [] },
+      purchaseNeed: { findMany: async () => [] },
+      productSubproductMapping: { findMany: async () => [] }
+    } as never, { get: () => '9454' } as never);
+
+    const matrix = await service.getPurchaseMatrix();
+    const dtf = matrix.groups.find((group) => group.title === 'DTF EXTERNO');
+    expect(dtf?.sizes).toHaveLength(1);
+    expect(dtf?.sizes[0]).toMatchObject({
+      subproductName: 'DTF Always Racing',
+      pendingOrderNeed: 2,
+      recommendedPurchaseQuantity: 2
+    });
+  });
 });
