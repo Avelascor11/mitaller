@@ -394,6 +394,7 @@ export class PurchaseService {
         dtfDemand.set(dtfKey, dtfCurrent);
       }
     }
+    this.addDtfCatalogFromMappings(dtfDemand, productMappings);
 
     const transferIndex = await this.ensureDtfStockItems(dtfDemand, transferStockItems);
 
@@ -615,6 +616,31 @@ export class PurchaseService {
     return { label: label || slug, slug };
   }
 
+  private addDtfCatalogFromMappings(
+    dtfDemand: Map<string, MatrixDemand>,
+    mappings: Array<{ productName: string; subproductName: string; sku: string }>
+  ) {
+    for (const mapping of mappings) {
+      const mapped = this.mapSubproductName(mapping.subproductName);
+      if (!mapped) continue;
+      const dtfDesign = this.mapOrderItemToDtfDesign(
+        { title: mapping.productName, sku: mapping.sku },
+        mapped
+      );
+      if (!dtfDesign) continue;
+      const key = this.dtfKey(dtfDesign.slug);
+      if (dtfDemand.has(key)) continue;
+      dtfDemand.set(key, {
+        kind: 'DTF',
+        color: 'EXTERNO',
+        size: dtfDesign.slug,
+        quantity: 0,
+        orders: [],
+        label: dtfDesign.label
+      });
+    }
+  }
+
   private cleanDtfDesignLabel(title: string) {
     let cleaned = title
       .replace(/^camiseta\s*/i, '')
@@ -688,12 +714,21 @@ export class PurchaseService {
       sizes: []
     };
 
-    for (const need of dtfDemand.values()) {
-      const sku = this.dtfSku(need.size);
+    const allSlugs = new Set([
+      ...[...dtfDemand.values()].map((need) => need.size),
+      ...[...transferIndex.keys()]
+        .filter((sku) => sku.startsWith('DTF-'))
+        .map((sku) => sku.replace(/^DTF-/, ''))
+    ]);
+
+    for (const slug of allSlugs) {
+      const need = dtfDemand.get(this.dtfKey(slug));
+      const sku = this.dtfSku(slug);
       const stockItem = transferIndex.get(sku);
       const currentInternalStock = stockItem?.levels.reduce((sum, level) => sum + level.quantity, 0) ?? 0;
       const minStockTarget = stockItem?.minStock ?? 0;
-      const pendingOrderNeed = need.quantity;
+      const pendingOrderNeed = need?.quantity ?? 0;
+      const label = need?.label ?? stockItem?.name.replace(/^DTF\s+/i, '') ?? slug;
       const alreadyOrderedQuantity = stockItem
         ? orderedNeeds
           .filter((ordered) => ordered.stockItemId === stockItem.id)
@@ -706,13 +741,13 @@ export class PurchaseService {
         alreadyOrderedQuantity
       });
       group.sizes.push({
-        size: need.size,
-        subproductName: `DTF ${need.label ?? need.size}`,
+        size: slug,
+        subproductName: `DTF ${label}`,
         sku: stockItem?.sku ?? sku,
         supplierSku: stockItem?.supplierSku ?? sku,
         stockItemId: stockItem?.id ?? null,
         pendingOrderNeed,
-        demandOrders: need.orders,
+        demandOrders: need?.orders ?? [],
         currentInternalStock,
         minStockTarget,
         alreadyOrderedQuantity,

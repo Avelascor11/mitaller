@@ -123,16 +123,41 @@ describe('PurchaseService', () => {
       },
       supplierStock: { findMany: async () => [] },
       purchaseNeed: { findMany: async () => [] },
-      productSubproductMapping: { findMany: async () => [] }
+      productSubproductMapping: {
+        findMany: async () => [
+          {
+            productName: 'Camiseta "No Risk No Story" - Negro - L',
+            productType: 'Camiseta',
+            color: 'Negro',
+            size: 'L',
+            sku: 'NO-RISK-L',
+            subproductName: 'Camiseta Negra - L',
+            imageRef: null
+          },
+          {
+            productName: 'Camiseta "Solo Interna" - Blanca - L',
+            productType: 'Camiseta',
+            color: 'Blanca',
+            size: 'L',
+            sku: 'INTERNA-L',
+            subproductName: 'Camiseta Blanca - L',
+            imageRef: null
+          }
+        ]
+      }
     } as never, { get: () => '9454' } as never);
 
     const matrix = await service.getPurchaseMatrix();
     const dtf = matrix.groups.find((group) => group.title === 'DTF EXTERNO');
-    expect(dtf?.sizes).toHaveLength(1);
-    expect(dtf?.sizes[0]).toMatchObject({
+    expect(dtf?.sizes).toHaveLength(2);
+    expect(dtf?.sizes.find((entry) => entry.subproductName === 'DTF Always Racing')).toMatchObject({
       subproductName: 'DTF Always Racing',
       pendingOrderNeed: 2,
       recommendedPurchaseQuantity: 2
+    });
+    expect(dtf?.sizes.find((entry) => entry.subproductName === 'DTF No Risk No Story')).toMatchObject({
+      pendingOrderNeed: 0,
+      recommendedPurchaseQuantity: 0
     });
   });
 });
