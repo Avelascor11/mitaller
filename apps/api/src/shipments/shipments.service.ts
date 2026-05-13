@@ -180,7 +180,7 @@ export class ShipmentsService {
       entityId: shipment.id,
       action: 'FINALIZED_CREATED_LABEL',
       message: `Pedido ${order.orderNumber} finalizado con etiqueta creada`,
-      metadataJson: { shopifyResult }
+      metadataJson: { trackingNumber: shipment.trackingNumber, shopifyResult }
     });
 
     return { ...shipment, order: { ...order, operationalStatus: 'SHIPPED', fulfillmentStatus: 'fulfilled' }, shopifyResult };

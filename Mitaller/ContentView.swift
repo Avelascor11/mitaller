@@ -895,6 +895,7 @@ final class WorkshopStore {
             if let index = orders.firstIndex(where: { $0.id == order.id }) {
                 orders[index].status = .shipped
                 orders[index].tracking = shipment.trackingNumber ?? orders[index].tracking
+                orders[index].printStatus = .printed
             }
             await syncFromAPI()
         } catch {
@@ -2200,11 +2201,11 @@ struct ShippingOrderCard: View {
                         if store.labelCreationOrderID == order.id {
                             ProgressView().frame(maxWidth: .infinity)
                         } else {
-                            Label("Finalizar etiqueta", systemImage: "checkmark.seal.fill")
+                            Label("Finalizar sin escanear", systemImage: "checkmark.seal.fill")
                                 .frame(maxWidth: .infinity)
                         }
                     }
-                    .buttonStyle(.borderedProminent)
+                    .buttonStyle(.bordered)
                     .tint(AppTheme.green)
                     .disabled(store.labelCreationOrderID != nil)
                 }

@@ -26,6 +26,11 @@ export class ShipmentsController {
     return this.shipments.finalizeCreatedLabel(orderId);
   }
 
+  @Post(':orderId/finalize-without-scan')
+  finalizeWithoutScan(@Param('orderId') orderId: string) {
+    return this.shipments.finalizeCreatedLabel(orderId);
+  }
+
   @Post(':orderId/package-photo')
   packagePhoto(@Param('orderId') orderId: string, @Body() body: { photoBase64?: string }) {
     return this.shipments.savePackagePhoto(orderId, body.photoBase64 ?? '');
