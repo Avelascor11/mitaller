@@ -370,7 +370,7 @@ export class PurchaseService {
       });
       demand.set(key, current);
 
-      const dtfDesign = this.mapOrderItemToDtfDesign(item, mapped);
+      const dtfDesign = this.mapOrderItemToDtfDesign({ ...item, imageRef: this.firstImageRef(item) }, mapped);
       if (dtfDesign) {
         const dtfKey = this.dtfKey(dtfDesign.slug);
         const dtfCurrent = dtfDemand.get(dtfKey) ?? {
@@ -379,8 +379,10 @@ export class PurchaseService {
           size: dtfDesign.slug,
           quantity: 0,
           orders: [],
-          label: dtfDesign.label
+          label: dtfDesign.label,
+          imageRef: dtfDesign.imageRef
         };
+        if (!dtfCurrent.imageRef && dtfDesign.imageRef) dtfCurrent.imageRef = dtfDesign.imageRef;
         dtfCurrent.quantity += item.quantity;
         dtfCurrent.orders.push({
           orderId: item.orderId,
@@ -605,7 +607,7 @@ export class PurchaseService {
   }
 
   private mapOrderItemToDtfDesign(
-    item: { title: string; sku: string },
+    item: { title: string; sku: string; imageRef?: string | null },
     mapped: { kind: string; color: string; size: string }
   ) {
     const externalDtfColors = new Set(['NEGRA', 'NAVY', 'AZUL', 'CHARCOAL']);
@@ -613,18 +615,27 @@ export class PurchaseService {
     const label = this.cleanDtfDesignLabel(item.title);
     const slug = this.slugifyDtf(label || item.sku || item.title);
     if (!slug) return null;
-    return { label: label || slug, slug };
+    return { label: label || slug, slug, imageRef: item.imageRef?.trim() || null };
+  }
+
+  private firstImageRef(item: { imageUrl?: string | null; imageUrlsJson?: unknown }) {
+    if (item.imageUrl?.trim()) return item.imageUrl.trim();
+    if (Array.isArray(item.imageUrlsJson)) {
+      const first = item.imageUrlsJson.find((value) => typeof value === 'string' && value.trim());
+      return typeof first === 'string' ? first.trim() : null;
+    }
+    return null;
   }
 
   private addDtfCatalogFromMappings(
     dtfDemand: Map<string, MatrixDemand>,
-    mappings: Array<{ productName: string; subproductName: string; sku: string }>
+    mappings: Array<{ productName: string; subproductName: string; sku: string; imageRef?: string | null }>
   ) {
     for (const mapping of mappings) {
       const mapped = this.mapSubproductName(mapping.subproductName);
       if (!mapped) continue;
       const dtfDesign = this.mapOrderItemToDtfDesign(
-        { title: mapping.productName, sku: mapping.sku },
+        { title: mapping.productName, sku: mapping.sku, imageRef: 'imageRef' in mapping ? mapping.imageRef : null },
         mapped
       );
       if (!dtfDesign) continue;
@@ -636,7 +647,8 @@ export class PurchaseService {
         size: dtfDesign.slug,
         quantity: 0,
         orders: [],
-        label: dtfDesign.label
+        label: dtfDesign.label,
+        imageRef: dtfDesign.imageRef
       });
     }
   }
@@ -729,6 +741,7 @@ export class PurchaseService {
       const minStockTarget = stockItem?.minStock ?? 0;
       const pendingOrderNeed = need?.quantity ?? 0;
       const label = need?.label ?? stockItem?.name.replace(/^DTF\s+/i, '') ?? slug;
+      const imageRef = need?.imageRef ?? null;
       const alreadyOrderedQuantity = stockItem
         ? orderedNeeds
           .filter((ordered) => ordered.stockItemId === stockItem.id)
@@ -752,7 +765,8 @@ export class PurchaseService {
         minStockTarget,
         alreadyOrderedQuantity,
         recommendedPurchaseQuantity,
-        supplierAvailableQuantity: supplierStocks.find((stock) => stock.supplierSku === sku)?.availableQuantity ?? null
+        supplierAvailableQuantity: supplierStocks.find((stock) => stock.supplierSku === sku)?.availableQuantity ?? null,
+        imageRef
       });
     }
 
@@ -868,6 +882,7 @@ interface MatrixDemand {
   quantity: number;
   orders: PurchaseMatrixDemandOrder[];
   label?: string;
+  imageRef?: string | null;
 }
 
 interface PurchaseMatrixDemandOrder {
@@ -934,5 +949,6 @@ interface PurchaseMatrixGroup {
     alreadyOrderedQuantity: number;
     recommendedPurchaseQuantity: number;
     supplierAvailableQuantity: number | null;
+    imageRef?: string | null;
   }>;
 }

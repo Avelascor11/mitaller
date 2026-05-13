@@ -722,6 +722,7 @@ private struct PurchaseMatrixEntryDTO: Decodable {
     let alreadyOrderedQuantity: Int?
     let recommendedPurchaseQuantity: Int
     let supplierAvailableQuantity: Int?
+    let imageRef: String?
 
     var purchaseMatrixEntry: PurchaseMatrixEntry {
         PurchaseMatrixEntry(
@@ -736,7 +737,8 @@ private struct PurchaseMatrixEntryDTO: Decodable {
             minStockTarget: minStockTarget,
             alreadyOrderedQuantity: alreadyOrderedQuantity ?? 0,
             recommendedPurchaseQuantity: recommendedPurchaseQuantity,
-            supplierAvailableQuantity: supplierAvailableQuantity
+            supplierAvailableQuantity: supplierAvailableQuantity,
+            imageRef: imageRef
         )
     }
 }

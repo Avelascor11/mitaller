@@ -574,6 +574,7 @@ struct PurchaseMatrixEntry: Identifiable {
     let alreadyOrderedQuantity: Int
     let recommendedPurchaseQuantity: Int
     let supplierAvailableQuantity: Int?
+    let imageRef: String?
 }
 
 struct PurchaseDemandOrder: Identifiable, Hashable {
@@ -2575,6 +2576,7 @@ struct StockMatrixCard: View {
                         onEditStock(entry)
                     } label: {
                         HStack(spacing: 12) {
+                            DTFThumbnail(entry: entry, size: 54)
                             VStack(alignment: .leading, spacing: 5) {
                                 Text(entry.subproductName)
                                     .font(.subheadline.weight(.black))
@@ -3093,6 +3095,9 @@ struct PurchaseBuyRow: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(alignment: .center, spacing: 12) {
+                if entry.imageRef != nil {
+                    DTFThumbnail(entry: entry, size: 58)
+                }
                 VStack(alignment: .leading, spacing: 6) {
                     Text(entry.subproductName)
                         .font(.headline.weight(.black))
@@ -3173,6 +3178,23 @@ struct MiniMetric: View {
             .clipShape(Capsule())
             .lineLimit(1)
             .minimumScaleFactor(0.75)
+    }
+}
+
+struct DTFThumbnail: View {
+    let entry: PurchaseMatrixEntry
+    let size: CGFloat
+
+    private var url: URL? {
+        guard let imageRef = entry.imageRef, !imageRef.isEmpty else { return nil }
+        return URL(string: imageRef)
+    }
+
+    var body: some View {
+        ProductImageView(url: url, title: entry.subproductName)
+            .frame(width: size, height: size)
+            .background(AppTheme.surfaceSoft)
+            .clipShape(RoundedRectangle(cornerRadius: 12))
     }
 }
 
