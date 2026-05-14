@@ -7,6 +7,7 @@
 
 import SwiftUI
 import UIKit
+import PDFKit
 import UniformTypeIdentifiers
 @preconcurrency import Vision
 
@@ -2372,6 +2373,7 @@ struct StockView: View {
     @State private var query = ""
     @State private var showingScanner = false
     @State private var showingReceiptCamera = false
+    @State private var showingReceiptPDF = false
     @State private var receiptReview: StockReceiptReviewState?
     @State private var stockEdit: StockEditSelection?
 
@@ -2424,8 +2426,19 @@ struct StockView: View {
                             .buttonStyle(.bordered)
                             .tint(AppTheme.blue)
 
-                            Button { showingReceiptCamera = true } label: {
-                                Label("Escanear albaran", systemImage: "doc.viewfinder")
+                            Menu {
+                                Button {
+                                    showingReceiptCamera = true
+                                } label: {
+                                    Label("Foto / cámara", systemImage: "doc.viewfinder")
+                                }
+                                Button {
+                                    showingReceiptPDF = true
+                                } label: {
+                                    Label("Subir PDF", systemImage: "doc.fill.badge.plus")
+                                }
+                            } label: {
+                                Label("Albarán", systemImage: "doc.text.viewfinder")
                                     .frame(maxWidth: .infinity)
                             }
                             .buttonStyle(.borderedProminent)
@@ -2489,8 +2502,34 @@ struct StockView: View {
                     receiptReview = StockReceiptReviewState(photo: photo)
                 }
             }
+            .fileImporter(
+                isPresented: $showingReceiptPDF,
+                allowedContentTypes: [.pdf],
+                allowsMultipleSelection: false
+            ) { result in
+                switch result {
+                case .success(let urls):
+                    guard let url = urls.first else { return }
+                    Task { await importReceiptPDF(url) }
+                case .failure(let error):
+                    store.syncError = "No se pudo abrir el PDF: \(error.localizedDescription)"
+                }
+            }
             .sheet(item: $receiptReview) { review in
                 StockReceiptReviewView(state: review)
+            }
+        }
+    }
+
+    private func importReceiptPDF(_ url: URL) async {
+        do {
+            let text = try extractReceiptText(fromPDF: url)
+            await MainActor.run {
+                receiptReview = StockReceiptReviewState(pdfText: text, filename: url.lastPathComponent)
+            }
+        } catch {
+            await MainActor.run {
+                store.syncError = "No se pudo leer el PDF: \(error.localizedDescription)"
             }
         }
     }
@@ -2812,7 +2851,33 @@ struct StockEditSheet: View {
 
 struct StockReceiptReviewState: Identifiable {
     let id = UUID()
-    let photo: Data
+    let photo: Data?
+    let rawText: String?
+    let filename: String?
+
+    init(photo: Data) {
+        self.photo = photo
+        self.rawText = nil
+        self.filename = nil
+    }
+
+    init(pdfText: String, filename: String) {
+        self.photo = nil
+        self.rawText = pdfText
+        self.filename = filename
+    }
+
+    func readableText() async throws -> String {
+        if let rawText {
+            let clean = rawText.trimmingCharacters(in: .whitespacesAndNewlines)
+            if clean.isEmpty {
+                throw APIClientError.server(422, "No se ha podido leer texto en el PDF.")
+            }
+            return clean
+        }
+        guard let photo else { throw APIClientError.invalidResponse }
+        return try await recognizeReceiptText(from: photo)
+    }
 }
 
 struct EditableReceiptLine: Identifiable, Hashable {
@@ -2856,13 +2921,19 @@ struct StockReceiptReviewView: View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 14) {
-                    if let image = UIImage(data: state.photo) {
+                    if let photo = state.photo, let image = UIImage(data: photo) {
                         Image(uiImage: image)
                             .resizable()
                             .scaledToFit()
                             .frame(maxWidth: .infinity, maxHeight: 260)
                             .clipShape(RoundedRectangle(cornerRadius: 16))
                             .glassPanel(padding: 0)
+                    } else if let filename = state.filename {
+                        Label(filename, systemImage: "doc.richtext.fill")
+                            .font(.headline.weight(.black))
+                            .foregroundStyle(AppTheme.ink)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .glassPanel(padding: 16, accent: AppTheme.green)
                     }
 
                     if isReading {
@@ -2945,7 +3016,7 @@ struct StockReceiptReviewView: View {
         error = nil
         defer { isReading = false }
         do {
-            let text = try await recognizeReceiptText(from: state.photo)
+            let text = try await state.readableText()
             rawText = text
             let draft = try await store.scanStockReceipt(rawText: text, photo: state.photo)
             receipt = draft
@@ -3045,6 +3116,28 @@ func recognizeReceiptText(from imageData: Data) async throws -> String {
             }
         }
     }
+}
+
+func extractReceiptText(fromPDF url: URL) throws -> String {
+    let didAccess = url.startAccessingSecurityScopedResource()
+    defer {
+        if didAccess { url.stopAccessingSecurityScopedResource() }
+    }
+
+    guard let document = PDFDocument(url: url) else {
+        throw APIClientError.invalidResponse
+    }
+
+    let text = (0..<document.pageCount)
+        .compactMap { document.page(at: $0)?.string }
+        .joined(separator: "\n")
+        .trimmingCharacters(in: .whitespacesAndNewlines)
+
+    if text.isEmpty {
+        throw APIClientError.server(422, "El PDF no contiene texto seleccionable. Prueba con foto si es un escaneo.")
+    }
+
+    return text
 }
 
 struct PurchaseMatrixView: View {
