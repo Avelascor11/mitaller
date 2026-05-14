@@ -65,7 +65,12 @@ describe('SendcloudAdapter', () => {
     expect(String(url)).toBe('https://panel.sendcloud.sc/api/v3/shipments/announce');
     expect(body.ship_with.properties.shipping_option_code).toBe('correos:standard');
     expect(body.label_details.dpi).toBe(72);
-    expect(body.customs_information).toBeUndefined();
+    expect(body.customs_information).toMatchObject({
+      invoice_number: 'INV-9490',
+      export_reason: 'commercial_goods',
+      export_type: 'private',
+      goods_description: 'Ropa y merchandising'
+    });
     expect(result.carrier).toBe('Correos');
     expect(result.trackingNumber).toBe('PQ123');
   });

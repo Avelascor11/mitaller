@@ -95,11 +95,9 @@ export class SendcloudAdapter {
           },
           parcel_items: parcelItems
         }
-      ]
+      ],
+      customs_information: customsInformation
     };
-    if (customsInformation) {
-      payload.customs_information = customsInformation;
-    }
 
     const response = await this.requestV3<SendcloudShipmentV3Response>('/shipments/announce', {
       method: 'POST',
@@ -343,7 +341,6 @@ export class SendcloudAdapter {
   }
 
   private customsInformationFor(order: SendcloudOrderInput, address: NormalizedAddress) {
-    if (!this.requiresCustomsInformation(address)) return undefined;
     return {
       invoice_number: this.invoiceNumberFor(order),
       export_reason: this.config.get<string>('SENDCLOUD_CUSTOMS_EXPORT_REASON')?.trim() ?? 'commercial_goods',
@@ -356,11 +353,6 @@ export class SendcloudAdapter {
       goods_description: this.config.get<string>('SENDCLOUD_CUSTOMS_GOODS_DESCRIPTION')?.trim() ?? 'Ropa y merchandising',
       general_notes: this.customsZoneNote(address)
     };
-  }
-
-  private requiresCustomsInformation(address: NormalizedAddress) {
-    if (address.country !== 'ES') return true;
-    return this.isSpanishCustomsZone(address.zip);
   }
 
   private isSpanishCustomsZone(zip: string) {
