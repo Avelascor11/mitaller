@@ -65,8 +65,88 @@ describe('SendcloudAdapter', () => {
     expect(String(url)).toBe('https://panel.sendcloud.sc/api/v3/shipments/announce');
     expect(body.ship_with.properties.shipping_option_code).toBe('correos:standard');
     expect(body.label_details.dpi).toBe(72);
+    expect(body.customs_information).toBeUndefined();
     expect(result.carrier).toBe('Correos');
     expect(result.trackingNumber).toBe('PQ123');
+  });
+
+  it('incluye informacion de aduanas para envios a Canarias', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        data: {
+          id: 'shipment-canarias',
+          carrier: { code: 'correos', name: 'Correos' },
+          ship_with: { properties: { shipping_option_code: 'correos:standard' } },
+          parcels: [{ id: 124, tracking_number: 'PQ124' }]
+        }
+      })
+    } as Response);
+
+    await adapter().createShipment({
+      ...order,
+      shippingAddressJson: {
+        ...order.shippingAddressJson,
+        city: 'Las Palmas de Gran Canaria',
+        zip: '35001'
+      },
+      items: [
+        {
+          id: 'line-1',
+          shopifyProductId: 'product-1',
+          sku: 'CAM-BLANCA-M',
+          title: 'Camiseta Mas sabe el diablo',
+          variantTitle: 'Blanca - M',
+          quantity: 2,
+          color: 'Blanca',
+          size: 'M'
+        }
+      ]
+    });
+
+    const body = JSON.parse(String(fetchMock.mock.calls[0][1]?.body));
+
+    expect(body.customs_information).toMatchObject({
+      invoice_number: 'INV-9490',
+      export_reason: 'commercial_goods',
+      export_type: 'private',
+      goods_description: 'Ropa y merchandising'
+    });
+    expect(body.customs_information.general_notes).toContain('Canarias');
+    expect(body.parcels[0].parcel_items[0]).toMatchObject({
+      quantity: 2,
+      hs_code: '610910',
+      origin_country: 'ES',
+      price: { value: '1.00', currency: 'EUR' }
+    });
+    expect(body.total_order_price).toEqual({ value: '2.00', currency: 'EUR' });
+  });
+
+  it('incluye informacion de aduanas para paises no espanoles', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        data: {
+          id: 'shipment-international',
+          carrier: { code: 'correos', name: 'Correos' },
+          ship_with: { properties: { shipping_option_code: 'correos:standard' } },
+          parcels: [{ id: 125, tracking_number: 'PQ125' }]
+        }
+      })
+    } as Response);
+
+    await adapter().createShipment({
+      ...order,
+      shippingAddressJson: {
+        ...order.shippingAddressJson,
+        city: 'Lisboa',
+        zip: '1000-001',
+        countryCodeV2: 'PT'
+      }
+    });
+
+    const body = JSON.parse(String(fetchMock.mock.calls[0][1]?.body));
+    expect(body.customs_information.goods_description).toBe('Ropa y merchandising');
   });
 
   it('normaliza el DPI a 72 aunque este configurado otro valor', async () => {
