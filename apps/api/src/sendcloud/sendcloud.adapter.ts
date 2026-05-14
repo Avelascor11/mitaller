@@ -102,6 +102,18 @@ export class SendcloudAdapter {
     const response = await this.requestV3<SendcloudShipmentV3Response>('/shipments/announce', {
       method: 'POST',
       body: JSON.stringify(payload)
+    }).catch((error) => {
+      const details = {
+        customs: Boolean(payload.customs_information),
+        country: address.country,
+        postalCode: address.zip,
+        itemCount: parcelItems.length,
+        hsCodes: parcelItems.map((item) => item.hs_code).filter(Boolean)
+      };
+      if (error instanceof BadGatewayException) {
+        throw new BadGatewayException(`${error.message} | Sendcloud payload: ${JSON.stringify(details)}`);
+      }
+      throw error;
     });
     const data = response.data ?? response;
     this.assertNotUnstampedLetter(data);
@@ -389,6 +401,9 @@ export class SendcloudAdapter {
 
   private hsCodeForItem(item: NonNullable<SendcloudOrderInput['items']>[number]) {
     const text = this.normalizeText([item.title, item.variantTitle, item.sku].filter(Boolean).join(' '));
+    if (text.includes('lanyard') || text.includes('landyard') || text.includes('cordon') || text.includes('llavero')) {
+      return this.config.get<string>('SENDCLOUD_CUSTOMS_LANYARD_HS_CODE')?.trim() ?? '630790';
+    }
     if (text.includes('pegatina') || text.includes('sticker')) return '491199';
     if (text.includes('sudadera') || text.includes('hoodie')) return '611020';
     return this.config.get<string>('SENDCLOUD_CUSTOMS_DEFAULT_HS_CODE')?.trim() ?? '610910';

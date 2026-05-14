@@ -154,6 +154,35 @@ describe('SendcloudAdapter', () => {
     expect(body.customs_information.goods_description).toBe('Ropa y merchandising');
   });
 
+  it('usa HS especifico para lanyards en aduanas', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        data: {
+          id: 'shipment-lanyard',
+          carrier: { code: 'correos', name: 'Correos' },
+          ship_with: { properties: { shipping_option_code: 'correos:standard' } },
+          parcels: [{ id: 126, tracking_number: 'PQ126' }]
+        }
+      })
+    } as Response);
+
+    await adapter().createShipment({
+      ...order,
+      items: [
+        {
+          id: 'line-lanyard',
+          sku: 'LANYARD-ALONSO',
+          title: 'Lanyard Magic Alonso',
+          quantity: 1
+        }
+      ]
+    });
+
+    const body = JSON.parse(String(fetchMock.mock.calls[0][1]?.body));
+    expect(body.parcels[0].parcel_items[0].hs_code).toBe('630790');
+  });
+
   it('normaliza el DPI a 72 aunque este configurado otro valor', async () => {
     const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue({
       ok: true,
