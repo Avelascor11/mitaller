@@ -147,4 +147,25 @@ describe('StockReceiptsService', () => {
       expect.objectContaining({ stockItemId: 'hoodie-tangerine-m', quantity: 1 })
     ]));
   });
+
+  it('no usa codigos de producto como ID.333 como cantidad de sudadera', async () => {
+    const createdLines: Array<{ stockItemId?: string; quantity: number; matchedName?: string }> = [];
+    const service = makeService(createdLines);
+
+    await service.scanReceipt({
+      rawText: [
+        '23742',
+        'WG005 White M',
+        '1',
+        'ID.333 Hoodie'
+      ].join('\n')
+    });
+
+    expect(createdLines).toEqual([
+      expect.objectContaining({ stockItemId: 'hoodie-white-m', quantity: 1 })
+    ]);
+    expect(createdLines).not.toEqual(expect.arrayContaining([
+      expect.objectContaining({ stockItemId: 'hoodie-white-m', quantity: 333 })
+    ]));
+  });
 });

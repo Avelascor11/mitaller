@@ -216,7 +216,9 @@ export class StockReceiptsService {
 
   private parseReceiptBlock(lines: string[], start: number, stockItems: StockItem[]) {
     for (let length = 1; length <= 5; length += 1) {
-      const block = lines.slice(start, start + length);
+      const block = lines
+        .slice(start, start + length)
+        .filter((line) => !this.isReceiptNoiseLine(line));
       if (!block.length) continue;
       const rawLine = block.join(' ');
       const quantity = this.extractQuantity(rawLine);
@@ -273,8 +275,8 @@ export class StockReceiptsService {
   }
 
   private detectKind(value: string) {
-    if (value.includes('sudadera') || value.includes('hoodie')) return 'sudadera';
-    if (value.includes('camiseta') || value.includes('shirt') || value.includes('tshirt') || value.includes('t shirt')) return 'camiseta';
+    if (value.includes('sudadera') || value.includes('hoodie') || /\bwg005\b/.test(value)) return 'sudadera';
+    if (value.includes('camiseta') || value.includes('shirt') || value.includes('tshirt') || value.includes('t shirt') || /\btg002\b/.test(value)) return 'camiseta';
     return undefined;
   }
 
