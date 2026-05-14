@@ -98,7 +98,7 @@ export class OrdersService {
       },
       data: { status: 'DONE', completedAt: new Date() }
     });
-    await this.decrementStockFor(existing.id);
+    await this.decrementStockForPreparation(existing.id);
     await this.activity.log({
       entityType: 'Order',
       entityId: existing.id,
@@ -129,23 +129,24 @@ export class OrdersService {
     }
   }
 
-  private async decrementStockFor(orderId: string) {
-    const items = await this.prisma.orderItem.findMany({ where: { orderId } });
-    for (const item of items) {
-      if (!item.sku || item.sku.startsWith('NO-SKU') || item.sku.includes('NO-STOCK')) continue;
+  private async decrementStockForPreparation(orderId: string) {
+    if (await this.hasActivePreparationStockDeduction(orderId)) return;
+
+    const demands = await this.getPreparationStockDemands(orderId);
+    for (const demand of demands) {
       const stockItem = await this.prisma.stockItem.findUnique({
-        where: { sku: item.sku },
+        where: { id: demand.stockItemId },
         include: { levels: { orderBy: { quantity: 'desc' } } }
       });
       if (!stockItem) continue;
-      let remaining = item.quantity;
+      let remaining = demand.quantity;
       for (const level of stockItem.levels) {
         if (remaining <= 0) break;
         const take = Math.min(level.quantity, remaining);
         if (take <= 0) continue;
         await this.prisma.stockLevel.update({
           where: { id: level.id },
-          data: { quantity: level.quantity - take }
+          data: { quantity: { decrement: take } }
         });
         await this.prisma.stockMovement.create({
           data: {
@@ -158,11 +159,183 @@ export class OrdersService {
         });
         remaining -= take;
       }
+      if (remaining > 0) {
+        await this.activity.log({
+          entityType: 'Order',
+          entityId: orderId,
+          action: 'ORDER_PREPARED_STOCK_SHORT',
+          message: `Faltan ${remaining} unidades de ${stockItem.name} para descontar stock`,
+          metadataJson: { stockItemId: stockItem.id, sku: stockItem.sku, missingQuantity: remaining }
+        });
+      }
     }
+  }
+
+  private async restoreStockForPreparation(orderId: string) {
+    const netMovements = await this.getPreparationStockMovementNet(orderId);
+    for (const movement of netMovements) {
+      if (movement.quantity >= 0) continue;
+      const restoreQuantity = Math.abs(movement.quantity);
+      const locationId = movement.locationId ?? (await this.defaultStockLocationId());
+      await this.prisma.stockLevel.upsert({
+        where: { stockItemId_locationId: { stockItemId: movement.stockItemId, locationId } },
+        create: { stockItemId: movement.stockItemId, locationId, quantity: restoreQuantity },
+        update: { quantity: { increment: restoreQuantity } }
+      });
+      await this.prisma.stockMovement.create({
+        data: {
+          stockItemId: movement.stockItemId,
+          toLocationId: locationId,
+          quantity: restoreQuantity,
+          reason: 'ORDER_PREPARED_REOPENED',
+          relatedOrderId: orderId
+        }
+      });
+    }
+  }
+
+  private async hasActivePreparationStockDeduction(orderId: string) {
+    const total = (await this.getPreparationStockMovementNet(orderId)).reduce((sum, movement) => sum + movement.quantity, 0);
+    return total < 0;
+  }
+
+  private async getPreparationStockMovementNet(orderId: string) {
+    const movements = await this.prisma.stockMovement.findMany({
+      where: {
+        relatedOrderId: orderId,
+        reason: { in: ['ORDER_PREPARED', 'ORDER_PREPARED_REOPENED'] }
+      }
+    });
+    const grouped = new Map<string, { stockItemId: string; locationId: string | null; quantity: number }>();
+    for (const movement of movements) {
+      const locationId = movement.fromLocationId ?? movement.toLocationId ?? null;
+      const key = `${movement.stockItemId}:${locationId ?? ''}`;
+      const current = grouped.get(key) ?? { stockItemId: movement.stockItemId, locationId, quantity: 0 };
+      current.quantity += movement.quantity;
+      grouped.set(key, current);
+    }
+    return [...grouped.values()];
+  }
+
+  private async getPreparationStockDemands(orderId: string) {
+    const [items, mappings, stockItems] = await Promise.all([
+      this.prisma.orderItem.findMany({ where: { orderId, status: { not: 'CANCELLED' } } }),
+      this.prisma.productSubproductMapping.findMany(),
+      this.prisma.stockItem.findMany({ where: { type: 'BLANK_GARMENT' } })
+    ]);
+    const mappingIndex = this.buildSubproductMappingIndex(mappings);
+    const stockIndex = new Map<string, { id: string; sku: string; name: string }>();
+    for (const stockItem of stockItems) {
+      const mapped = this.mapSubproductName(`${stockItem.name} ${stockItem.sku} ${stockItem.supplierSku ?? ''}`);
+      if (mapped) stockIndex.set(this.stockDemandKey(mapped.kind, mapped.color, mapped.size), stockItem);
+    }
+
+    const demands = new Map<string, { stockItemId: string; quantity: number }>();
+    for (const item of items) {
+      const mapped = this.mapOrderItemToBlankGarment(item, mappingIndex);
+      if (!mapped) continue;
+      const stockItem = stockIndex.get(this.stockDemandKey(mapped.kind, mapped.color, mapped.size));
+      if (!stockItem) continue;
+      const current = demands.get(stockItem.id) ?? { stockItemId: stockItem.id, quantity: 0 };
+      current.quantity += item.quantity;
+      demands.set(stockItem.id, current);
+    }
+    return [...demands.values()];
+  }
+
+  private async defaultStockLocationId() {
+    const location = await this.prisma.stockLocation.findFirst({
+      where: { code: { in: ['EST-A-01', 'TALLER'] } },
+      orderBy: { code: 'asc' }
+    });
+    if (location) return location.id;
+    return (await this.prisma.stockLocation.findFirstOrThrow()).id;
+  }
+
+  private buildSubproductMappingIndex(mappings: Array<{ sku: string; productName: string; subproductName: string }>) {
+    const index = new Map<string, string>();
+    for (const mapping of mappings) {
+      if (this.isReliableSku(mapping.sku)) index.set(`sku:${mapping.sku}`, mapping.subproductName);
+      index.set(`name:${this.normalizeText(mapping.productName)}`, mapping.subproductName);
+    }
+    return index;
+  }
+
+  private mapOrderItemToBlankGarment(
+    item: { productType?: string | null; title: string; sku: string; color?: string | null; size?: string | null; variantTitle?: string | null },
+    mappingIndex: Map<string, string>
+  ) {
+    const mappedSubproduct =
+      mappingIndex.get(`name:${this.normalizeText(item.title)}`)
+      ?? (this.isReliableSku(item.sku) ? mappingIndex.get(`sku:${item.sku}`) : undefined);
+    if (mappedSubproduct) {
+      const mapped = this.mapSubproductName(mappedSubproduct);
+      if (mapped) return mapped;
+    }
+
+    const kind = this.inferGarmentKind(`${item.productType ?? ''} ${item.title} ${item.sku}`);
+    const color = this.normalizeColor(`${item.color ?? ''} ${item.variantTitle ?? ''} ${item.title}`);
+    const size = this.normalizeSize(`${item.size ?? ''} ${item.variantTitle ?? ''} ${item.title}`);
+    if (!kind || !color || !size) return null;
+    return { kind, color, size };
+  }
+
+  private mapSubproductName(subproductName: string) {
+    const kind = this.inferGarmentKind(subproductName);
+    const color = this.normalizeColor(subproductName);
+    const size = this.normalizeSize(subproductName);
+    if (!kind || !color || !size) return null;
+    return { kind, color, size };
+  }
+
+  private stockDemandKey(kind: string, color: string, size: string) {
+    return `${kind}:${color}:${size}`;
+  }
+
+  private isReliableSku(sku: string) {
+    const normalized = sku.trim().toUpperCase();
+    return Boolean(normalized) && !normalized.startsWith('WRONG-') && !normalized.startsWith('NO-SKU');
+  }
+
+  private inferGarmentKind(value: string) {
+    const normalized = this.normalizeText(value);
+    if (/\b(sudadera|hoodie|hd)\b/.test(normalized)) return 'SUDADERA';
+    if (/\b(camiseta|shirt|tshirt|ts)\b/.test(normalized)) return 'CAMISETA';
+    return null;
+  }
+
+  private normalizeSize(value: string) {
+    const normalized = this.normalizeText(value).toUpperCase();
+    const match = normalized.match(/(^|[^A-Z])(XXL|XL|L|M|S)([^A-Z]|$)/);
+    return match?.[2] ?? null;
+  }
+
+  private normalizeColor(value: string) {
+    const normalized = this.normalizeText(value);
+    const rules: Array<[string, RegExp]> = [
+      ['BLANCA', /\b(blanco|blanca|white|wht)\b/],
+      ['NEGRA', /\b(negro|negra|black|blk)\b/],
+      ['SAND', /\b(sand|arena)\b/],
+      ['CHARCOAL', /\b(charcoal|carbon|gris)\b/],
+      ['TANGERINE', /\b(tangerine|naranja|orange)\b/],
+      ['AZUL', /\b(azul|blue)\b/],
+      ['MARRON', /\b(marron|brown)\b/],
+      ['ROSA', /\b(rosa|pink)\b/],
+      ['NAVY', /\b(navy|marino)\b/]
+    ];
+    return rules.find(([, pattern]) => pattern.test(normalized))?.[0] ?? null;
+  }
+
+  private normalizeText(value: string) {
+    return value
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .toLowerCase();
   }
 
   async reopenPreparation(id: string) {
     const existing = await this.findOne(id);
+    await this.restoreStockForPreparation(existing.id);
     const order = await this.prisma.order.update({
       where: { id: existing.id },
       data: { operationalStatus: 'WAITING_PICKING' },
