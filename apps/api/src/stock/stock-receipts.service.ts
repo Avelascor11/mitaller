@@ -153,23 +153,65 @@ export class StockReceiptsService {
     const results = new Map<string, ParsedReceiptLine>();
 
     for (let index = 0; index < sourceLines.length; index += 1) {
+      if (this.isReceiptNoiseLine(sourceLines[index])) continue;
+
+      const packzettelLine = this.parsePackzettelLine(sourceLines[index], stockItems);
+      if (packzettelLine) {
+        this.addParsedResult(results, packzettelLine);
+        continue;
+      }
+
       const parsed = this.parseReceiptBlock(sourceLines, index, stockItems);
       if (!parsed) continue;
       index += parsed.consumedLines - 1;
-      const { rawLine, stockItem, quantity } = parsed;
-      const key = stockItem.id;
-      const existing = results.get(key);
-      results.set(key, {
-        key,
-        rawLine: existing ? `${existing.rawLine}\n${rawLine}` : rawLine,
-        stockItem,
-        detectedName: stockItem.name,
-        quantity: (existing?.quantity ?? 0) + quantity,
-        confidence: Math.max(existing?.confidence ?? 0, this.confidenceFor(rawLine, stockItem))
-      });
+      this.addParsedResult(results, parsed);
     }
 
     return [...results.values()].map(({ key: _key, ...line }) => line);
+  }
+
+  private isReceiptNoiseLine(line: string) {
+    const normalized = this.normalize(line);
+    return normalized.includes('articulo descripcion cantidad') ||
+      normalized === 'n articulo' ||
+      normalized === 'descripcion' ||
+      normalized === 'cantidad' ||
+      normalized === 'e220 t shirt' ||
+      normalized === 'id 333 hoodie';
+  }
+
+  private addParsedResult(
+    results: Map<string, ParsedReceiptLine>,
+    parsed: { rawLine: string; stockItem: StockItem; quantity: number; confidence?: number }
+  ) {
+    const { rawLine, stockItem, quantity } = parsed;
+    const key = stockItem.id;
+    const existing = results.get(key);
+    results.set(key, {
+      key,
+      rawLine: existing ? `${existing.rawLine}\n${rawLine}` : rawLine,
+      stockItem,
+      detectedName: stockItem.name,
+      quantity: (existing?.quantity ?? 0) + quantity,
+      confidence: Math.max(existing?.confidence ?? 0, parsed.confidence ?? this.confidenceFor(rawLine, stockItem))
+    });
+  }
+
+  private parsePackzettelLine(line: string, stockItems: StockItem[]) {
+    const match = line.match(/^\d{4,}\s+(TG002|WG005)\s+(.+?)\s+(2XL|XXL|XL|L|M|S)\s+([1-9]\d{0,2})$/i);
+    if (!match) return null;
+
+    const [, code, colorText, sizeText, quantityText] = match;
+    const kind = code.toUpperCase() === 'WG005' ? 'sudadera' : 'camiseta';
+    const color = this.detectColor(this.normalize(colorText));
+    const size = this.normalizeSize(sizeText);
+    const quantity = Number(quantityText);
+    if (!color || !size || !quantity) return null;
+
+    const stockItem = this.findByKindColorSize(stockItems, kind, color, size);
+    if (!stockItem) return null;
+
+    return { rawLine: line, stockItem, quantity, consumedLines: 1, confidence: 0.96 };
   }
 
   private parseReceiptBlock(lines: string[], start: number, stockItems: StockItem[]) {
@@ -209,6 +251,10 @@ export class StockReceiptsService {
     const size = this.detectSize(normalizedLine);
     if (!kind || !color || !size) return undefined;
 
+    return this.findByKindColorSize(stockItems, kind, color, size);
+  }
+
+  private findByKindColorSize(stockItems: StockItem[], kind: string, color: string, size: string) {
     return stockItems.find((item) => {
       const normalizedName = this.normalize(item.name);
       const tokens = normalizedName.split(/\s+/);
@@ -250,7 +296,11 @@ export class StockReceiptsService {
   private detectSize(value: string) {
     const match = value.match(/(?:^|\s|[-_/])(?:talla\s*)?(2xl|xxl|xl|l|m|s)(?:\s|$|[-_/])/i);
     if (!match) return undefined;
-    return match[1].toLowerCase() === '2xl' ? 'xxl' : match[1].toLowerCase();
+    return this.normalizeSize(match[1]);
+  }
+
+  private normalizeSize(value: string) {
+    return value.toLowerCase() === '2xl' ? 'xxl' : value.toLowerCase();
   }
 
   private normalize(value: string) {
