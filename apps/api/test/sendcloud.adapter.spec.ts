@@ -124,6 +124,7 @@ describe('SendcloudAdapter', () => {
       origin_country: 'ES',
       price: { value: '1.00', currency: 'EUR' }
     });
+    expect(body.parcels[0].weight).toEqual({ value: '0.600', unit: 'kg' });
     expect(body.total_order_price).toEqual({ value: '2.00', currency: 'EUR' });
   });
 
@@ -181,6 +182,31 @@ describe('SendcloudAdapter', () => {
 
     const body = JSON.parse(String(fetchMock.mock.calls[0][1]?.body));
     expect(body.parcels[0].parcel_items[0].hs_code).toBe('630790');
+  });
+
+  it('calcula el peso del paquete como minimo la suma declarada de articulos', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        data: {
+          id: 'shipment-weight',
+          carrier: { code: 'correos', name: 'Correos' },
+          ship_with: { properties: { shipping_option_code: 'correos:standard' } },
+          parcels: [{ id: 127, tracking_number: 'PQ127' }]
+        }
+      })
+    } as Response);
+
+    await adapter().createShipment({
+      ...order,
+      items: [
+        { id: 'line-1', sku: 'LANYARD', title: 'Lanyard', quantity: 1 },
+        { id: 'line-2', sku: 'CAM-1', title: 'Camiseta Blanca M', quantity: 3 }
+      ]
+    });
+
+    const body = JSON.parse(String(fetchMock.mock.calls[0][1]?.body));
+    expect(body.parcels[0].weight).toEqual({ value: '0.950', unit: 'kg' });
   });
 
   it('normaliza el DPI a 72 aunque este configurado otro valor', async () => {

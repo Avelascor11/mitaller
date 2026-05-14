@@ -54,6 +54,7 @@ export class SendcloudAdapter {
     const fromAddress = await this.resolveFromAddress();
     const shippingOptionCode = await this.resolveShippingOptionCode(order, address, fromAddress);
     const parcelItems = this.parcelItemsFor(order);
+    const parcelWeight = this.parcelWeightFor(parcelItems);
     const customsInformation = this.customsInformationFor(order, address);
     const payload: Record<string, unknown> = {
       label_details: {
@@ -90,7 +91,7 @@ export class SendcloudAdapter {
             unit: 'cm'
           },
           weight: {
-            value: String(this.config.get('SENDCLOUD_DEFAULT_WEIGHT_KG') ?? '0.3'),
+            value: parcelWeight,
             unit: 'kg'
           },
           parcel_items: parcelItems
@@ -389,6 +390,14 @@ export class SendcloudAdapter {
     return { currency: 'EUR', value: total.toFixed(2) };
   }
 
+  private parcelWeightFor(items: Array<{ quantity: number; weight: { value: number | string; unit: string } }>) {
+    const configured = Number(this.config.get('SENDCLOUD_DEFAULT_WEIGHT_KG') ?? '0.3');
+    const minimum = Number.isFinite(configured) && configured > 0 ? configured : 0.3;
+    const declaredItemsWeight = items.reduce((sum, item) => sum + Number(item.weight.value) * item.quantity, 0);
+    const total = Math.max(minimum, declaredItemsWeight);
+    return total.toFixed(3);
+  }
+
   private defaultItemPrice() {
     const configured = Number(this.config.get<string>('SENDCLOUD_CUSTOMS_DEFAULT_ITEM_VALUE_EUR') ?? '1');
     const value = Number.isFinite(configured) && configured > 0 ? configured : 1;
@@ -411,6 +420,7 @@ export class SendcloudAdapter {
 
   private weightForItem(item: NonNullable<SendcloudOrderInput['items']>[number]) {
     const text = this.normalizeText([item.title, item.variantTitle, item.sku].filter(Boolean).join(' '));
+    if (text.includes('lanyard') || text.includes('landyard') || text.includes('cordon') || text.includes('llavero')) return 0.05;
     if (text.includes('pegatina') || text.includes('sticker')) return 0.05;
     if (text.includes('sudadera') || text.includes('hoodie')) return 0.6;
     return 0.3;
