@@ -146,34 +146,50 @@ export class StockReceiptsService {
   }
 
   private parseLines(rawText: string, stockItems: StockItem[]) {
-    const candidates = rawText
+    const sourceLines = rawText
       .split(/\r?\n/)
       .map((line) => line.trim())
-      .filter((line) => line.length >= 4);
-    const results: ParsedReceiptLine[] = [];
+      .filter((line) => line.length >= 1);
+    const results = new Map<string, ParsedReceiptLine>();
 
-    for (const rawLine of candidates) {
+    for (let index = 0; index < sourceLines.length; index += 1) {
+      const parsed = this.parseReceiptBlock(sourceLines, index, stockItems);
+      if (!parsed) continue;
+      index += parsed.consumedLines - 1;
+      const { rawLine, stockItem, quantity } = parsed;
+      const key = stockItem.id;
+      const existing = results.get(key);
+      results.set(key, {
+        key,
+        rawLine: existing ? `${existing.rawLine}\n${rawLine}` : rawLine,
+        stockItem,
+        detectedName: stockItem.name,
+        quantity: (existing?.quantity ?? 0) + quantity,
+        confidence: Math.max(existing?.confidence ?? 0, this.confidenceFor(rawLine, stockItem))
+      });
+    }
+
+    return [...results.values()].map(({ key: _key, ...line }) => line);
+  }
+
+  private parseReceiptBlock(lines: string[], start: number, stockItems: StockItem[]) {
+    for (let length = 1; length <= 5; length += 1) {
+      const block = lines.slice(start, start + length);
+      if (!block.length) continue;
+      const rawLine = block.join(' ');
       const quantity = this.extractQuantity(rawLine);
       if (!quantity) continue;
       const stockItem = this.matchStockItem(rawLine, stockItems);
       if (!stockItem) continue;
-      const key = `${stockItem.id}:${quantity}:${this.normalize(rawLine)}`;
-      if (results.some((line) => line.key === key)) continue;
-      results.push({
-        key,
-        rawLine,
-        stockItem,
-        detectedName: stockItem.name,
-        quantity,
-        confidence: this.confidenceFor(rawLine, stockItem)
-      });
+      return { rawLine, stockItem, quantity, consumedLines: length };
     }
-
-    return results.map(({ key: _key, ...line }) => line);
+    return null;
   }
 
   private extractQuantity(line: string) {
     const cleaned = line.replace(/\b\d+[,.]\d{2}\b/g, ' ');
+    const end = cleaned.match(/\b([1-9]\d{0,2})\s*$/);
+    if (end) return Number(end[1]);
     const matches = [...cleaned.matchAll(/\b([1-9]\d{0,2})\b/g)].map((match) => Number(match[1]));
     if (!matches.length) return 0;
     return matches[matches.length - 1];
@@ -193,11 +209,13 @@ export class StockReceiptsService {
     const size = this.detectSize(normalizedLine);
     if (!kind || !color || !size) return undefined;
 
-    return stockItems.find((item) =>
-      this.normalize(item.name).includes(kind) &&
-      this.normalize(item.name).includes(color) &&
-      this.normalize(item.name).includes(size)
-    );
+    return stockItems.find((item) => {
+      const normalizedName = this.normalize(item.name);
+      const tokens = normalizedName.split(/\s+/);
+      return normalizedName.includes(kind) &&
+        normalizedName.includes(color) &&
+        tokens.includes(size);
+    });
   }
 
   private confidenceFor(line: string, item: StockItem) {
@@ -210,18 +228,29 @@ export class StockReceiptsService {
 
   private detectKind(value: string) {
     if (value.includes('sudadera') || value.includes('hoodie')) return 'sudadera';
-    if (value.includes('camiseta') || value.includes('shirt') || value.includes('tshirt')) return 'camiseta';
+    if (value.includes('camiseta') || value.includes('shirt') || value.includes('tshirt') || value.includes('t shirt')) return 'camiseta';
     return undefined;
   }
 
   private detectColor(value: string) {
-    const colors = ['blanca', 'negra', 'sand', 'charcoal', 'tangerine', 'azul', 'marron', 'rosa', 'navy'];
-    return colors.find((color) => value.includes(color) || value.includes(color.replace('a', 'o')));
+    const colors: Array<[string, RegExp]> = [
+      ['blanca', /\b(blanca|blanco|white)\b/],
+      ['negra', /\b(negra|negro|black)\b/],
+      ['sand', /\b(sand|arena|mastic)\b/],
+      ['charcoal', /\b(charcoal|dark grey|dark gray|gris)\b/],
+      ['tangerine', /\b(tangerine|naranja|orange)\b/],
+      ['azul', /\b(azul|blue)\b/],
+      ['marron', /\b(marron|brown)\b/],
+      ['rosa', /\b(rosa|pink)\b/],
+      ['navy', /\b(navy|marino)\b/]
+    ];
+    return colors.find(([, pattern]) => pattern.test(value))?.[0];
   }
 
   private detectSize(value: string) {
-    const match = value.match(/(?:^|\s|[-_/])(?:talla\s*)?(xxl|xl|l|m|s)(?:\s|$|[-_/])/i);
-    return match?.[1]?.toLowerCase();
+    const match = value.match(/(?:^|\s|[-_/])(?:talla\s*)?(2xl|xxl|xl|l|m|s)(?:\s|$|[-_/])/i);
+    if (!match) return undefined;
+    return match[1].toLowerCase() === '2xl' ? 'xxl' : match[1].toLowerCase();
   }
 
   private normalize(value: string) {

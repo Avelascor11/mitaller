@@ -2523,7 +2523,7 @@ struct StockView: View {
 
     private func importReceiptPDF(_ url: URL) async {
         do {
-            let text = try extractReceiptText(fromPDF: url)
+            let text = try await extractReceiptText(fromPDF: url)
             await MainActor.run {
                 receiptReview = StockReceiptReviewState(pdfText: text, filename: url.lastPathComponent)
             }
@@ -3118,7 +3118,7 @@ func recognizeReceiptText(from imageData: Data) async throws -> String {
     }
 }
 
-func extractReceiptText(fromPDF url: URL) throws -> String {
+func extractReceiptText(fromPDF url: URL) async throws -> String {
     let didAccess = url.startAccessingSecurityScopedResource()
     defer {
         if didAccess { url.stopAccessingSecurityScopedResource() }
@@ -3128,16 +3128,54 @@ func extractReceiptText(fromPDF url: URL) throws -> String {
         throw APIClientError.invalidResponse
     }
 
-    let text = (0..<document.pageCount)
+    let embeddedText = (0..<document.pageCount)
         .compactMap { document.page(at: $0)?.string }
         .joined(separator: "\n")
         .trimmingCharacters(in: .whitespacesAndNewlines)
 
-    if text.isEmpty {
-        throw APIClientError.server(422, "El PDF no contiene texto seleccionable. Prueba con foto si es un escaneo.")
+    if !embeddedText.isEmpty {
+        return embeddedText
     }
 
+    let renderedPages = (0..<document.pageCount)
+        .compactMap { document.page(at: $0) }
+        .compactMap { renderPDFPageForOCR($0) }
+
+    var ocrText: [String] = []
+    for imageData in renderedPages {
+        if let text = try? await recognizeReceiptText(from: imageData), !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            ocrText.append(text)
+        }
+    }
+
+    let text = ocrText.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
+    if text.isEmpty {
+        throw APIClientError.server(422, "No se ha podido leer texto del PDF escaneado.")
+    }
     return text
+}
+
+func renderPDFPageForOCR(_ page: PDFPage) -> Data? {
+    let bounds = page.bounds(for: .mediaBox)
+    guard bounds.width > 0, bounds.height > 0 else { return nil }
+
+    let scale: CGFloat = 2.4
+    let size = CGSize(width: bounds.width * scale, height: bounds.height * scale)
+    let format = UIGraphicsImageRendererFormat()
+    format.scale = 1
+    format.opaque = true
+
+    let image = UIGraphicsImageRenderer(size: size, format: format).image { context in
+        UIColor.white.setFill()
+        context.fill(CGRect(origin: .zero, size: size))
+        context.cgContext.saveGState()
+        context.cgContext.translateBy(x: 0, y: size.height)
+        context.cgContext.scaleBy(x: scale, y: -scale)
+        page.draw(with: .mediaBox, to: context.cgContext)
+        context.cgContext.restoreGState()
+    }
+
+    return image.jpegData(compressionQuality: 0.92)
 }
 
 struct PurchaseMatrixView: View {
