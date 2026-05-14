@@ -336,9 +336,13 @@ export class OrdersService {
   async reopenPreparation(id: string) {
     const existing = await this.findOne(id);
     await this.restoreStockForPreparation(existing.id);
+    await this.cancelPendingShipmentsForReopenedOrder(existing.id);
     const order = await this.prisma.order.update({
       where: { id: existing.id },
-      data: { operationalStatus: 'WAITING_PICKING' },
+      data: {
+        operationalStatus: 'WAITING_PICKING',
+        preparedAt: null
+      },
       include: { items: true, shipments: true }
     });
     await this.activity.log({
@@ -348,6 +352,16 @@ export class OrdersService {
       message: `Pedido ${existing.orderNumber} devuelto a sin preparar`
     });
     return order;
+  }
+
+  private async cancelPendingShipmentsForReopenedOrder(orderId: string) {
+    await this.prisma.shipment.updateMany({
+      where: {
+        orderId,
+        status: { in: ['PENDING', 'PARCEL_CREATED', 'LABEL_CREATED', 'PRINTED', 'ERROR'] }
+      },
+      data: { status: 'CANCELLED' }
+    });
   }
 
   async importShopifyOrders() {
@@ -521,15 +535,16 @@ export class OrdersService {
       ['LABEL_CREATED', 'PRINTED'].includes(shipment.status)
     );
     const isCancelled = input.operationalStatus === 'CANCELLED';
+    const isLocallyAdvanced = existingOrder && locallyAdvancedStatuses.includes(existingOrder.operationalStatus);
     const operationalStatus = isCancelled
       ? 'CANCELLED'
       : isSheetImport
       ? calculated.operationalStatus
       : hasShipped
       ? 'SHIPPED'
-      : hasCreatedLabel
+      : hasCreatedLabel && isLocallyAdvanced
       ? 'LABEL_CREATED'
-      : existingOrder && locallyAdvancedStatuses.includes(existingOrder.operationalStatus)
+      : isLocallyAdvanced
       ? existingOrder.operationalStatus
       : calculated.operationalStatus;
 
