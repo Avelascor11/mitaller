@@ -26,6 +26,11 @@ export class OrdersController {
     return this.orders.markPrepared(id, body?.photoBase64);
   }
 
+  @Patch('orders/:id/confirm-picking')
+  confirmPicking(@Param('id') id: string) {
+    return this.orders.confirmPicking(id);
+  }
+
   @Get('orders/:id/package-photo')
   async getPackagePhoto(@Param('id') id: string, @Res() res: Response) {
     const photo = await this.orders.getPackagePhoto(id);

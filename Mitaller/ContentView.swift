@@ -1010,6 +1010,22 @@ final class WorkshopStore {
         }
     }
 
+    func confirmPickingRemote(_ order: WorkshopOrder) async {
+        guard let index = orders.firstIndex(where: { $0.id == order.id }) else { return }
+        orders[index].status = .inProduction
+        guard let client = apiClient else { return }
+        do {
+            let updated = try await client.confirmOrderPicking(id: order.remoteID ?? order.number)
+            if let index = orders.firstIndex(where: { $0.id == order.id }) {
+                orders[index] = updated
+            }
+            await syncFromAPI()
+        } catch {
+            syncError = "No se pudo confirmar la cogida de stock: \(error.localizedDescription)"
+            await syncFromAPI()
+        }
+    }
+
     func reprintLabelRemote(for order: WorkshopOrder) async {
         guard let client = apiClient else { return }
         syncError = nil
@@ -3922,8 +3938,8 @@ struct FlowChips<Content: View>: View {
 
 struct OrderPreparationDetailView: View {
     @Environment(WorkshopStore.self) private var store
-    @State private var showingPrepareConfirmation = false
-    @State private var showingPhotoCapture = false
+    @State private var showingPickStock = false
+    @State private var showingFinishConfirmation = false
     @State private var showingPrintPrompt = false
     let order: WorkshopOrder
 
@@ -3939,16 +3955,25 @@ struct OrderPreparationDetailView: View {
         store.orderPickingLists[currentOrder.remoteID ?? currentOrder.number]
     }
 
+    var stockAlreadyPicked: Bool {
+        switch currentOrder.status {
+        case .inProduction, .produced, .picked, .readyForLabel, .labelCreated, .shipped:
+            true
+        default:
+            false
+        }
+    }
+
     var quantityWarningMessage: String {
         repeatedQuantityItems
             .map { "\($0.displayTitle): x\($0.quantity)" }
             .joined(separator: "\n")
     }
 
-    var prepareConfirmationMessage: String {
+    var finishConfirmationMessage: String {
         let lines = currentOrder.items.map { "• \($0.displayTitle) · \($0.sizeText) · x\($0.quantity)" }.joined(separator: "\n")
         if repeatedQuantityItems.isEmpty {
-            return "Confirma que el paquete contiene:\n\n\(lines)"
+            return "Confirma que las prendas ya estan fabricadas y el pedido puede pasar a Envios:\n\n\(lines)"
         }
         return "OJO: hay items con 2 o mas unidades:\n\(quantityWarningMessage)\n\nConfirma que el paquete contiene:\n\n\(lines)"
     }
@@ -3999,6 +4024,16 @@ struct OrderPreparationDetailView: View {
                 SectionHeader(title: "Qué coger", subtitle: "La app traduce cada producto Shopify a ropa base del taller")
 
                 if let pickingList {
+                    if stockAlreadyPicked {
+                        Label("Ropa base cogida. Siguiente paso: fabricar y finalizar el pedido.", systemImage: "checkmark.circle.fill")
+                            .font(.subheadline.weight(.bold))
+                            .foregroundStyle(AppTheme.green)
+                            .padding(12)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .background(AppTheme.greenSoft)
+                            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    }
+
                     if !pickingList.unmapped.isEmpty {
                         VStack(alignment: .leading, spacing: 8) {
                             Label("Faltan mapeos", systemImage: "exclamationmark.triangle.fill")
@@ -4073,13 +4108,17 @@ struct OrderPreparationDetailView: View {
                     .controlSize(.large)
                 } else {
                     Button {
-                        showingPrepareConfirmation = true
+                        if stockAlreadyPicked {
+                            showingFinishConfirmation = true
+                        } else {
+                            showingPickStock = true
+                        }
                     } label: {
-                        Label("Pedido preparado", systemImage: "checkmark.circle.fill")
+                        Label(stockAlreadyPicked ? "Pedido fabricado / finalizar" : "Coger prendas del stock", systemImage: stockAlreadyPicked ? "checkmark.circle.fill" : "tshirt.fill")
                             .frame(maxWidth: .infinity)
                     }
                     .buttonStyle(.borderedProminent)
-                    .tint(AppTheme.green)
+                    .tint(stockAlreadyPicked ? AppTheme.green : AppTheme.blue)
                     .controlSize(.large)
                     .disabled(currentOrder.status == .waitingStock)
                 }
@@ -4092,35 +4131,24 @@ struct OrderPreparationDetailView: View {
         .task(id: currentOrder.remoteID ?? currentOrder.number) {
             await store.loadPickingList(for: currentOrder)
         }
-        .alert("Confirmar pedido preparado", isPresented: $showingPrepareConfirmation) {
-            Button("Cancelar", role: .cancel) {}
-            Button("Sí, hacer foto y cerrar") {
-                showingPhotoCapture = true
+        .sheet(isPresented: $showingPickStock) {
+            NavigationStack {
+                StockPickConfirmationView(order: currentOrder, pickingList: pickingList) {
+                    showingPickStock = false
+                    Task { await store.confirmPickingRemote(currentOrder) }
+                }
             }
-            Button("Sin foto", role: .destructive) {
+        }
+        .alert("Finalizar pedido", isPresented: $showingFinishConfirmation) {
+            Button("Cancelar", role: .cancel) {}
+            Button("Finalizar y mandar a Envios") {
                 Task {
                     await store.markPreparedRemote(currentOrder)
                     showingPrintPrompt = true
                 }
             }
         } message: {
-            Text(prepareConfirmationMessage)
-        }
-        .sheet(isPresented: $showingPhotoCapture) {
-            NavigationStack {
-                PackagePhotoCaptureView(order: currentOrder) { photo in
-                    showingPhotoCapture = false
-                    Task {
-                        await store.markPreparedRemote(currentOrder, photo: photo)
-                        showingPrintPrompt = true
-                    }
-                }
-                .navigationTitle("Foto del paquete")
-                .navigationBarTitleDisplayMode(.inline)
-                .toolbar {
-                    Button("Cancelar") { showingPhotoCapture = false }
-                }
-            }
+            Text(finishConfirmationMessage)
         }
         .alert("Imprimir etiqueta", isPresented: $showingPrintPrompt) {
             Button("Sí, crear e imprimir") {
@@ -4174,6 +4202,142 @@ struct PickingBaseLineCard: View {
             }
         }
         .glassPanel(accent: line.stockAvailable >= line.quantity ? AppTheme.blue : AppTheme.red)
+    }
+}
+
+struct StockPickConfirmationView: View {
+    @Environment(\.dismiss) private var dismiss
+    let order: WorkshopOrder
+    let pickingList: OrderPickingList?
+    let onConfirm: () -> Void
+    @State private var checkedLineIDs: Set<String> = []
+
+    private var lines: [OrderPickingLine] { pickingList?.lines ?? [] }
+    private var unmapped: [OrderPickingUnmapped] { pickingList?.unmapped ?? [] }
+    private var allChecked: Bool {
+        guard pickingList != nil else { return false }
+        return lines.isEmpty || checkedLineIDs.count == lines.count
+    }
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 16) {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Coger stock")
+                        .font(.system(size: 34, weight: .black))
+                        .foregroundStyle(AppTheme.ink)
+                    Text("\(order.number) · \(order.customer)")
+                        .font(.headline)
+                        .foregroundStyle(AppTheme.muted)
+                    Text("Marca cada prenda cuando la tengas fisicamente en la mano. Al continuar se descuenta del stock y pasas a fabricacion.")
+                        .font(.subheadline)
+                        .foregroundStyle(AppTheme.muted)
+                }
+                .glassPanel(accent: AppTheme.blue)
+
+                if pickingList == nil {
+                    ProgressView("Calculando prendas base...")
+                        .frame(maxWidth: .infinity)
+                        .glassPanel()
+                } else if !unmapped.isEmpty {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Label("Hay productos sin mapear", systemImage: "exclamationmark.triangle.fill")
+                            .font(.headline.weight(.black))
+                            .foregroundStyle(AppTheme.amber)
+                        ForEach(unmapped) { item in
+                            Text("\(item.title) · x\(item.quantity)")
+                                .font(.subheadline.weight(.semibold))
+                        }
+                        Text("Puedes continuar, pero esas lineas no descontaran ropa base hasta que esten mapeadas.")
+                            .font(.caption)
+                            .foregroundStyle(AppTheme.muted)
+                    }
+                    .glassPanel(accent: AppTheme.amber)
+                }
+
+                if pickingList == nil {
+                    EmptyView()
+                } else if lines.isEmpty {
+                    ContentUnavailableView("Sin ropa base detectada", systemImage: "shippingbox", description: Text("No hay camisetas o sudaderas mapeadas para descontar."))
+                        .glassPanel()
+                } else {
+                    ForEach(lines) { line in
+                        StockPickCheckRow(line: line, isChecked: checkedLineIDs.contains(line.id)) {
+                            if checkedLineIDs.contains(line.id) {
+                                checkedLineIDs.remove(line.id)
+                            } else {
+                                checkedLineIDs.insert(line.id)
+                            }
+                        }
+                    }
+                }
+
+                Button {
+                    onConfirm()
+                } label: {
+                    Label(lines.isEmpty ? "Continuar a fabricacion" : "Siguiente: fabricar", systemImage: "arrow.right.circle.fill")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(AppTheme.green)
+                .controlSize(.large)
+                .disabled(!allChecked)
+            }
+            .padding()
+        }
+        .screenBackground()
+        .navigationTitle("Coger stock")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .cancellationAction) {
+                Button("Cancelar") { dismiss() }
+            }
+        }
+    }
+}
+
+struct StockPickCheckRow: View {
+    let line: OrderPickingLine
+    let isChecked: Bool
+    let toggle: () -> Void
+
+    var stockAfterPick: Int { line.stockAvailable - line.quantity }
+
+    var body: some View {
+        Button(action: toggle) {
+            HStack(alignment: .center, spacing: 14) {
+                Image(systemName: isChecked ? "checkmark.circle.fill" : "circle")
+                    .font(.system(size: 30, weight: .bold))
+                    .foregroundStyle(isChecked ? AppTheme.green : AppTheme.mutedSoft)
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack(alignment: .firstTextBaseline) {
+                        Text(line.subproductName)
+                            .font(.title3.weight(.black))
+                            .foregroundStyle(AppTheme.ink)
+                        Spacer()
+                        Text("x\(line.quantity)")
+                            .font(.system(size: 34, weight: .black, design: .rounded))
+                            .foregroundStyle(AppTheme.blue)
+                    }
+                    FlowChips {
+                        Tag(text: line.color, systemImage: "paintpalette.fill")
+                        Tag(text: line.size, systemImage: "ruler.fill")
+                        Tag(text: "Stock: \(line.stockAvailable)", systemImage: "tray.full.fill")
+                        Tag(text: "Queda: \(stockAfterPick)", systemImage: "minus.circle.fill")
+                    }
+                    if line.quantity > 1 {
+                        Label("Ojo: coge \(line.quantity) unidades de esta talla", systemImage: "exclamationmark.triangle.fill")
+                            .font(.caption.weight(.bold))
+                            .foregroundStyle(AppTheme.amber)
+                    }
+                }
+            }
+            .padding(14)
+            .background(isChecked ? AppTheme.greenSoft : AppTheme.surface)
+            .overlay(RoundedRectangle(cornerRadius: 14).stroke(isChecked ? AppTheme.green.opacity(0.45) : AppTheme.line))
+            .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+        }
+        .buttonStyle(.plain)
     }
 }
 

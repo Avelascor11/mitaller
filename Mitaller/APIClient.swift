@@ -83,10 +83,16 @@ struct APIClient {
 
     func markOrderPrepared(id: String, photo: Data? = nil) async throws -> WorkshopOrder {
         let request = try jsonRequest(
-            path: "/orders/\(id)/mark-prepared",
+            path: "/orders/\(Self.pathSegment(id))/mark-prepared",
             method: "PATCH",
             body: MarkPreparedRequest(photoBase64: photo?.base64EncodedString())
         )
+        let response: OrderDTO = try await perform(request)
+        return response.workshopOrder
+    }
+
+    func confirmOrderPicking(id: String) async throws -> WorkshopOrder {
+        let request = try jsonRequest(path: "/orders/\(Self.pathSegment(id))/confirm-picking", method: "PATCH", body: EmptyBody())
         let response: OrderDTO = try await perform(request)
         return response.workshopOrder
     }

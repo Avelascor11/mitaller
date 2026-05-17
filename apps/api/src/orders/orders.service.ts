@@ -108,6 +108,26 @@ export class OrdersService {
     return order;
   }
 
+  async confirmPicking(id: string) {
+    const existing = await this.findOne(id);
+    const alreadyPicked = await this.hasActivePreparationStockDeduction(existing.id);
+    if (!alreadyPicked) {
+      await this.decrementStockForPreparation(existing.id, 'ORDER_STOCK_PICKED');
+      await this.activity.log({
+        entityType: 'Order',
+        entityId: existing.id,
+        action: 'ORDER_STOCK_PICKED',
+        message: `Ropa base cogida para el pedido ${existing.orderNumber}`
+      });
+    }
+
+    return this.prisma.order.update({
+      where: { id: existing.id },
+      data: { operationalStatus: 'IN_PRODUCTION' },
+      include: { items: true, shipments: true }
+    });
+  }
+
   async getPackagePhoto(id: string): Promise<Buffer | null> {
     const order = await this.prisma.order.findFirst({
       where: { OR: [{ id }, { orderNumber: id }, { shopifyOrderId: id }] },
@@ -129,7 +149,7 @@ export class OrdersService {
     }
   }
 
-  private async decrementStockForPreparation(orderId: string) {
+  private async decrementStockForPreparation(orderId: string, reason = 'ORDER_PREPARED') {
     if (await this.hasActivePreparationStockDeduction(orderId)) return;
 
     const demands = await this.getPreparationStockDemands(orderId);
@@ -153,7 +173,7 @@ export class OrdersService {
             stockItemId: stockItem.id,
             fromLocationId: level.locationId,
             quantity: -take,
-            reason: 'ORDER_PREPARED',
+            reason,
             relatedOrderId: orderId
           }
         });
@@ -203,7 +223,7 @@ export class OrdersService {
     const movements = await this.prisma.stockMovement.findMany({
       where: {
         relatedOrderId: orderId,
-        reason: { in: ['ORDER_PREPARED', 'ORDER_PREPARED_REOPENED'] }
+        reason: { in: ['ORDER_PREPARED', 'ORDER_STOCK_PICKED', 'ORDER_PREPARED_REOPENED'] }
       }
     });
     const grouped = new Map<string, { stockItemId: string; locationId: string | null; quantity: number }>();
@@ -315,8 +335,8 @@ export class OrdersService {
     const rules: Array<[string, RegExp]> = [
       ['BLANCA', /\b(blanco|blanca|white|wht)\b/],
       ['NEGRA', /\b(negro|negra|black|blk)\b/],
-      ['SAND', /\b(sand|arena)\b/],
-      ['CHARCOAL', /\b(charcoal|carbon|gris)\b/],
+      ['SAND', /\b(sand|arena|mastic)\b/],
+      ['CHARCOAL', /\b(charcoal|carbon|gris|dark grey|dark gray)\b/],
       ['TANGERINE', /\b(tangerine|naranja|orange)\b/],
       ['AZUL', /\b(azul|blue)\b/],
       ['MARRON', /\b(marron|brown)\b/],
