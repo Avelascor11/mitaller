@@ -134,6 +134,15 @@ enum OrderStatus: String {
         case .cancelled: "Cancelado"
         }
     }
+
+    var stockAlreadyPicked: Bool {
+        switch self {
+        case .inProduction, .produced, .picked, .readyForLabel, .labelCreated, .shipped:
+            true
+        default:
+            false
+        }
+    }
 }
 
 struct WorkshopTask: Identifiable, Hashable {
@@ -650,6 +659,8 @@ final class WorkshopStore {
     var lastSyncText = "Sin sincronizar"
     var labelCreationOrderID: UUID?
     var labelScanOrderID: UUID?
+    var isBatchProcessing = false
+    var batchProgressText: String?
     private var didBootstrap = false
     var tasks: [WorkshopTask] = []
     var orders: [WorkshopOrder] = []
@@ -1023,6 +1034,85 @@ final class WorkshopStore {
         } catch {
             syncError = "No se pudo confirmar la cogida de stock: \(error.localizedDescription)"
             await syncFromAPI()
+        }
+    }
+
+    func confirmPickingBatchRemote(_ batchOrders: [WorkshopOrder]) async {
+        guard let client = apiClient, !batchOrders.isEmpty else { return }
+        isBatchProcessing = true
+        syncError = nil
+        defer {
+            isBatchProcessing = false
+            batchProgressText = nil
+        }
+
+        var failures: [String] = []
+        for (offset, order) in batchOrders.enumerated() {
+            batchProgressText = "Cogiendo stock \(offset + 1)/\(batchOrders.count)"
+            do {
+                let updated = try await client.confirmOrderPicking(id: order.remoteID ?? order.number)
+                if let index = orders.firstIndex(where: { $0.id == order.id }) {
+                    orders[index] = updated
+                }
+            } catch {
+                failures.append(order.number)
+            }
+        }
+        await syncFromAPI()
+        if !failures.isEmpty {
+            syncError = "No se pudo coger stock en lote para: \(failures.joined(separator: ", "))"
+        }
+    }
+
+    func finishBatchRemote(_ batchOrders: [WorkshopOrder]) async {
+        guard let client = apiClient, !batchOrders.isEmpty else { return }
+        isBatchProcessing = true
+        syncError = nil
+        defer {
+            isBatchProcessing = false
+            batchProgressText = nil
+        }
+
+        var failures: [String] = []
+        for (offset, order) in batchOrders.enumerated() {
+            batchProgressText = "Finalizando \(offset + 1)/\(batchOrders.count)"
+            do {
+                let updated = try await client.markOrderPrepared(id: order.remoteID ?? order.number)
+                if let index = orders.firstIndex(where: { $0.id == order.id }) {
+                    orders[index] = updated
+                }
+            } catch {
+                failures.append(order.number)
+            }
+        }
+        await syncFromAPI()
+        if !failures.isEmpty {
+            syncError = "No se pudo finalizar en lote: \(failures.joined(separator: ", "))"
+        }
+    }
+
+    func createLabelsBatchRemote(for batchOrders: [WorkshopOrder]) async {
+        guard let client = apiClient, !batchOrders.isEmpty else { return }
+        isBatchProcessing = true
+        syncError = nil
+        defer {
+            isBatchProcessing = false
+            batchProgressText = nil
+        }
+
+        var failures: [String] = []
+        for (offset, order) in batchOrders.enumerated() {
+            guard order.status == .readyForLabel && order.printStatus == .none else { continue }
+            batchProgressText = "Creando etiquetas \(offset + 1)/\(batchOrders.count)"
+            do {
+                _ = try await client.createLabel(orderId: order.remoteID ?? order.number)
+            } catch {
+                failures.append(order.number)
+            }
+        }
+        await syncFromAPI()
+        if !failures.isEmpty {
+            syncError = "No se pudo crear etiqueta para: \(failures.joined(separator: ", "))"
         }
     }
 
@@ -1684,6 +1774,9 @@ struct PickingView: View {
     @State private var sort: OrderSort = .smart
     @State private var searchText = ""
     @State private var rafagaActive = false
+    @State private var batchMode = false
+    @State private var selectedOrderIDs: Set<UUID> = []
+    @State private var showingBatchSheet = false
 
     var filteredOrders: [WorkshopOrder] {
         let filtered = store.pendingPreparationOrders
@@ -1695,6 +1788,10 @@ struct PickingView: View {
 
     var hasActiveFilters: Bool {
         shippingFilter != .all || priorityFilter != .all || sort != .smart
+    }
+
+    var selectedOrders: [WorkshopOrder] {
+        filteredOrders.filter { selectedOrderIDs.contains($0.id) }
     }
 
     private func matchesSearch(_ order: WorkshopOrder) -> Bool {
@@ -1822,17 +1919,42 @@ struct PickingView: View {
                         }
                     }
 
+                    if batchMode {
+                        BatchSelectionSummary(
+                            count: selectedOrders.count,
+                            isProcessing: store.isBatchProcessing,
+                            progressText: store.batchProgressText,
+                            primaryTitle: "Abrir lote",
+                            primaryIcon: "square.stack.3d.up.fill",
+                            onPrimary: { showingBatchSheet = true },
+                            onSelectAll: { selectedOrderIDs = Set(filteredOrders.map(\.id)) },
+                            onClear: { selectedOrderIDs.removeAll() }
+                        )
+                    }
+
                     if filteredOrders.isEmpty {
                         ContentUnavailableView("Nada pendiente", systemImage: "checkmark.circle.fill", description: Text("No hay pedidos con estos filtros."))
                             .glassPanel()
                     } else {
                         LazyVStack(spacing: 12) {
                             ForEach(filteredOrders) { order in
-                                NavigationLink(value: order) {
-                                    PendingOrderRow(order: order, showsAction: false) {}
-                                        .glassPanel(padding: 14, accent: order.priority.color)
+                                if batchMode {
+                                    Button {
+                                        toggleSelection(order)
+                                    } label: {
+                                        SelectableOrderCard(isSelected: selectedOrderIDs.contains(order.id)) {
+                                            PendingOrderRow(order: order, showsAction: false) {}
+                                        }
+                                        .glassPanel(padding: 14, accent: selectedOrderIDs.contains(order.id) ? AppTheme.blue : order.priority.color)
+                                    }
+                                    .buttonStyle(.plain)
+                                } else {
+                                    NavigationLink(value: order) {
+                                        PendingOrderRow(order: order, showsAction: false) {}
+                                            .glassPanel(padding: 14, accent: order.priority.color)
+                                    }
+                                    .buttonStyle(.plain)
                                 }
-                                .buttonStyle(.plain)
                             }
                         }
                     }
@@ -1843,6 +1965,12 @@ struct PickingView: View {
             .globalSearch()
             .navigationTitle("Sin preparar")
             .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button(batchMode ? "Cerrar lote" : "Lote") {
+                        batchMode.toggle()
+                        if !batchMode { selectedOrderIDs.removeAll() }
+                    }
+                }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button { rafagaActive = true } label: {
                         Image(systemName: "barcode.viewfinder")
@@ -1866,7 +1994,279 @@ struct PickingView: View {
             .fullScreenCover(isPresented: $rafagaActive) {
                 RafagaPickingView(orders: store.pendingPreparationOrders)
             }
+            .sheet(isPresented: $showingBatchSheet) {
+                NavigationStack {
+                    BatchPreparationView(orders: selectedOrders) {
+                        showingBatchSheet = false
+                        selectedOrderIDs.removeAll()
+                        batchMode = false
+                    }
+                }
+            }
         }
+    }
+
+    private func toggleSelection(_ order: WorkshopOrder) {
+        if selectedOrderIDs.contains(order.id) {
+            selectedOrderIDs.remove(order.id)
+        } else {
+            selectedOrderIDs.insert(order.id)
+        }
+    }
+}
+
+struct BatchPreparationView: View {
+    @Environment(WorkshopStore.self) private var store
+    @Environment(\.dismiss) private var dismiss
+    let orders: [WorkshopOrder]
+    let onDone: () -> Void
+
+    var currentOrders: [WorkshopOrder] {
+        orders.map { order in
+            store.orders.first(where: { $0.id == order.id }) ?? order
+        }
+    }
+
+    var ordersToPick: [WorkshopOrder] {
+        currentOrders.filter { !$0.status.stockAlreadyPicked && $0.status != .waitingStock }
+    }
+
+    var ordersToFinish: [WorkshopOrder] {
+        currentOrders.filter { $0.status.stockAlreadyPicked && $0.status != .readyForLabel && $0.status != .labelCreated && $0.status != .shipped }
+    }
+
+    var aggregateLines: [BatchPickLine] {
+        var grouped: [String: BatchPickLine] = [:]
+        for order in currentOrders {
+            let key = order.remoteID ?? order.number
+            guard let list = store.orderPickingLists[key] else { continue }
+            for line in list.lines {
+                var current = grouped[line.key] ?? BatchPickLine(
+                    key: line.key,
+                    title: line.subproductName,
+                    color: line.color,
+                    size: line.size,
+                    quantity: 0,
+                    stockAvailable: line.stockAvailable,
+                    orderNumbers: []
+                )
+                current.quantity += line.quantity
+                current.stockAvailable = min(current.stockAvailable, line.stockAvailable)
+                current.orderNumbers.append(order.number)
+                grouped[line.key] = current
+            }
+        }
+        return grouped.values.sorted {
+            if $0.title == $1.title { return $0.size < $1.size }
+            return $0.title < $1.title
+        }
+    }
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 16) {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Lote de taller")
+                        .font(.system(size: 34, weight: .black))
+                        .foregroundStyle(AppTheme.ink)
+                    Text("\(currentOrders.count) pedidos seleccionados")
+                        .font(.headline)
+                        .foregroundStyle(AppTheme.muted)
+                    Text("Primero coge prendas del lote. Cuando esten fabricadas, finaliza el lote y pasara a Envios.")
+                        .font(.subheadline)
+                        .foregroundStyle(AppTheme.muted)
+                }
+                .glassPanel(accent: AppTheme.blue)
+
+                if store.isBatchProcessing {
+                    HStack(spacing: 10) {
+                        ProgressView()
+                        Text(store.batchProgressText ?? "Procesando lote...")
+                            .font(.headline.weight(.bold))
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .glassPanel(accent: AppTheme.amber)
+                }
+
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 104), spacing: 10)], spacing: 10) {
+                    MetricTile(title: "Pedidos", value: currentOrders.count, color: AppTheme.blue, icon: "shippingbox.fill")
+                    MetricTile(title: "Por coger", value: ordersToPick.count, color: AppTheme.amber, icon: "tshirt.fill")
+                    MetricTile(title: "Fabricar", value: ordersToFinish.count, color: AppTheme.green, icon: "hammer.fill")
+                }
+
+                SectionHeader(title: "Coger del stock", subtitle: "Suma de prendas base para todos los pedidos seleccionados")
+
+                if aggregateLines.isEmpty {
+                    ContentUnavailableView("Sin prendas calculadas", systemImage: "shippingbox", description: Text("Abre este lote cuando los pedidos tengan mapeos cargados."))
+                        .glassPanel()
+                } else {
+                    ForEach(aggregateLines) { line in
+                        BatchPickLineCard(line: line)
+                    }
+                }
+
+                VStack(spacing: 10) {
+                    Button {
+                        Task {
+                            await store.confirmPickingBatchRemote(ordersToPick)
+                        }
+                    } label: {
+                        Label("He cogido todo el stock del lote", systemImage: "checkmark.circle.fill")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(AppTheme.blue)
+                    .controlSize(.large)
+                    .disabled(ordersToPick.isEmpty || store.isBatchProcessing)
+
+                    Button {
+                        Task {
+                            await store.finishBatchRemote(ordersToFinish)
+                            onDone()
+                        }
+                    } label: {
+                        Label("Finalizar lote y mandar a Envios", systemImage: "arrow.right.circle.fill")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(AppTheme.green)
+                    .controlSize(.large)
+                    .disabled(ordersToFinish.isEmpty || store.isBatchProcessing)
+                }
+            }
+            .padding()
+        }
+        .screenBackground()
+        .navigationTitle("Lote")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .cancellationAction) {
+                Button("Cerrar") { dismiss() }
+            }
+        }
+        .task {
+            for order in currentOrders {
+                await store.loadPickingList(for: order)
+            }
+        }
+    }
+}
+
+struct BatchPickLine: Identifiable {
+    let key: String
+    var id: String { key }
+    let title: String
+    let color: String
+    let size: String
+    var quantity: Int
+    var stockAvailable: Int
+    var orderNumbers: [String]
+}
+
+struct BatchPickLineCard: View {
+    let line: BatchPickLine
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .firstTextBaseline) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(line.title)
+                        .font(.title3.weight(.black))
+                        .foregroundStyle(AppTheme.ink)
+                    Text(line.orderNumbers.uniqued().joined(separator: ", "))
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(AppTheme.muted)
+                        .lineLimit(2)
+                }
+                Spacer()
+                Text("x\(line.quantity)")
+                    .font(.system(size: 34, weight: .black, design: .rounded))
+                    .foregroundStyle(AppTheme.blue)
+            }
+            FlowChips {
+                Tag(text: line.color, systemImage: "paintpalette.fill")
+                Tag(text: line.size, systemImage: "ruler.fill")
+                Tag(text: "Stock: \(line.stockAvailable)", systemImage: "tray.full.fill")
+                Tag(text: "Queda: \(line.stockAvailable - line.quantity)", systemImage: "minus.circle.fill")
+            }
+            if line.quantity > 1 {
+                Label("Coge \(line.quantity) unidades de esta talla/color", systemImage: "exclamationmark.triangle.fill")
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(AppTheme.amber)
+            }
+        }
+        .glassPanel(accent: line.stockAvailable >= line.quantity ? AppTheme.blue : AppTheme.red)
+    }
+}
+
+extension Array where Element: Hashable {
+    func uniqued() -> [Element] {
+        var seen = Set<Element>()
+        return filter { seen.insert($0).inserted }
+    }
+}
+
+struct SelectableOrderCard<Content: View>: View {
+    let isSelected: Bool
+    @ViewBuilder var content: Content
+
+    var body: some View {
+        ZStack(alignment: .topTrailing) {
+            content
+            Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
+                .font(.title2.weight(.bold))
+                .foregroundStyle(isSelected ? AppTheme.blue : AppTheme.mutedSoft)
+                .padding(6)
+        }
+    }
+}
+
+struct BatchSelectionSummary: View {
+    let count: Int
+    let isProcessing: Bool
+    let progressText: String?
+    let primaryTitle: String
+    let primaryIcon: String
+    let onPrimary: () -> Void
+    let onSelectAll: () -> Void
+    let onClear: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Label("\(count) seleccionados", systemImage: "checkmark.circle.fill")
+                    .font(.headline.weight(.black))
+                    .foregroundStyle(AppTheme.ink)
+                Spacer()
+                if isProcessing {
+                    ProgressView()
+                }
+            }
+            if let progressText {
+                Text(progressText)
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(AppTheme.amber)
+            }
+            HStack(spacing: 8) {
+                Button(action: onSelectAll) {
+                    Label("Todos", systemImage: "checklist")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.bordered)
+                Button(action: onClear) {
+                    Label("Limpiar", systemImage: "xmark.circle")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.bordered)
+                Button(action: onPrimary) {
+                    Label(primaryTitle, systemImage: primaryIcon)
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(count == 0 || isProcessing)
+            }
+        }
+        .glassPanel(accent: AppTheme.blue)
     }
 }
 
@@ -2042,6 +2442,8 @@ struct ShippingView: View {
     @State private var scanningOrder: WorkshopOrder?
     @State private var searchText = ""
     @State private var queueSort: ShippingQueueSort = .preparedOldest
+    @State private var batchMode = false
+    @State private var selectedOrderIDs: Set<UUID> = []
 
     var allShippingCandidates: [WorkshopOrder] {
         queueSort.sort(store.orders.filter { $0.status == .readyForLabel || $0.status == .labelCreated })
@@ -2057,6 +2459,14 @@ struct ShippingView: View {
         let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !query.isEmpty else { return pendingShipping }
         return pendingShipping.filter { matchesSearch($0, query: query) }
+    }
+
+    var selectedOrders: [WorkshopOrder] {
+        filteredOrders.filter { selectedOrderIDs.contains($0.id) }
+    }
+
+    var selectedReadyForLabels: [WorkshopOrder] {
+        selectedOrders.filter { $0.status == .readyForLabel && $0.printStatus == .none }
     }
 
     private func matchesSearch(_ order: WorkshopOrder, query: String) -> Bool {
@@ -2115,6 +2525,25 @@ struct ShippingView: View {
                     }
                     .pickerStyle(.segmented)
 
+                    if batchMode {
+                        BatchSelectionSummary(
+                            count: selectedOrders.count,
+                            isProcessing: store.isBatchProcessing,
+                            progressText: store.batchProgressText,
+                            primaryTitle: "Crear etiquetas",
+                            primaryIcon: "tag.fill",
+                            onPrimary: {
+                                Task {
+                                    await store.createLabelsBatchRemote(for: selectedReadyForLabels)
+                                    selectedOrderIDs.removeAll()
+                                    batchMode = false
+                                }
+                            },
+                            onSelectAll: { selectedOrderIDs = Set(filteredOrders.map(\.id)) },
+                            onClear: { selectedOrderIDs.removeAll() }
+                        )
+                    }
+
                     if filteredOrders.isEmpty {
                         ContentUnavailableView(
                             pendingShipping.isEmpty ? "Sin envíos pendientes" : "Sin resultados",
@@ -2128,7 +2557,18 @@ struct ShippingView: View {
                     } else {
                         LazyVStack(spacing: 14) {
                             ForEach(filteredOrders) { order in
-                                ShippingOrderCard(order: order, scanningOrder: $scanningOrder)
+                                if batchMode {
+                                    Button {
+                                        toggleSelection(order)
+                                    } label: {
+                                        SelectableOrderCard(isSelected: selectedOrderIDs.contains(order.id)) {
+                                            ShippingOrderCard(order: order, scanningOrder: $scanningOrder, showsActions: false)
+                                        }
+                                    }
+                                    .buttonStyle(.plain)
+                                } else {
+                                    ShippingOrderCard(order: order, scanningOrder: $scanningOrder)
+                                }
                             }
                         }
                     }
@@ -2139,12 +2579,20 @@ struct ShippingView: View {
             .globalSearch()
             .navigationTitle("Envios")
             .toolbar {
-                Button {
-                    Task { await store.syncFromAPI() }
-                } label: {
-                    Image(systemName: "arrow.clockwise")
+                ToolbarItem(placement: .topBarLeading) {
+                    Button(batchMode ? "Cerrar lote" : "Lote") {
+                        batchMode.toggle()
+                        if !batchMode { selectedOrderIDs.removeAll() }
+                    }
                 }
-                .disabled(store.isLoading)
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button {
+                        Task { await store.syncFromAPI() }
+                    } label: {
+                        Image(systemName: "arrow.clockwise")
+                    }
+                    .disabled(store.isLoading)
+                }
             }
             .refreshable {
                 await store.syncFromAPI()
@@ -2167,12 +2615,21 @@ struct ShippingView: View {
             }
         }
     }
+
+    private func toggleSelection(_ order: WorkshopOrder) {
+        if selectedOrderIDs.contains(order.id) {
+            selectedOrderIDs.remove(order.id)
+        } else {
+            selectedOrderIDs.insert(order.id)
+        }
+    }
 }
 
 struct ShippingOrderCard: View {
     @Environment(WorkshopStore.self) private var store
     let order: WorkshopOrder
     @Binding var scanningOrder: WorkshopOrder?
+    var showsActions = true
 
     var body: some View {
         VStack(alignment: .leading, spacing: 13) {
@@ -2249,6 +2706,7 @@ struct ShippingOrderCard: View {
                     .foregroundStyle(AppTheme.green)
             }
 
+            if showsActions {
             VStack(spacing: 9) {
                 if order.status == .readyForLabel && order.printStatus == .none {
                     Button { Task { await store.createLabelRemote(for: order) } } label: {
@@ -2332,6 +2790,7 @@ struct ShippingOrderCard: View {
                     }
                     .buttonStyle(.bordered)
                 }
+            }
             }
         }
         .glassPanel(padding: 14, accent: order.priority.color)
