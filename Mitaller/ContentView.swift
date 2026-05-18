@@ -1210,6 +1210,8 @@ struct MainTabView: View {
                 .tabItem { Label("Imprimir", systemImage: "printer.fill") }
             EconomicsView()
                 .tabItem { Label("Economía", systemImage: "eurosign.circle.fill") }
+            BankView()
+                .tabItem { Label("Banco", systemImage: "building.columns.fill") }
             AdminView()
                 .tabItem { Label("Admin", systemImage: "chart.bar.xaxis") }
         }
@@ -5640,6 +5642,306 @@ struct CustomEconomicsDatePicker: View {
     }
 }
 
+struct BankView: View {
+    @Environment(WorkshopStore.self) private var store
+    @State private var status: BankStatus?
+    @State private var institutions: [BankInstitution] = []
+    @State private var selectedInstitutionID: String?
+    @State private var daily: BankDailySummary?
+    @State private var selectedDay = Calendar.current.startOfDay(for: Date())
+    @State private var loading = false
+    @State private var error: String?
+    @State private var info: String?
+
+    private var selectedInstitution: BankInstitution? {
+        institutions.first { $0.id == selectedInstitutionID } ?? institutions.first
+    }
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 16) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Banco")
+                            .font(.system(size: 30, weight: .heavy, design: .rounded))
+                            .foregroundStyle(AppTheme.ink)
+                        Text("Movimientos diarios para controlar caja real.")
+                            .font(.subheadline.weight(.medium))
+                            .foregroundStyle(AppTheme.muted)
+                    }
+
+                    BankConnectionCard(
+                        status: status,
+                        institutions: institutions,
+                        selectedInstitutionID: $selectedInstitutionID,
+                        loading: loading,
+                        onConnect: { Task { await connectBank() } },
+                        onRefreshBanks: { Task { await loadInstitutions() } }
+                    )
+
+                    VStack(alignment: .leading, spacing: 12) {
+                        DatePicker("Dia", selection: $selectedDay, displayedComponents: .date)
+                            .datePickerStyle(.compact)
+                        HStack(spacing: 10) {
+                            Button { Task { await syncBank() } } label: {
+                                Label("Sincronizar", systemImage: "arrow.triangle.2.circlepath")
+                                    .frame(maxWidth: .infinity)
+                            }
+                            .buttonStyle(.borderedProminent)
+                            .disabled(loading)
+
+                            Button { Task { await loadDaily() } } label: {
+                                Image(systemName: "arrow.clockwise")
+                                    .frame(width: 44)
+                            }
+                            .buttonStyle(.bordered)
+                            .disabled(loading)
+                        }
+                    }
+                    .glassPanel(padding: 14, accent: AppTheme.blue)
+
+                    if let daily {
+                        BankDailyCard(summary: daily)
+                        BankTransactionsSection(transactions: daily.transactions, currency: daily.currency)
+                    } else if loading {
+                        ProgressView().frame(maxWidth: .infinity)
+                    }
+
+                    if let info {
+                        Text(info)
+                            .font(.footnote.weight(.semibold))
+                            .foregroundStyle(AppTheme.green)
+                            .padding(10)
+                            .glassPanel(padding: 10, accent: AppTheme.green)
+                    }
+
+                    if let error {
+                        Text(error)
+                            .font(.footnote.weight(.semibold))
+                            .foregroundStyle(AppTheme.red)
+                            .padding(10)
+                            .glassPanel(padding: 10, accent: AppTheme.red)
+                    }
+                }
+                .padding()
+            }
+            .screenBackground()
+            .navigationTitle("Banco")
+            .task { await reload() }
+            .refreshable { await reload() }
+        }
+    }
+
+    private func reload() async {
+        await loadStatus()
+        await loadInstitutions()
+        await loadDaily()
+    }
+
+    private func loadStatus() async {
+        guard let client = store.apiClient else { error = "API no configurada"; return }
+        do { status = try await client.bankStatus() } catch { self.error = error.localizedDescription }
+    }
+
+    private func loadInstitutions() async {
+        guard let client = store.apiClient else { error = "API no configurada"; return }
+        loading = true
+        defer { loading = false }
+        do {
+            institutions = try await client.bankInstitutions()
+            if selectedInstitutionID == nil {
+                selectedInstitutionID = institutions.first(where: { $0.name.localizedCaseInsensitiveContains("N26") })?.id ?? institutions.first?.id
+            }
+        } catch {
+            self.error = error.localizedDescription
+        }
+    }
+
+    private func connectBank() async {
+        guard let client = store.apiClient else { error = "API no configurada"; return }
+        guard let institution = selectedInstitution else { error = "No hay banco seleccionado"; return }
+        loading = true
+        error = nil
+        defer { loading = false }
+        do {
+            let connection = try await client.bankConnect(institutionId: institution.id, institutionName: institution.name)
+            if let link = connection.link, let url = URL(string: link) {
+                await MainActor.run { UIApplication.shared.open(url) }
+                info = "Autoriza el banco y vuelve a la app. Luego pulsa Sincronizar."
+            } else {
+                info = "Conexion creada. Pulsa Sincronizar cuando el banco este autorizado."
+            }
+        } catch {
+            self.error = error.localizedDescription
+        }
+    }
+
+    private func syncBank() async {
+        guard let client = store.apiClient else { error = "API no configurada"; return }
+        loading = true
+        error = nil
+        defer { loading = false }
+        do {
+            let response = try await client.bankSync(from: selectedDay, to: selectedDay)
+            info = "Sincronizados \(response.imported) movimientos de \(response.accounts) cuenta(s)."
+            await loadDaily()
+        } catch {
+            self.error = error.localizedDescription
+        }
+    }
+
+    private func loadDaily() async {
+        guard let client = store.apiClient else { error = "API no configurada"; return }
+        do {
+            daily = try await client.bankDaily(from: selectedDay, to: selectedDay)
+        } catch {
+            self.error = error.localizedDescription
+        }
+    }
+}
+
+struct BankConnectionCard: View {
+    let status: BankStatus?
+    let institutions: [BankInstitution]
+    @Binding var selectedInstitutionID: String?
+    let loading: Bool
+    let onConnect: () -> Void
+    let onRefreshBanks: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Label(status?.configured == true ? "PSD2 listo" : "PSD2 en modo demo", systemImage: "lock.shield.fill")
+                    .font(.headline.weight(.heavy))
+                    .foregroundStyle(status?.configured == true ? AppTheme.green : AppTheme.amber)
+                Spacer()
+                Button(action: onRefreshBanks) {
+                    Image(systemName: "arrow.clockwise")
+                }
+                .disabled(loading)
+            }
+
+            Picker("Banco", selection: Binding(
+                get: { selectedInstitutionID ?? institutions.first?.id ?? "" },
+                set: { selectedInstitutionID = $0 }
+            )) {
+                ForEach(institutions) { bank in
+                    Text(bank.name).tag(bank.id)
+                }
+            }
+            .pickerStyle(.menu)
+
+            Button(action: onConnect) {
+                Label("Conectar banco", systemImage: "building.columns.fill")
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.borderedProminent)
+            .disabled(loading || institutions.isEmpty)
+
+            Text("Nunca guardamos usuario ni contraseña del banco. La autorizacion ocurre en la pagina del banco.")
+                .font(.caption)
+                .foregroundStyle(AppTheme.muted)
+        }
+        .glassPanel(padding: 16, accent: status?.configured == true ? AppTheme.green : AppTheme.amber)
+    }
+}
+
+struct BankDailyCard: View {
+    let summary: BankDailySummary
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 10) {
+                MoneyTile(label: "Ingresos", value: summary.income, currency: summary.currency, color: AppTheme.green)
+                MoneyTile(label: "Gastos", value: summary.expense, currency: summary.currency, color: AppTheme.red)
+                MoneyTile(label: "Neto banco", value: summary.net, currency: summary.currency, color: summary.net >= 0 ? AppTheme.blue : AppTheme.red)
+            }
+            Text("\(summary.count) movimientos bancarios")
+                .font(.caption.weight(.bold))
+                .foregroundStyle(AppTheme.muted)
+        }
+        .glassPanel(padding: 16, accent: summary.net >= 0 ? AppTheme.green : AppTheme.red)
+    }
+}
+
+struct BankTransactionsSection: View {
+    let transactions: [BankTransaction]
+    let currency: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            SectionHeader(title: "Movimientos", subtitle: "Clasificados automaticamente")
+            if transactions.isEmpty {
+                EmptyStateCard(title: "Sin movimientos", subtitle: "Sincroniza el banco o elige otro dia.")
+            } else {
+                ForEach(transactions) { transaction in
+                    BankTransactionRow(transaction: transaction, currency: currency)
+                }
+            }
+        }
+    }
+}
+
+struct BankTransactionRow: View {
+    let transaction: BankTransaction
+    let currency: String
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 12) {
+            Image(systemName: transaction.amount >= 0 ? "arrow.down.circle.fill" : "arrow.up.circle.fill")
+                .font(.title3)
+                .foregroundStyle(transaction.amount >= 0 ? AppTheme.green : AppTheme.red)
+                .frame(width: 28)
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text(transaction.counterpartyName ?? transaction.description)
+                    .font(.subheadline.weight(.heavy))
+                    .foregroundStyle(AppTheme.ink)
+                    .lineLimit(2)
+                Text(bankCategoryText(transaction.category))
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(AppTheme.muted)
+                if let order = transaction.orderNumber {
+                    Tag(text: order, systemImage: "cart.fill")
+                }
+            }
+
+            Spacer()
+
+            VStack(alignment: .trailing, spacing: 3) {
+                Text(formatMoney(transaction.amount, currency: transaction.currency))
+                    .font(.headline.weight(.black))
+                    .foregroundStyle(transaction.amount >= 0 ? AppTheme.green : AppTheme.red)
+                Text(formatPayoutLineDate(transaction.bookingDate))
+                    .font(.caption2.weight(.bold))
+                    .foregroundStyle(AppTheme.muted)
+            }
+        }
+        .padding(12)
+        .background(AppTheme.surfaceSoft)
+        .overlay(RoundedRectangle(cornerRadius: 14).stroke(AppTheme.line))
+        .clipShape(RoundedRectangle(cornerRadius: 14))
+    }
+}
+
+struct EmptyStateCard: View {
+    let title: String
+    let subtitle: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(title)
+                .font(.headline.weight(.heavy))
+                .foregroundStyle(AppTheme.ink)
+            Text(subtitle)
+                .font(.caption)
+                .foregroundStyle(AppTheme.muted)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .glassPanel(padding: 14, accent: AppTheme.blue)
+    }
+}
+
 struct ShopifyPayoutsCard: View {
     let summary: ShopifyPayoutsSummary
     @State private var expandedPayoutID: String?
@@ -6231,6 +6533,21 @@ func payoutStatusText(_ status: String) -> String {
     case "failed": "Fallido"
     case "canceled": "Cancelado"
     default: status.capitalized
+    }
+}
+
+func bankCategoryText(_ category: String) -> String {
+    switch category {
+    case "SHOPIFY_PAYOUT": "Shopify"
+    case "SENDCLOUD": "Envios"
+    case "GARMENT_SUPPLIER": "Proveedor ropa"
+    case "DTF_SUPPLIER": "DTF"
+    case "TAX": "Impuestos"
+    case "ADS": "Publicidad"
+    case "SOFTWARE": "Software"
+    case "OTHER_INCOME": "Otros ingresos"
+    case "OTHER_EXPENSE": "Otros gastos"
+    default: category.replacingOccurrences(of: "_", with: " ").capitalized
     }
 }
 

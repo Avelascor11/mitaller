@@ -61,3 +61,13 @@ http://localhost:3001
 - `GET /supplier/stock`
 - `POST /supplier/import-catalog`
 - `POST /supplier/sync-stock`
+
+## Banco / PSD2
+
+- `GET /bank/status`
+- `GET /bank/institutions?country=ES`
+- `POST /bank/connect`
+- `GET /bank/callback`
+- `POST /bank/sync`
+- `GET /bank/transactions?from=YYYY-MM-DD&to=YYYY-MM-DD`
+- `GET /bank/daily?from=YYYY-MM-DD&to=YYYY-MM-DD`

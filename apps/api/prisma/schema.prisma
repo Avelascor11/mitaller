@@ -99,6 +99,25 @@ enum StockReceiptStatus {
   CANCELLED
 }
 
+enum BankConnectionStatus {
+  PENDING
+  LINKED
+  EXPIRED
+  ERROR
+}
+
+enum BankTransactionCategory {
+  SHOPIFY_PAYOUT
+  SENDCLOUD
+  GARMENT_SUPPLIER
+  DTF_SUPPLIER
+  TAX
+  ADS
+  SOFTWARE
+  OTHER_INCOME
+  OTHER_EXPENSE
+}
+
 model User {
   id              String           @id @default(cuid())
   name            String
@@ -383,6 +402,68 @@ model Shipment {
   createdAt          DateTime       @default(now())
   updatedAt          DateTime       @updatedAt
   order              Order          @relation(fields: [orderId], references: [id], onDelete: Cascade)
+}
+
+model BankConnection {
+  id              String                @id @default(cuid())
+  provider        String                @default("GOCARDLESS")
+  institutionId   String
+  institutionName String?
+  requisitionId   String                @unique
+  reference       String                @unique
+  link            String?
+  status          BankConnectionStatus  @default(PENDING)
+  agreementId     String?
+  accountsJson    Json?
+  rawDataJson     Json?
+  connectedAt     DateTime?
+  expiresAt       DateTime?
+  lastSyncedAt    DateTime?
+  createdAt       DateTime              @default(now())
+  updatedAt       DateTime              @updatedAt
+  accounts        BankAccount[]
+}
+
+model BankAccount {
+  id                String             @id @default(cuid())
+  connectionId      String
+  providerAccountId String             @unique
+  iban              String?
+  name              String?
+  currency          String?
+  ownerName         String?
+  product           String?
+  cashAccountType   String?
+  rawDataJson       Json?
+  createdAt         DateTime           @default(now())
+  updatedAt         DateTime           @updatedAt
+  connection        BankConnection     @relation(fields: [connectionId], references: [id], onDelete: Cascade)
+  transactions      BankTransaction[]
+}
+
+model BankTransaction {
+  id                    String                   @id @default(cuid())
+  accountId             String
+  providerTransactionId String?
+  bookingDate           DateTime
+  valueDate             DateTime?
+  amount                Float
+  currency              String                   @default("EUR")
+  description           String
+  merchantName          String?
+  remittanceInfo        String?
+  counterpartyName      String?
+  counterpartyIban      String?
+  category              BankTransactionCategory  @default(OTHER_EXPENSE)
+  orderNumber           String?
+  rawDataJson           Json?
+  createdAt             DateTime                 @default(now())
+  updatedAt             DateTime                 @updatedAt
+  account               BankAccount              @relation(fields: [accountId], references: [id], onDelete: Cascade)
+
+  @@unique([accountId, providerTransactionId])
+  @@index([bookingDate])
+  @@index([category])
 }
 
 model ShippingRule {

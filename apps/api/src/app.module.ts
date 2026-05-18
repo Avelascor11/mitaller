@@ -4,6 +4,7 @@ import { ScheduleModule } from '@nestjs/schedule';
 import { ActivityModule } from './activity/activity.module';
 import { AppController } from './app.controller';
 import { AuthModule } from './auth/auth.module';
+import { BankModule } from './bank/bank.module';
 import { EconomicsModule } from './economics/economics.module';
 import { ManualPrintModule } from './manual-print/manual-print.module';
 import { OrdersModule } from './orders/orders.module';
@@ -24,6 +25,7 @@ import { SupplierModule } from './supplier/supplier.module';
     PrismaModule,
     ActivityModule,
     AuthModule,
+    BankModule,
     OrdersModule,
     ProductionModule,
     StockModule,

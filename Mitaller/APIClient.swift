@@ -216,6 +216,38 @@ struct APIClient {
         try await get("/economics/order/\(Self.pathSegment(id))")
     }
 
+    func bankStatus() async throws -> BankStatus {
+        try await get("/bank/status")
+    }
+
+    func bankInstitutions(country: String = "ES") async throws -> [BankInstitution] {
+        try await get("/bank/institutions?country=\(country)")
+    }
+
+    func bankConnect(institutionId: String, institutionName: String?) async throws -> BankConnection {
+        let request = try jsonRequest(
+            path: "/bank/connect",
+            method: "POST",
+            body: BankConnectRequest(institutionId: institutionId, institutionName: institutionName, redirectUrl: nil)
+        )
+        return try await perform(request)
+    }
+
+    func bankSync(from: Date? = nil, to: Date? = nil) async throws -> BankSyncResponse {
+        let formatter = DateFormatter.apiDay
+        let request = try jsonRequest(
+            path: "/bank/sync",
+            method: "POST",
+            body: BankSyncRequest(from: from.map { formatter.string(from: $0) }, to: to.map { formatter.string(from: $0) })
+        )
+        return try await perform(request)
+    }
+
+    func bankDaily(from: Date, to: Date) async throws -> BankDailySummary {
+        let formatter = DateFormatter.apiDay
+        return try await get("/bank/daily?from=\(formatter.string(from: from))&to=\(formatter.string(from: to))")
+    }
+
     private func patchTask(path: String) async throws {
         let request = try jsonRequest(path: path, method: "PATCH", body: EmptyBody())
         let _: EmptyResponse = try await perform(request)
@@ -314,6 +346,15 @@ private struct ManualPrintRequest: Encodable {
 }
 private struct MarkPreparedRequest: Encodable {
     let photoBase64: String?
+}
+private struct BankConnectRequest: Encodable {
+    let institutionId: String
+    let institutionName: String?
+    let redirectUrl: String?
+}
+private struct BankSyncRequest: Encodable {
+    let from: String?
+    let to: String?
 }
 
 struct ProductMappingSaveRequest: Encodable {
@@ -500,6 +541,55 @@ struct OrderItemBreakdown: Decodable, Identifiable {
     let cost: Double
     let margin: Double
     let marginPct: Double?
+}
+
+struct BankStatus: Decodable {
+    let provider: String
+    let configured: Bool
+}
+
+struct BankInstitution: Decodable, Identifiable {
+    let id: String
+    let name: String
+    let bic: String?
+    let logo: String?
+}
+
+struct BankConnection: Decodable, Identifiable {
+    let id: String
+    let provider: String
+    let institutionId: String
+    let institutionName: String?
+    let requisitionId: String
+    let reference: String
+    let link: String?
+    let status: String
+}
+
+struct BankSyncResponse: Decodable {
+    let imported: Int
+    let accounts: Int
+}
+
+struct BankDailySummary: Decodable {
+    let currency: String
+    let income: Double
+    let expense: Double
+    let net: Double
+    let count: Int
+    let byCategory: [String: Double]
+    let transactions: [BankTransaction]
+}
+
+struct BankTransaction: Decodable, Identifiable {
+    let id: String
+    let bookingDate: Date
+    let amount: Double
+    let currency: String
+    let description: String
+    let counterpartyName: String?
+    let category: String
+    let orderNumber: String?
 }
 
 struct ProductMarginRow: Decodable, Identifiable {
