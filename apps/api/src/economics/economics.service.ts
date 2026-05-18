@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../prisma/prisma.service';
 
 const SHOPIFY_FEE_RATE = 0.024; // 2.4 % comisión Shopify Payments
@@ -43,12 +44,16 @@ interface OrderBreakdown {
   netMarginPct: number | null;
   items: OrderItemBreakdown[];
   shipmentCostKnown: boolean;
+  shippingCostSource: 'SENDCLOUD' | 'INVOICE_ESTIMATE';
   hasItemPrices: boolean;
 }
 
 @Injectable()
 export class EconomicsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly config: ConfigService
+  ) {}
 
   async today() {
     const now = new Date();
@@ -137,10 +142,7 @@ export class EconomicsService {
       }
     );
 
-    const shippingReserve = breakdowns.reduce(
-      (sum, breakdown) => sum + (breakdown.shipmentCostKnown ? breakdown.shippingCost : 0),
-      0
-    );
+    const shippingReserve = breakdowns.reduce((sum, breakdown) => sum + breakdown.shippingCost, 0);
 
     return {
       from: start.toISOString(),
@@ -185,7 +187,7 @@ export class EconomicsService {
     const productCost = items.reduce((sum, item) => sum + item.cost, 0);
     const shipmentWithCost = order.shipments.find((shipment: any) => typeof shipment.cost === 'number');
     const shipmentCostKnown = Boolean(shipmentWithCost);
-    const shippingCost = shipmentCostKnown ? shipmentWithCost.cost : Math.max(shippingRevenue, 0);
+    const shippingCost = shipmentCostKnown ? shipmentWithCost.cost : this.estimatedShippingCost(order);
     const shopifyFee = grossRevenue * SHOPIFY_FEE_RATE;
     const netMargin = grossRevenue - productCost - shippingCost - shopifyFee;
     const hasItemPrices = items.some((item) => item.unitPrice > 0);
@@ -207,8 +209,47 @@ export class EconomicsService {
       netMarginPct: grossRevenue > 0 ? (netMargin / grossRevenue) * 100 : null,
       items,
       shipmentCostKnown,
+      shippingCostSource: shipmentCostKnown ? 'SENDCLOUD' : 'INVOICE_ESTIMATE',
       hasItemPrices
     };
+  }
+
+  private estimatedShippingCost(order: any): number {
+    const method = this.normalize(`${order.shippingMethod ?? ''}`);
+    const country = this.normalize(`${order.shippingCountry ?? 'ES'}`);
+    const itemCount = order.items?.reduce((sum: number, item: any) => sum + (item.quantity ?? 0), 0) ?? 1;
+
+    if (country && country !== 'es' && country !== 'espana' && country !== 'spain') {
+      return this.moneyConfig('ECONOMICS_SHIPPING_COST_INTERNATIONAL', 12.45);
+    }
+
+    if (/premium|express|24h|urgente/.test(method)) {
+      return this.moneyConfig('ECONOMICS_SHIPPING_COST_PREMIUM_ES', 4.26);
+    }
+
+    if (/paq ligero|ligero|carta|letter/.test(method)) {
+      return this.moneyConfig('ECONOMICS_SHIPPING_COST_LIGHT_ES', 3.31);
+    }
+
+    if (/1-2kg|1 a 2kg|1kg-2kg/.test(method) || itemCount >= 4) {
+      return this.moneyConfig('ECONOMICS_SHIPPING_COST_STANDARD_ES_1_2KG', 3.98);
+    }
+
+    return this.moneyConfig('ECONOMICS_SHIPPING_COST_STANDARD_ES', 3.81);
+  }
+
+  private moneyConfig(key: string, fallback: number): number {
+    const raw = this.config.get<string>(key);
+    if (!raw) return fallback;
+    const parsed = Number(raw.replace(',', '.'));
+    return Number.isFinite(parsed) && parsed >= 0 ? parsed : fallback;
+  }
+
+  private normalize(value: string) {
+    return value
+      .toLowerCase()
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '');
   }
 
   private itemCost(item: any): ItemCost {

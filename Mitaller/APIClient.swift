@@ -453,6 +453,7 @@ struct OrderBreakdown: Decodable, Identifiable {
     let netMarginPct: Double?
     let items: [OrderItemBreakdown]
     let shipmentCostKnown: Bool
+    let shippingCostSource: String?
     let hasItemPrices: Bool
 }
 

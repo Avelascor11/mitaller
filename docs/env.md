@@ -57,6 +57,16 @@ Puedes consultar metodos disponibles con `GET /shipments/shipping-methods`. En l
 
 Para imprimir etiquetas automaticamente en el taller, instala la Honeywell PC42d en macOS y pon su nombre CUPS exacto en `LABEL_PRINTER_NAME`. Activa `AUTO_PRINT_LABELS=true`. Para etiquetas 100x150 mm usa `LABEL_PAPER_SIZE=Custom.100x150mm`. El backend descarga el PDF de Sendcloud y lo envia con `lp` justo despues de crear la etiqueta.
 
+## Economia
+
+- `ECONOMICS_SHIPPING_COST_STANDARD_ES`: coste estimado para Correos Estandar nacional 0-1 kg. Por defecto `3.81`.
+- `ECONOMICS_SHIPPING_COST_PREMIUM_ES`: coste estimado para Correos Premium/Express nacional 0-1 kg. Por defecto `4.26`.
+- `ECONOMICS_SHIPPING_COST_LIGHT_ES`: coste estimado para Paq Ligero/carta nacional. Por defecto `3.31`.
+- `ECONOMICS_SHIPPING_COST_STANDARD_ES_1_2KG`: coste estimado para Correos Estandar nacional 1-2 kg. Por defecto `3.98`.
+- `ECONOMICS_SHIPPING_COST_INTERNATIONAL`: coste estimado para envios internacionales. Por defecto `12.45`.
+
+Estos importes salen de la factura Sendcloud `1-26-ES0024751` del 06-05-2026, sumando tarifa base y recargo de combustible aproximado. Si Sendcloud devuelve coste real al crear la etiqueta, la app usa el coste real; si no, usa esta tabla para que un pedido con envio gratis para el cliente siga teniendo coste de transporte en el margen.
+
 ## Falk & Ross
 
 - `FALKROSS_STOCK_CSV_URL`

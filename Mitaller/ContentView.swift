@@ -5576,7 +5576,7 @@ struct ShippingReserveCard: View {
             Text(formatMoney(summary.shippingReserve, currency: summary.currency))
                 .font(.system(size: 36, weight: .heavy, design: .rounded))
                 .foregroundStyle(AppTheme.amber)
-            Text("Aparta esta cantidad de las ventas para pagar Sendcloud (\(summary.orderCount) pedido\(summary.orderCount == 1 ? "" : "s")).")
+            Text("Aparta esta cantidad de las ventas para pagar Sendcloud. Si Sendcloud aún no devuelve coste real, se estima con tu factura.")
                 .font(.caption)
                 .foregroundStyle(AppTheme.muted)
         }
@@ -5691,7 +5691,7 @@ struct OrderBreakdownRow: View {
                 Tag(text: "Env \(formatMoneyShort(order.shippingCost))", systemImage: "shippingbox.fill")
             }
             if !order.shipmentCostKnown {
-                Label("Coste envío estimado", systemImage: "questionmark.circle")
+                Label("Coste envío estimado con factura Sendcloud", systemImage: "questionmark.circle")
                     .font(.caption2)
                     .foregroundStyle(AppTheme.amber)
             }
