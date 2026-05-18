@@ -1091,7 +1091,7 @@ final class WorkshopStore {
         }
     }
 
-    func createLabelsBatchRemote(for batchOrders: [WorkshopOrder]) async {
+    func printLabelsBatchRemote(for batchOrders: [WorkshopOrder]) async {
         guard let client = apiClient, !batchOrders.isEmpty else { return }
         isBatchProcessing = true
         syncError = nil
@@ -1102,17 +1102,20 @@ final class WorkshopStore {
 
         var failures: [String] = []
         for (offset, order) in batchOrders.enumerated() {
-            guard order.status == .readyForLabel && order.printStatus == .none else { continue }
-            batchProgressText = "Creando etiquetas \(offset + 1)/\(batchOrders.count)"
+            batchProgressText = "Enviando a impresora \(offset + 1)/\(batchOrders.count)"
             do {
-                _ = try await client.createLabel(orderId: order.remoteID ?? order.number)
+                if order.status == .readyForLabel && order.printStatus == .none {
+                    _ = try await client.createLabel(orderId: order.remoteID ?? order.number)
+                } else {
+                    try await client.reprintLabelByOrder(orderId: order.remoteID ?? order.number)
+                }
             } catch {
                 failures.append(order.number)
             }
         }
         await syncFromAPI()
         if !failures.isEmpty {
-            syncError = "No se pudo crear etiqueta para: \(failures.joined(separator: ", "))"
+            syncError = "No se pudo mandar a imprimir: \(failures.joined(separator: ", "))"
         }
     }
 
@@ -2227,6 +2230,7 @@ struct BatchSelectionSummary: View {
     let progressText: String?
     let primaryTitle: String
     let primaryIcon: String
+    var isPrimaryDisabled = false
     let onPrimary: () -> Void
     let onSelectAll: () -> Void
     let onClear: () -> Void
@@ -2263,7 +2267,7 @@ struct BatchSelectionSummary: View {
                         .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.borderedProminent)
-                .disabled(count == 0 || isProcessing)
+                .disabled(isPrimaryDisabled || count == 0 || isProcessing)
             }
         }
         .glassPanel(accent: AppTheme.blue)
@@ -2465,8 +2469,8 @@ struct ShippingView: View {
         filteredOrders.filter { selectedOrderIDs.contains($0.id) }
     }
 
-    var selectedReadyForLabels: [WorkshopOrder] {
-        selectedOrders.filter { $0.status == .readyForLabel && $0.printStatus == .none }
+    var selectedPrintableOrders: [WorkshopOrder] {
+        selectedOrders.filter { $0.status == .readyForLabel || $0.status == .labelCreated }
     }
 
     private func matchesSearch(_ order: WorkshopOrder, query: String) -> Bool {
@@ -2530,11 +2534,12 @@ struct ShippingView: View {
                             count: selectedOrders.count,
                             isProcessing: store.isBatchProcessing,
                             progressText: store.batchProgressText,
-                            primaryTitle: "Crear etiquetas",
-                            primaryIcon: "tag.fill",
+                            primaryTitle: "Crear e imprimir",
+                            primaryIcon: "printer.fill",
+                            isPrimaryDisabled: selectedPrintableOrders.isEmpty,
                             onPrimary: {
                                 Task {
-                                    await store.createLabelsBatchRemote(for: selectedReadyForLabels)
+                                    await store.printLabelsBatchRemote(for: selectedPrintableOrders)
                                     selectedOrderIDs.removeAll()
                                     batchMode = false
                                 }
