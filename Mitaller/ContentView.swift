@@ -5467,6 +5467,7 @@ struct EconomicsView: View {
     @Environment(WorkshopStore.self) private var store
     @State private var today: EconomicsSummary?
     @State private var month: EconomicsSummary?
+    @State private var payouts: ShopifyPayoutsSummary?
     @State private var products: [ProductMarginRow] = []
     @State private var loading = false
     @State private var error: String?
@@ -5516,6 +5517,9 @@ struct EconomicsView: View {
                         )
                         ShippingReserveCard(summary: summary)
                         EconomicsSummaryCard(summary: summary)
+                        if let payouts {
+                            ShopifyPayoutsCard(summary: payouts)
+                        }
                         OrdersBreakdownSection(summary: summary)
                     }
 
@@ -5558,12 +5562,153 @@ struct EconomicsView: View {
             async let t = client.economicsToday()
             async let m = client.economicsMonth()
             async let p = client.economicsProducts()
+            async let pay = client.economicsPayouts()
             today = try await t
             month = try await m
             products = try await p
+            payouts = try await pay
         } catch let err {
             error = err.localizedDescription
         }
+    }
+}
+
+struct ShopifyPayoutsCard: View {
+    let summary: ShopifyPayoutsSummary
+    @State private var expandedPayoutID: String?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(alignment: .top) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Pagos Shopify")
+                        .font(.headline.weight(.heavy))
+                        .foregroundStyle(AppTheme.ink)
+                    Text("Ingresos previstos y margen estimado por pedido.")
+                        .font(.caption)
+                        .foregroundStyle(AppTheme.muted)
+                }
+                Spacer()
+                VStack(alignment: .trailing, spacing: 2) {
+                    Text(formatMoney(summary.totalAmount, currency: summary.currency))
+                        .font(.title3.weight(.black))
+                        .foregroundStyle(AppTheme.green)
+                    Text("\(summary.payoutCount) pagos")
+                        .font(.caption2.weight(.bold))
+                        .foregroundStyle(AppTheme.muted)
+                }
+            }
+
+            HStack(spacing: 10) {
+                MoneyTile(label: "Cargos", value: summary.totalCharges, currency: summary.currency, color: AppTheme.blue)
+                MoneyTile(label: "Comisiones", value: summary.totalFees, currency: summary.currency, color: AppTheme.red)
+                MoneyTile(label: "Margen", value: summary.totalEstimatedMargin, currency: summary.currency, color: summary.totalEstimatedMargin >= 0 ? AppTheme.green : AppTheme.red)
+            }
+
+            VStack(spacing: 10) {
+                ForEach(summary.payouts.prefix(5)) { payout in
+                    ShopifyPayoutRow(
+                        payout: payout,
+                        isExpanded: expandedPayoutID == payout.id,
+                        onToggle: {
+                            withAnimation(.snappy) {
+                                expandedPayoutID = expandedPayoutID == payout.id ? nil : payout.id
+                            }
+                        }
+                    )
+                }
+            }
+        }
+        .glassPanel(padding: 16, accent: AppTheme.green)
+    }
+}
+
+struct ShopifyPayoutRow: View {
+    let payout: ShopifyPayout
+    let isExpanded: Bool
+    let onToggle: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Button(action: onToggle) {
+                HStack(spacing: 12) {
+                    VStack(alignment: .leading, spacing: 3) {
+                        HStack(spacing: 8) {
+                            Text(formatPayoutDate(payout.date))
+                                .font(.subheadline.weight(.heavy))
+                                .foregroundStyle(AppTheme.ink)
+                            Tag(text: payoutStatusText(payout.status), systemImage: "clock.fill")
+                        }
+                        Text("\(payout.lines.count) movimientos · margen \(formatMoneyShort(payout.estimatedMargin))")
+                            .font(.caption)
+                            .foregroundStyle(AppTheme.muted)
+                    }
+                    Spacer()
+                    VStack(alignment: .trailing, spacing: 2) {
+                        Text(formatMoney(payout.amount, currency: payout.currency))
+                            .font(.headline.weight(.black))
+                            .foregroundStyle(AppTheme.green)
+                        Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
+                            .font(.caption.weight(.black))
+                            .foregroundStyle(AppTheme.muted)
+                    }
+                }
+            }
+            .buttonStyle(.plain)
+
+            HStack(spacing: 8) {
+                Tag(text: "Cargos \(formatMoneyShort(payout.charges))", systemImage: "plus.circle.fill")
+                Tag(text: "Fees \(formatMoneyShort(payout.fees))", systemImage: "minus.circle.fill")
+                Tag(text: "Reemb \(formatMoneyShort(payout.refunds))", systemImage: "arrow.uturn.backward.circle.fill")
+            }
+
+            if isExpanded {
+                VStack(spacing: 8) {
+                    ForEach(payout.lines.prefix(8)) { line in
+                        ShopifyPayoutLineRow(line: line)
+                    }
+                }
+                .transition(.opacity.combined(with: .move(edge: .top)))
+            }
+        }
+        .padding(12)
+        .background(AppTheme.surfaceSoft)
+        .overlay(RoundedRectangle(cornerRadius: 14).stroke(AppTheme.line))
+        .clipShape(RoundedRectangle(cornerRadius: 14))
+    }
+}
+
+struct ShopifyPayoutLineRow: View {
+    let line: ShopifyPayoutLine
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 10) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(line.orderNumber ?? line.type.capitalized)
+                    .font(.subheadline.weight(.heavy))
+                    .foregroundStyle(AppTheme.ink)
+                Text("\(formatPayoutLineDate(line.processedAt)) · \(payoutTypeText(line.type))")
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(AppTheme.muted)
+                if let margin = line.margin {
+                    Text("Margen app \(formatMoneyShort(margin))")
+                        .font(.caption2.weight(.bold))
+                        .foregroundStyle(margin >= 0 ? AppTheme.green : AppTheme.red)
+                }
+            }
+            Spacer()
+            VStack(alignment: .trailing, spacing: 2) {
+                Text(formatMoney(line.net, currency: line.currency))
+                    .font(.subheadline.weight(.black))
+                    .foregroundStyle(line.net >= 0 ? AppTheme.green : AppTheme.red)
+                Text("fee \(formatMoneyShort(line.fee))")
+                    .font(.caption2.weight(.bold))
+                    .foregroundStyle(AppTheme.muted)
+            }
+        }
+        .padding(10)
+        .background(AppTheme.surface)
+        .clipShape(RoundedRectangle(cornerRadius: 12))
     }
 }
 
@@ -5884,6 +6029,45 @@ func formatMoney(_ value: Double, currency: String = "EUR") -> String {
 
 func formatMoneyShort(_ value: Double) -> String {
     String(format: "%.0f€", value)
+}
+
+func formatPayoutDate(_ value: String) -> String {
+    let input = DateFormatter()
+    input.locale = Locale(identifier: "es_ES")
+    input.dateFormat = "yyyy-MM-dd"
+    guard let date = input.date(from: value) else { return value }
+    let output = DateFormatter()
+    output.locale = Locale(identifier: "es_ES")
+    output.dateFormat = "d MMM yyyy"
+    return output.string(from: date)
+}
+
+func formatPayoutLineDate(_ date: Date) -> String {
+    let formatter = DateFormatter()
+    formatter.locale = Locale(identifier: "es_ES")
+    formatter.dateFormat = "d MMM"
+    return formatter.string(from: date)
+}
+
+func payoutStatusText(_ status: String) -> String {
+    switch status.lowercased() {
+    case "scheduled": "Programado"
+    case "in_transit": "En camino"
+    case "paid": "Pagado"
+    case "failed": "Fallido"
+    case "canceled": "Cancelado"
+    default: status.capitalized
+    }
+}
+
+func payoutTypeText(_ type: String) -> String {
+    switch type.lowercased() {
+    case "charge": "Cargo"
+    case "refund": "Reembolso"
+    case "adjustment": "Ajuste"
+    case "payout": "Pago"
+    default: type.capitalized
+    }
 }
 
 struct FinalizedView: View {

@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../prisma/prisma.service';
+import { ShopifyAdapter, ShopifyBalanceTransaction } from '../shopify/shopify.adapter';
 
 const SHOPIFY_FEE_RATE = 0.024; // 2.4 % comisión Shopify Payments
 
@@ -52,7 +53,8 @@ interface OrderBreakdown {
 export class EconomicsService {
   constructor(
     private readonly prisma: PrismaService,
-    private readonly config: ConfigService
+    private readonly config: ConfigService,
+    private readonly shopify: ShopifyAdapter
   ) {}
 
   async today() {
@@ -106,6 +108,81 @@ export class EconomicsService {
     });
     if (!order) return null;
     return this.computeOrderBreakdown(order);
+  }
+
+  async payouts() {
+    const limit = Math.min(Number(this.config.get('ECONOMICS_PAYOUT_LIMIT') ?? 8), 20);
+    const payouts = (await this.shopify.listPayouts()).slice(0, limit);
+    const enriched = [];
+
+    for (const payout of payouts) {
+      const transactions = await this.shopify.listPayoutTransactions(payout.id);
+      const orderKeys = this.orderKeysFromTransactions(transactions);
+      const orders = orderKeys.length
+        ? await this.prisma.order.findMany({
+          where: {
+            OR: [
+              { shopifyOrderId: { in: orderKeys.map((key) => `gid://shopify/Order/${key}`).filter((key) => !key.includes('#')) } },
+              { orderNumber: { in: orderKeys.filter((key) => key.startsWith('#')) } }
+            ]
+          },
+          include: { items: true, shipments: true }
+        })
+        : [];
+      const orderByShopifyId = new Map(orders.map((order) => [order.shopifyOrderId.split('/').pop(), this.computeOrderBreakdown(order)]));
+      const orderByNumber = new Map(orders.map((order) => [order.orderNumber, this.computeOrderBreakdown(order)]));
+
+      const lines = transactions.map((transaction) => {
+        const orderNumber = this.orderNumberFromTransaction(transaction);
+        const sourceOrderId = transaction.source_order_id ? String(transaction.source_order_id) : undefined;
+        const breakdown = (sourceOrderId ? orderByShopifyId.get(sourceOrderId) : undefined)
+          ?? (orderNumber ? orderByNumber.get(orderNumber) : undefined);
+        return {
+          id: String(transaction.id),
+          processedAt: transaction.processed_at,
+          orderNumber,
+          type: transaction.type,
+          amount: this.money(transaction.amount),
+          fee: -Math.abs(this.money(transaction.fee)),
+          net: this.money(transaction.net),
+          currency: transaction.currency,
+          sourceOrderId,
+          orderId: breakdown?.orderId,
+          margin: breakdown?.netMargin ?? null,
+          productCost: breakdown?.productCost ?? null,
+          shippingCost: breakdown?.shippingCost ?? null
+        };
+      });
+
+      const charges = lines.filter((line) => line.type === 'charge').reduce((sum, line) => sum + line.amount, 0);
+      const refunds = lines.filter((line) => line.type === 'refund').reduce((sum, line) => sum + line.amount, 0);
+      const fees = lines.reduce((sum, line) => sum + line.fee, 0);
+      const net = lines.reduce((sum, line) => sum + line.net, 0);
+      enriched.push({
+        id: String(payout.id),
+        status: payout.status,
+        date: payout.date,
+        currency: payout.currency,
+        amount: this.money(payout.amount),
+        charges,
+        refunds,
+        fees,
+        net,
+        estimatedMargin: lines.reduce((sum, line) => sum + (line.margin ?? 0), 0),
+        lines
+      });
+    }
+
+    return {
+      currency: enriched[0]?.currency ?? 'EUR',
+      payoutCount: enriched.length,
+      totalAmount: enriched.reduce((sum, payout) => sum + payout.amount, 0),
+      totalCharges: enriched.reduce((sum, payout) => sum + payout.charges, 0),
+      totalRefunds: enriched.reduce((sum, payout) => sum + payout.refunds, 0),
+      totalFees: enriched.reduce((sum, payout) => sum + payout.fees, 0),
+      totalEstimatedMargin: enriched.reduce((sum, payout) => sum + payout.estimatedMargin, 0),
+      payouts: enriched
+    };
   }
 
   private async summary(start: Date, end: Date) {
@@ -243,6 +320,29 @@ export class EconomicsService {
     if (!raw) return fallback;
     const parsed = Number(raw.replace(',', '.'));
     return Number.isFinite(parsed) && parsed >= 0 ? parsed : fallback;
+  }
+
+  private orderKeysFromTransactions(transactions: ShopifyBalanceTransaction[]) {
+    const keys = transactions.flatMap((transaction) => {
+      const keys: string[] = [];
+      if (transaction.source_order_id) keys.push(String(transaction.source_order_id));
+      const orderName = this.orderNumberFromTransaction(transaction);
+      if (orderName) keys.push(orderName);
+      return keys;
+    });
+    return [...new Set(keys)];
+  }
+
+  private orderNumberFromTransaction(transaction: ShopifyBalanceTransaction) {
+    return transaction.adjustment_order_transactions
+      ?.map((adjustment) => adjustment.order?.name)
+      .find((name): name is string => Boolean(name));
+  }
+
+  private money(value?: string | number | null): number {
+    if (value == null) return 0;
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : 0;
   }
 
   private normalize(value: string) {

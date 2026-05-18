@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { EconomicsService } from '../src/economics/economics.service';
 
 function service(config: Record<string, string> = {}) {
-  return new EconomicsService({} as never, { get: (key: string) => config[key] } as never) as unknown as {
+  return new EconomicsService({} as never, { get: (key: string) => config[key] } as never, {} as never) as unknown as {
     computeOrderBreakdown: (order: unknown) => {
       shippingRevenue: number;
       shippingCost: number;

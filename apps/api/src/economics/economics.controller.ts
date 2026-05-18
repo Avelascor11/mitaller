@@ -22,6 +22,11 @@ export class EconomicsController {
     return this.economics.productMargins();
   }
 
+  @Get('payouts')
+  payouts() {
+    return this.economics.payouts();
+  }
+
   @Get('order/:id')
   async order(@Param('id') id: string) {
     const result = await this.economics.orderBreakdown(id);

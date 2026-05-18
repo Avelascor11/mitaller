@@ -207,6 +207,7 @@ struct APIClient {
     func economicsToday() async throws -> EconomicsSummary { try await get("/economics/today") }
     func economicsMonth() async throws -> EconomicsSummary { try await get("/economics/month") }
     func economicsProducts() async throws -> [ProductMarginRow] { try await get("/economics/products") }
+    func economicsPayouts() async throws -> ShopifyPayoutsSummary { try await get("/economics/payouts") }
     func economicsForOrder(_ id: String) async throws -> OrderBreakdown {
         try await get("/economics/order/\(Self.pathSegment(id))")
     }
@@ -484,6 +485,47 @@ struct ProductMarginRow: Decodable, Identifiable {
     let cost: Double
     let margin: Double
     let marginPct: Double?
+}
+
+struct ShopifyPayoutsSummary: Decodable {
+    let currency: String
+    let payoutCount: Int
+    let totalAmount: Double
+    let totalCharges: Double
+    let totalRefunds: Double
+    let totalFees: Double
+    let totalEstimatedMargin: Double
+    let payouts: [ShopifyPayout]
+}
+
+struct ShopifyPayout: Decodable, Identifiable {
+    let id: String
+    let status: String
+    let date: String
+    let currency: String
+    let amount: Double
+    let charges: Double
+    let refunds: Double
+    let fees: Double
+    let net: Double
+    let estimatedMargin: Double
+    let lines: [ShopifyPayoutLine]
+}
+
+struct ShopifyPayoutLine: Decodable, Identifiable {
+    let id: String
+    let processedAt: Date
+    let orderNumber: String?
+    let type: String
+    let amount: Double
+    let fee: Double
+    let net: Double
+    let currency: String
+    let sourceOrderId: String?
+    let orderId: String?
+    let margin: Double?
+    let productCost: Double?
+    let shippingCost: Double?
 }
 
 struct FinalizedShipment: Decodable, Identifiable {

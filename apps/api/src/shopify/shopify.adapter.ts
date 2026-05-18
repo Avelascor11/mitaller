@@ -147,6 +147,21 @@ export class ShopifyAdapter {
     return { mode: 'real', products: data.products.nodes };
   }
 
+  async listPayouts() {
+    this.assertConfigured();
+    const response = await this.rest<ShopifyPayoutsResponse>('/shopify_payments/payouts.json', { method: 'GET' });
+    return response.payouts ?? [];
+  }
+
+  async listPayoutTransactions(payoutId: string | number) {
+    this.assertConfigured();
+    const response = await this.rest<ShopifyBalanceTransactionsResponse>(
+      `/shopify_payments/balance/transactions.json?payout_id=${encodeURIComponent(String(payoutId))}`,
+      { method: 'GET' }
+    );
+    return response.transactions ?? [];
+  }
+
   async handleOrderCreatedWebhook(payload: unknown) {
     return { received: true, order: this.mapWebhookOrder(payload) };
   }
@@ -462,6 +477,56 @@ interface ShopifyOrdersResponse {
 
 interface ShopifyProductsResponse {
   products: { nodes: unknown[] };
+}
+
+interface ShopifyPayoutsResponse {
+  payouts?: ShopifyPayout[];
+}
+
+interface ShopifyPayout {
+  id: number | string;
+  status: string;
+  date: string;
+  currency: string;
+  amount: string;
+  summary?: {
+    charges_fee_amount?: string;
+    charges_gross_amount?: string;
+    refunds_fee_amount?: string;
+    refunds_gross_amount?: string;
+    adjustments_fee_amount?: string;
+    adjustments_gross_amount?: string;
+  };
+}
+
+interface ShopifyBalanceTransactionsResponse {
+  transactions?: ShopifyBalanceTransaction[];
+}
+
+export interface ShopifyBalanceTransaction {
+  id: number | string;
+  type: string;
+  payout_id?: number | string | null;
+  payout_status?: string;
+  currency: string;
+  amount: string;
+  fee: string;
+  net: string;
+  source_id?: number | string | null;
+  source_type?: string | null;
+  source_order_id?: number | string | null;
+  source_order_transaction_id?: number | string | null;
+  processed_at: string;
+  adjustment_order_transactions?: Array<{
+    id?: number | string;
+    amount?: string;
+    fee?: string;
+    net?: string;
+    order?: {
+      id?: number | string;
+      name?: string;
+    } | null;
+  }>;
 }
 
 type ShopifyMoneySet = { shopMoney?: { amount?: string | number; currencyCode?: string } } | null;
