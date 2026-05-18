@@ -9,6 +9,8 @@ function service(config: Record<string, string> = {}) {
       shippingReserve?: number;
       shippingCostSource: string;
       shipmentCostKnown: boolean;
+      productCost: number;
+      wasteCost: number;
       netMargin: number;
     };
   };
@@ -47,6 +49,8 @@ describe('EconomicsService', () => {
     expect(breakdown.shippingCost).toBe(3.81);
     expect(breakdown.shippingCostSource).toBe('INVOICE_ESTIMATE');
     expect(breakdown.shipmentCostKnown).toBe(false);
+    expect(breakdown.productCost).toBe(3.29);
+    expect(breakdown.wasteCost).toBeCloseTo(0.0658);
   });
 
   it('usa el coste real de Sendcloud si la etiqueta lo trae', () => {
@@ -89,5 +93,36 @@ describe('EconomicsService', () => {
     });
 
     expect(breakdown.shippingCost).toBe(4.99);
+  });
+
+  it('permite ajustar la merma por variable de entorno', () => {
+    const breakdown = service({ ECONOMICS_WASTE_RATE: '0,05' }).computeOrderBreakdown({
+      id: 'order-1',
+      orderNumber: '#9492',
+      customerName: 'Cliente',
+      orderedAt: new Date('2026-05-06T10:00:00Z'),
+      currency: 'EUR',
+      shippingMethod: 'Correos Estandar',
+      shippingCountry: 'ES',
+      subtotalPrice: 20,
+      totalShipping: 0,
+      totalDiscount: 0,
+      totalPrice: 20,
+      shipments: [],
+      items: [
+        {
+          id: 'item-1',
+          sku: 'TEE-WHITE-M',
+          title: 'Camiseta test',
+          productType: 'Camiseta',
+          color: 'Blanca',
+          size: 'M',
+          quantity: 1,
+          unitPrice: 20
+        }
+      ]
+    });
+
+    expect(breakdown.wasteCost).toBeCloseTo(0.1645);
   });
 });

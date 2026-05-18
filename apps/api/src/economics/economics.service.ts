@@ -40,6 +40,7 @@ interface OrderBreakdown {
   grossRevenue: number;
   shopifyFee: number;
   productCost: number;
+  wasteCost: number;
   shippingCost: number;
   netMargin: number;
   netMarginPct: number | null;
@@ -160,6 +161,7 @@ export class EconomicsService {
           orderId: breakdown?.orderId,
           margin: breakdown?.netMargin ?? null,
           productCost: breakdown?.productCost ?? null,
+          wasteCost: breakdown?.wasteCost ?? null,
           shippingCost: breakdown?.shippingCost ?? null
         };
       });
@@ -211,6 +213,7 @@ export class EconomicsService {
         acc.totalDiscount += breakdown.totalDiscount;
         acc.shopifyFee += breakdown.shopifyFee;
         acc.productCost += breakdown.productCost;
+        acc.wasteCost += breakdown.wasteCost;
         acc.shippingCost += breakdown.shippingCost;
         acc.netMargin += breakdown.netMargin;
         acc.orderCount += 1;
@@ -223,6 +226,7 @@ export class EconomicsService {
         totalDiscount: 0,
         shopifyFee: 0,
         productCost: 0,
+        wasteCost: 0,
         shippingCost: 0,
         netMargin: 0,
         orderCount: 0
@@ -272,11 +276,12 @@ export class EconomicsService {
     const totalDiscount = order.totalDiscount ?? 0;
     const grossRevenue = order.totalPrice ?? itemsRevenue + shippingRevenue - totalDiscount;
     const productCost = items.reduce((sum, item) => sum + item.cost, 0);
+    const wasteCost = productCost * this.wasteRate();
     const shipmentWithCost = order.shipments.find((shipment: any) => typeof shipment.cost === 'number');
     const shipmentCostKnown = Boolean(shipmentWithCost);
     const shippingCost = shipmentCostKnown ? shipmentWithCost.cost : this.estimatedShippingCost(order);
     const shopifyFee = grossRevenue * SHOPIFY_FEE_RATE;
-    const netMargin = grossRevenue - productCost - shippingCost - shopifyFee;
+    const netMargin = grossRevenue - productCost - wasteCost - shippingCost - shopifyFee;
     const hasItemPrices = items.some((item) => item.unitPrice > 0);
 
     return {
@@ -291,6 +296,7 @@ export class EconomicsService {
       grossRevenue,
       shopifyFee,
       productCost,
+      wasteCost,
       shippingCost,
       netMargin,
       netMarginPct: grossRevenue > 0 ? (netMargin / grossRevenue) * 100 : null,
@@ -330,6 +336,13 @@ export class EconomicsService {
     if (!raw) return fallback;
     const parsed = Number(raw.replace(',', '.'));
     return Number.isFinite(parsed) && parsed >= 0 ? parsed : fallback;
+  }
+
+  private wasteRate(): number {
+    const raw = this.config.get<string>('ECONOMICS_WASTE_RATE');
+    if (!raw) return 0.02;
+    const parsed = Number(raw.replace(',', '.'));
+    return Number.isFinite(parsed) && parsed >= 0 ? parsed : 0.02;
   }
 
   private orderKeysFromTransactions(transactions: ShopifyBalanceTransaction[]) {

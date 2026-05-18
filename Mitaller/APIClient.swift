@@ -443,6 +443,7 @@ struct EconomicsSummary: Decodable {
     let totalDiscount: Double
     let shopifyFee: Double
     let productCost: Double
+    let wasteCost: Double
     let shippingCost: Double
     let netMargin: Double
     let netMarginPct: Double?
@@ -464,6 +465,7 @@ struct OrderBreakdown: Decodable, Identifiable {
     let grossRevenue: Double
     let shopifyFee: Double
     let productCost: Double
+    let wasteCost: Double
     let shippingCost: Double
     let netMargin: Double
     let netMarginPct: Double?

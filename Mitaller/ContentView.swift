@@ -5833,7 +5833,7 @@ struct AllocationPlanCard: View {
                     percent: $materialPct,
                     amount: summary.grossRevenue * materialPct / 100,
                     currency: summary.currency,
-                    realReference: summary.productCost
+                    realReference: summary.productCost + summary.wasteCost
                 )
                 AllocationSliderRow(
                     title: "Ganancia",
@@ -5958,6 +5958,7 @@ struct EconomicsSummaryCard: View {
             }
             Divider().background(AppTheme.line)
             CostRow(label: "Coste producto", value: summary.productCost, currency: summary.currency)
+            CostRow(label: "Merma estimada (2%)", value: summary.wasteCost, currency: summary.currency)
             CostRow(label: "Coste envíos", value: summary.shippingCost, currency: summary.currency)
             CostRow(label: "Comisión Shopify (2.4%)", value: summary.shopifyFee, currency: summary.currency)
             if let pct = summary.netMarginPct {

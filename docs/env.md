@@ -64,6 +64,7 @@ Para imprimir etiquetas automaticamente en el taller, instala la Honeywell PC42d
 - `ECONOMICS_SHIPPING_COST_LIGHT_ES`: coste estimado para Paq Ligero/carta nacional. Por defecto `3.31`.
 - `ECONOMICS_SHIPPING_COST_STANDARD_ES_1_2KG`: coste estimado para Correos Estandar nacional 1-2 kg. Por defecto `3.98`.
 - `ECONOMICS_SHIPPING_COST_INTERNATIONAL`: coste estimado para envios internacionales. Por defecto `12.45`.
+- `ECONOMICS_WASTE_RATE`: merma estimada sobre coste de producto/impresion. Por defecto `0.02` (2%).
 - `ECONOMICS_PAYOUT_LIMIT`: numero maximo de pagos Shopify recientes que se muestran en Economia. Por defecto `8`.
 
 Estos importes salen de la factura Sendcloud `1-26-ES0024751` del 06-05-2026, sumando tarifa base y recargo de combustible aproximado. Si Sendcloud devuelve coste real al crear la etiqueta, la app usa el coste real; si no, usa esta tabla para que un pedido con envio gratis para el cliente siga teniendo coste de transporte en el margen.
