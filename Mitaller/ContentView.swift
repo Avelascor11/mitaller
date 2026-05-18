@@ -5471,6 +5471,9 @@ struct EconomicsView: View {
     @State private var loading = false
     @State private var error: String?
     @State private var range: Range = .today
+    @AppStorage("economicsShippingReservePct") private var shippingReservePct = 8.0
+    @AppStorage("economicsMaterialReservePct") private var materialReservePct = 35.0
+    @AppStorage("economicsProfitReservePct") private var profitReservePct = 25.0
 
     enum Range: String, CaseIterable, Identifiable {
         case today, month
@@ -5505,6 +5508,12 @@ struct EconomicsView: View {
                     if loading && current == nil {
                         ProgressView().frame(maxWidth: .infinity)
                     } else if let summary = current {
+                        AllocationPlanCard(
+                            summary: summary,
+                            shippingPct: $shippingReservePct,
+                            materialPct: $materialReservePct,
+                            profitPct: $profitReservePct
+                        )
                         ShippingReserveCard(summary: summary)
                         EconomicsSummaryCard(summary: summary)
                         OrdersBreakdownSection(summary: summary)
@@ -5555,6 +5564,141 @@ struct EconomicsView: View {
         } catch let err {
             error = err.localizedDescription
         }
+    }
+}
+
+struct AllocationPlanCard: View {
+    let summary: EconomicsSummary
+    @Binding var shippingPct: Double
+    @Binding var materialPct: Double
+    @Binding var profitPct: Double
+
+    private var totalPct: Double { shippingPct + materialPct + profitPct }
+    private var remainingPct: Double { 100 - totalPct }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(alignment: .top) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Separar ventas")
+                        .font(.headline.weight(.heavy))
+                        .foregroundStyle(AppTheme.ink)
+                    Text("Porcentajes calculados sobre los ingresos del rango.")
+                        .font(.caption)
+                        .foregroundStyle(AppTheme.muted)
+                }
+                Spacer()
+                Text("\(Int(totalPct.rounded()))%")
+                    .font(.headline.weight(.black))
+                    .foregroundStyle(totalPct <= 100 ? AppTheme.blue : AppTheme.red)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 6)
+                    .background((totalPct <= 100 ? AppTheme.blueSoft : AppTheme.red.opacity(0.12)))
+                    .clipShape(Capsule())
+            }
+
+            VStack(spacing: 12) {
+                AllocationSliderRow(
+                    title: "Envíos",
+                    icon: "shippingbox.fill",
+                    color: AppTheme.amber,
+                    percent: $shippingPct,
+                    amount: summary.grossRevenue * shippingPct / 100,
+                    currency: summary.currency,
+                    realReference: summary.shippingCost
+                )
+                AllocationSliderRow(
+                    title: "Materia prima",
+                    icon: "tshirt.fill",
+                    color: AppTheme.blue,
+                    percent: $materialPct,
+                    amount: summary.grossRevenue * materialPct / 100,
+                    currency: summary.currency,
+                    realReference: summary.productCost
+                )
+                AllocationSliderRow(
+                    title: "Ganancia",
+                    icon: "eurosign.circle.fill",
+                    color: AppTheme.green,
+                    percent: $profitPct,
+                    amount: summary.grossRevenue * profitPct / 100,
+                    currency: summary.currency,
+                    realReference: summary.netMargin
+                )
+            }
+
+            Divider().background(AppTheme.line)
+
+            HStack {
+                Label(remainingPct >= 0 ? "Resto / caja" : "Te pasas", systemImage: remainingPct >= 0 ? "tray.full.fill" : "exclamationmark.triangle.fill")
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(remainingPct >= 0 ? AppTheme.muted : AppTheme.red)
+                Spacer()
+                Text("\(Int(abs(remainingPct).rounded()))% · \(formatMoney(abs(summary.grossRevenue * remainingPct / 100), currency: summary.currency))")
+                    .font(.subheadline.weight(.heavy))
+                    .foregroundStyle(remainingPct >= 0 ? AppTheme.ink : AppTheme.red)
+            }
+        }
+        .glassPanel(padding: 16, accent: totalPct <= 100 ? AppTheme.blue : AppTheme.red)
+    }
+}
+
+struct AllocationSliderRow: View {
+    let title: String
+    let icon: String
+    let color: Color
+    @Binding var percent: Double
+    let amount: Double
+    let currency: String
+    let realReference: Double
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 10) {
+                Image(systemName: icon)
+                    .font(.subheadline.weight(.bold))
+                    .foregroundStyle(color)
+                    .frame(width: 22)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(title)
+                        .font(.subheadline.weight(.heavy))
+                        .foregroundStyle(AppTheme.ink)
+                    Text("Real actual: \(formatMoney(realReference, currency: currency))")
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(AppTheme.muted)
+                }
+                Spacer()
+                VStack(alignment: .trailing, spacing: 2) {
+                    Text(formatMoney(amount, currency: currency))
+                        .font(.subheadline.weight(.heavy))
+                        .foregroundStyle(color)
+                    Text("\(Int(percent.rounded()))%")
+                        .font(.caption.weight(.bold))
+                        .foregroundStyle(AppTheme.muted)
+                }
+            }
+
+            HStack(spacing: 10) {
+                Button { percent = max(0, percent - 1) } label: {
+                    Image(systemName: "minus")
+                        .frame(width: 30, height: 30)
+                }
+                .buttonStyle(.bordered)
+
+                Slider(value: $percent, in: 0...100, step: 1)
+                    .tint(color)
+
+                Button { percent = min(100, percent + 1) } label: {
+                    Image(systemName: "plus")
+                        .frame(width: 30, height: 30)
+                }
+                .buttonStyle(.bordered)
+            }
+        }
+        .padding(12)
+        .background(AppTheme.surfaceSoft)
+        .overlay(RoundedRectangle(cornerRadius: 14).stroke(AppTheme.line))
+        .clipShape(RoundedRectangle(cornerRadius: 14))
     }
 }
 
