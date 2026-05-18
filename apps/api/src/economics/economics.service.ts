@@ -123,6 +123,113 @@ export class EconomicsService {
     return this.computeOrderBreakdown(order);
   }
 
+  async cashflow() {
+    const today = new Date().toISOString().slice(0, 10);
+    const shopifyFeeRate = 0.024;
+    const taxRate = this.taxReserveRate();
+    const productionRate = this.productionRate();
+    const shippingRate = this.shippingRate();
+
+    const allPayouts = await this.shopify.listPayouts();
+
+    const paidToday = allPayouts.filter(p => p.status === 'paid' && p.date === today);
+    const inTransit = allPayouts.filter(p => p.status === 'in_transit');
+    const scheduledSoon = allPayouts.filter(p => p.status === 'scheduled');
+
+    const enrichPayout = async (payout: any) => {
+      const amount = this.money(payout.amount);
+      const transactions = await this.shopify.listPayoutTransactions(payout.id);
+      const charges = transactions.filter(t => t.type === 'charge');
+      const refunds = transactions.filter(t => t.type === 'refund');
+
+      // Look up order numbers in DB using source_order_id
+      const sourceIds = charges
+        .map(t => t.source_order_id ? String(t.source_order_id) : null)
+        .filter(Boolean) as string[];
+      const dbOrders = sourceIds.length
+        ? await this.prisma.order.findMany({
+            where: { shopifyOrderId: { in: sourceIds.map(id => `gid://shopify/Order/${id}`) } },
+            select: { shopifyOrderId: true, orderNumber: true, orderedAt: true }
+          })
+        : [];
+      const orderBySourceId = new Map(
+        dbOrders.map(o => [o.shopifyOrderId.split('/').pop()!, o])
+      );
+
+      const orders = charges.map(t => {
+        const sourceId = t.source_order_id ? String(t.source_order_id) : null;
+        const dbOrder = sourceId ? orderBySourceId.get(sourceId) : null;
+        const orderNumber = dbOrder?.orderNumber
+          ?? t.adjustment_order_transactions?.map((a: any) => a.order?.name).find(Boolean)
+          ?? null;
+        const saleDate = dbOrder?.orderedAt
+          ? dbOrder.orderedAt.toISOString().slice(0, 10)
+          : t.processed_at?.slice(0, 10) ?? null;
+        return {
+          orderNumber,
+          saleDate,
+          amount: this.money(t.amount),
+          fee: -Math.abs(this.money(t.fee)),
+          processedAt: t.processed_at?.slice(0, 10)
+        };
+      });
+
+      // Group by sale date to show "ventas del dia X"
+      const byDate = new Map<string, { date: string; orders: typeof orders; subtotal: number }>();
+      for (const o of orders) {
+        const key = o.saleDate ?? 'unknown';
+        const group = byDate.get(key) ?? { date: key, orders: [], subtotal: 0 };
+        group.orders.push(o);
+        group.subtotal += o.amount;
+        byDate.set(key, group);
+      }
+      const salesDays = [...byDate.values()].sort((a, b) => a.date.localeCompare(b.date));
+
+      const gross = amount / (1 - shopifyFeeRate);
+      return {
+        id: String(payout.id),
+        date: payout.date,
+        amount,
+        currency: payout.currency,
+        shopifyFee: +(-(gross * shopifyFeeRate)).toFixed(2),
+        refunds: +refunds.reduce((s, t) => s + this.money(t.amount), 0).toFixed(2),
+        orders,
+        salesDays,
+        allocation: {
+          taxReserve: +(gross * taxRate).toFixed(2),
+          production: +(gross * productionRate).toFixed(2),
+          shipping: +(gross * shippingRate).toFixed(2),
+          cashFree: +(amount - gross * taxRate - gross * productionRate - gross * shippingRate).toFixed(2)
+        }
+      };
+    };
+
+    const todayPayouts = await Promise.all(paidToday.map(enrichPayout));
+    const todayTotal = todayPayouts.reduce((s, p) => s + p.amount, 0);
+    const todayAllocation = {
+      taxReserve: +todayPayouts.reduce((s, p) => s + p.allocation.taxReserve, 0).toFixed(2),
+      production: +todayPayouts.reduce((s, p) => s + p.allocation.production, 0).toFixed(2),
+      shipping: +todayPayouts.reduce((s, p) => s + p.allocation.shipping, 0).toFixed(2),
+      cashFree: +todayPayouts.reduce((s, p) => s + p.allocation.cashFree, 0).toFixed(2)
+    };
+
+    return {
+      today: today,
+      currency: allPayouts[0]?.currency ?? 'EUR',
+      receivedToday: +todayTotal.toFixed(2),
+      payouts: todayPayouts,
+      allocation: todayAllocation,
+      pending: {
+        amount: +inTransit.reduce((s, p) => s + this.money(p.amount), 0).toFixed(2),
+        payouts: await Promise.all(inTransit.map(enrichPayout))
+      },
+      scheduled: {
+        amount: +scheduledSoon.reduce((s, p) => s + this.money(p.amount), 0).toFixed(2),
+        payouts: await Promise.all(scheduledSoon.map(enrichPayout))
+      }
+    };
+  }
+
   async payouts() {
     const limit = Math.min(Number(this.config.get('ECONOMICS_PAYOUT_LIMIT') ?? 8), 20);
     const payouts = (await this.shopify.listPayouts()).slice(0, limit);
@@ -364,6 +471,18 @@ export class EconomicsService {
     if (!raw) return 0.02;
     const parsed = Number(raw.replace(',', '.'));
     return Number.isFinite(parsed) && parsed >= 0 ? parsed : 0.02;
+  }
+
+  private productionRate(): number {
+    const raw = this.config.get<string>('ALLOCATION_PRODUCTION_RATE');
+    const parsed = Number(raw?.replace(',', '.'));
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : 0.22;
+  }
+
+  private shippingRate(): number {
+    const raw = this.config.get<string>('ALLOCATION_SHIPPING_RATE');
+    const parsed = Number(raw?.replace(',', '.'));
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : 0.10;
   }
 
   private taxReserveRate(): number {

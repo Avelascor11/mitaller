@@ -27,6 +27,11 @@ export class EconomicsController {
     return this.economics.productMargins();
   }
 
+  @Get('cashflow')
+  cashflow() {
+    return this.economics.cashflow();
+  }
+
   @Get('payouts')
   payouts() {
     return this.economics.payouts();

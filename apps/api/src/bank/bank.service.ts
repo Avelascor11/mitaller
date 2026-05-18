@@ -2,19 +2,19 @@ import { BadRequestException, Injectable, NotFoundException } from '@nestjs/comm
 import { ConfigService } from '@nestjs/config';
 import { BankTransactionCategory } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
-import { GoCardlessBankAdapter } from './gocardless-bank.adapter';
+import { TinkBankAdapter } from './tink-bank.adapter';
 
 @Injectable()
 export class BankService {
   constructor(
     private readonly prisma: PrismaService,
-    private readonly gocardless: GoCardlessBankAdapter,
+    private readonly gocardless: TinkBankAdapter,
     private readonly config: ConfigService
   ) {}
 
   status() {
     return {
-      provider: 'GOCARDLESS',
+      provider: 'TINK',
       configured: this.gocardless.configured
     };
   }
@@ -50,15 +50,15 @@ export class BankService {
     return { ...connection, link: requisition.link };
   }
 
-  async callback(reference?: string, requisitionId?: string) {
+  async callback(reference?: string, requisitionId?: string, code?: string) {
     const connection = await this.findConnection(reference, requisitionId);
-    return this.refreshConnection(connection.id);
+    return this.refreshConnection(connection.id, code);
   }
 
-  async refreshConnection(id: string) {
+  async refreshConnection(id: string, code?: string) {
     const connection = await this.prisma.bankConnection.findUnique({ where: { id } });
     if (!connection) throw new NotFoundException('Conexion bancaria no encontrada');
-    const requisition = await this.gocardless.requisition(connection.requisitionId);
+    const requisition = await this.gocardless.requisition(connection.requisitionId, code);
     const accounts = Array.isArray(requisition.accounts) ? requisition.accounts : [];
 
     const updated = await this.prisma.bankConnection.update({
@@ -132,6 +132,46 @@ export class BankService {
     });
   }
 
+  async allocation() {
+    const shopifyFeeRate = 0.024;
+    const taxRate = this.taxReserveRate();
+    const productionRate = this.productionRate();
+    const shippingRate = this.shippingRate();
+    const cashFreeRate = 1 - taxRate - productionRate - shippingRate;
+
+    const since = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000);
+    const payouts = await this.prisma.bankTransaction.findMany({
+      where: {
+        category: 'SHOPIFY_PAYOUT',
+        amount: { gt: 0 },
+        bookingDate: { gte: since }
+      },
+      orderBy: { bookingDate: 'desc' },
+      take: 20
+    });
+
+    const allocate = (amount: number) => {
+      const gross = amount / (1 - shopifyFeeRate);
+      const taxReserve = gross * taxRate;
+      const production = gross * productionRate;
+      const shipping = gross * shippingRate;
+      const cashFree = amount - taxReserve - production - shipping;
+      return { taxReserve, production, shipping, cashFree };
+    };
+
+    return {
+      currency: 'EUR',
+      rates: { taxReserve: taxRate, production: productionRate, shipping: shippingRate, cashFree: cashFreeRate },
+      payouts: payouts.map(tx => ({
+        id: tx.id,
+        date: tx.bookingDate.toISOString().slice(0, 10),
+        description: tx.description,
+        totalAmount: tx.amount,
+        allocation: allocate(tx.amount)
+      }))
+    };
+  }
+
   async daily(from?: string, to?: string) {
     const transactions = await this.transactions(from, to);
     const totals = transactions.reduce(
@@ -201,7 +241,7 @@ export class BankService {
     const text = description.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
     if (/shopify|stripe/.test(text)) return BankTransactionCategory.SHOPIFY_PAYOUT;
     if (/sendcloud|correos|paq/.test(text)) return BankTransactionCategory.SENDCLOUD;
-    if (/falk|ross|textil|camiseta|sudadera|roly|b\\s*&\\s*c/.test(text)) return BankTransactionCategory.GARMENT_SUPPLIER;
+    if (/falk|ross|textil|camiseta|sudadera|roly|b\s*&\s*c/.test(text)) return BankTransactionCategory.GARMENT_SUPPLIER;
     if (/dtf|transfer|vinilo/.test(text)) return BankTransactionCategory.DTF_SUPPLIER;
     if (/hacienda|aeat|iva|impuesto|seguridad social/.test(text)) return BankTransactionCategory.TAX;
     if (/meta|facebook|instagram|google ads|tiktok/.test(text)) return BankTransactionCategory.ADS;
@@ -226,10 +266,31 @@ export class BankService {
     return connection;
   }
 
+  private taxReserveRate(): number {
+    const raw = this.config.get<string>('ECONOMICS_TAX_RESERVE_RATE');
+    const parsed = Number(raw?.replace(',', '.'));
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : 0.15;
+  }
+
+  private productionRate(): number {
+    const raw = this.config.get<string>('ALLOCATION_PRODUCTION_RATE');
+    const parsed = Number(raw?.replace(',', '.'));
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : 0.22;
+  }
+
+  private shippingRate(): number {
+    const raw = this.config.get<string>('ALLOCATION_SHIPPING_RATE');
+    const parsed = Number(raw?.replace(',', '.'));
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : 0.10;
+  }
+
   private dateRange(from?: string, to?: string) {
-    const start = from ? new Date(`${from}T00:00:00.000Z`) : new Date();
-    const end = to ? new Date(`${to}T23:59:59.999Z`) : new Date(start);
-    if (!to) end.setHours(23, 59, 59, 999);
-    return { start, end };
+    const today = new Date().toISOString().slice(0, 10);
+    const startStr = from ?? today;
+    const endStr = to ?? startStr;
+    return {
+      start: new Date(`${startStr}T00:00:00.000Z`),
+      end: new Date(`${endStr}T23:59:59.999Z`)
+    };
   }
 }

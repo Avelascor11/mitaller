@@ -243,6 +243,9 @@ struct APIClient {
         return try await perform(request)
     }
 
+    func bankAllocation() async throws -> AllocationPlan { try await get("/bank/allocation") }
+    func cashflow() async throws -> CashflowSummary { try await get("/economics/cashflow") }
+
     func bankDaily(from: Date, to: Date) async throws -> BankDailySummary {
         let formatter = DateFormatter.apiDay
         return try await get("/bank/daily?from=\(formatter.string(from: from))&to=\(formatter.string(from: to))")
@@ -590,6 +593,83 @@ struct BankTransaction: Decodable, Identifiable {
     let counterpartyName: String?
     let category: String
     let orderNumber: String?
+}
+
+struct CashflowSummary: Decodable {
+    let today: String
+    let currency: String
+    let receivedToday: Double
+    let payouts: [CashflowPayout]
+    let allocation: CashflowAllocation
+    let pending: CashflowPending
+    let scheduled: CashflowPending
+}
+
+struct CashflowPayout: Decodable, Identifiable {
+    let id: String
+    let date: String
+    let amount: Double
+    let currency: String
+    let shopifyFee: Double
+    let refunds: Double
+    let orders: [CashflowOrder]
+    let salesDays: [CashflowSalesDay]
+    let allocation: CashflowAllocation
+}
+
+struct CashflowOrder: Decodable {
+    let orderNumber: String?
+    let saleDate: String?
+    let amount: Double
+    let fee: Double
+    let processedAt: String?
+}
+
+struct CashflowSalesDay: Decodable, Identifiable {
+    var id: String { date }
+    let date: String
+    let orders: [CashflowOrder]
+    let subtotal: Double
+}
+
+struct CashflowAllocation: Decodable {
+    let taxReserve: Double
+    let production: Double
+    let shipping: Double
+    let cashFree: Double
+}
+
+struct CashflowPending: Decodable {
+    let amount: Double
+    let payouts: [CashflowPayout]
+}
+
+struct AllocationPlan: Decodable {
+    let currency: String
+    let rates: AllocationRates
+    let payouts: [PayoutAllocation]
+}
+
+struct AllocationRates: Decodable {
+    let taxReserve: Double
+    let production: Double
+    let shipping: Double
+    let cashFree: Double
+}
+
+struct PayoutAllocation: Decodable, Identifiable {
+    let id: String
+    let date: String
+    let description: String
+    let totalAmount: Double
+    let allocation: AllocationBreakdown
+}
+
+struct AllocationBreakdown: Decodable {
+    let taxReserve: Double
+    let production: Double
+    let shipping: Double
+    let cashFree: Double
 }
 
 struct ProductMarginRow: Decodable, Identifiable {

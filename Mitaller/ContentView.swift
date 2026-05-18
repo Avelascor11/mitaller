@@ -1210,6 +1210,8 @@ struct MainTabView: View {
                 .tabItem { Label("Imprimir", systemImage: "printer.fill") }
             EconomicsView()
                 .tabItem { Label("Economía", systemImage: "eurosign.circle.fill") }
+            CashflowView()
+                .tabItem { Label("Caja", systemImage: "banknote.fill") }
             BankView()
                 .tabItem { Label("Banco", systemImage: "building.columns.fill") }
             AdminView()
@@ -5648,6 +5650,7 @@ struct BankView: View {
     @State private var institutions: [BankInstitution] = []
     @State private var selectedInstitutionID: String?
     @State private var daily: BankDailySummary?
+    @State private var allocation: AllocationPlan?
     @State private var selectedDay = Calendar.current.startOfDay(for: Date())
     @State private var loading = false
     @State private var error: String?
@@ -5678,6 +5681,10 @@ struct BankView: View {
                         onConnect: { Task { await connectBank() } },
                         onRefreshBanks: { Task { await loadInstitutions() } }
                     )
+
+                    if let allocation, !allocation.payouts.isEmpty {
+                        BankAllocationSection(plan: allocation)
+                    }
 
                     VStack(alignment: .leading, spacing: 12) {
                         DatePicker("Dia", selection: $selectedDay, displayedComponents: .date)
@@ -5735,7 +5742,10 @@ struct BankView: View {
     private func reload() async {
         await loadStatus()
         await loadInstitutions()
-        await loadDaily()
+        await withTaskGroup(of: Void.self) { group in
+            group.addTask { await self.loadDaily() }
+            group.addTask { await self.loadAllocation() }
+        }
     }
 
     private func loadStatus() async {
@@ -5796,6 +5806,447 @@ struct BankView: View {
             daily = try await client.bankDaily(from: selectedDay, to: selectedDay)
         } catch {
             self.error = error.localizedDescription
+        }
+    }
+
+    private func loadAllocation() async {
+        guard let client = store.apiClient else { return }
+        do {
+            allocation = try await client.bankAllocation()
+        } catch {
+            // silent — allocation is optional context
+        }
+    }
+}
+
+struct CashflowView: View {
+    @Environment(WorkshopStore.self) private var store
+    @State private var summary: CashflowSummary?
+    @State private var loading = false
+    @State private var error: String?
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 16) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Caja")
+                            .font(.system(size: 30, weight: .heavy, design: .rounded))
+                            .foregroundStyle(AppTheme.ink)
+                        Text("Cobros de Shopify y qué separar cada día.")
+                            .font(.subheadline.weight(.medium))
+                            .foregroundStyle(AppTheme.muted)
+                    }
+
+                    if loading {
+                        ProgressView().frame(maxWidth: .infinity).padding(.top, 40)
+                    } else if let summary {
+                        CashflowTodayCard(summary: summary)
+                        if !summary.pending.payouts.isEmpty || !summary.scheduled.payouts.isEmpty {
+                            CashflowPendingCard(pending: summary.pending, scheduled: summary.scheduled, currency: summary.currency)
+                        }
+                    } else if let error {
+                        Text(error).font(.footnote).foregroundStyle(AppTheme.red).glassPanel(padding: 12, accent: AppTheme.red)
+                    }
+                }
+                .padding()
+            }
+            .screenBackground()
+            .navigationTitle("Caja")
+            .task { await load() }
+            .refreshable { await load() }
+        }
+    }
+
+    private func load() async {
+        guard let client = store.apiClient else { error = "API no configurada"; return }
+        loading = true
+        defer { loading = false }
+        do { summary = try await client.cashflow() }
+        catch { self.error = error.localizedDescription }
+    }
+}
+
+struct CashflowTodayCard: View {
+    let summary: CashflowSummary
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Cobrado hoy")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(AppTheme.muted)
+                    Text(formatted(summary.receivedToday, currency: summary.currency))
+                        .font(.system(size: 36, weight: .heavy, design: .rounded))
+                        .foregroundStyle(summary.receivedToday > 0 ? AppTheme.green : AppTheme.muted)
+                }
+                Spacer()
+                Image(systemName: summary.receivedToday > 0 ? "checkmark.circle.fill" : "clock.circle")
+                    .font(.system(size: 32))
+                    .foregroundStyle(summary.receivedToday > 0 ? AppTheme.green : AppTheme.muted)
+            }
+
+            if summary.payouts.isEmpty {
+                Text("Hoy no ha entrado ningún pago de Shopify.")
+                    .font(.subheadline)
+                    .foregroundStyle(AppTheme.muted)
+            } else {
+                Divider().background(AppTheme.line)
+                ForEach(summary.payouts) { payout in
+                    CashflowPayoutDetail(payout: payout, currency: summary.currency)
+                }
+            }
+
+            if summary.receivedToday > 0 {
+                Divider().background(AppTheme.line)
+                Text("Qué separar ahora")
+                    .font(.subheadline.weight(.bold))
+                    .foregroundStyle(AppTheme.ink)
+                CashflowAllocationGrid(allocation: summary.allocation, currency: summary.currency)
+            }
+        }
+        .glassPanel(padding: 16, accent: AppTheme.green)
+    }
+
+    private func formatted(_ value: Double, currency: String) -> String {
+        let f = NumberFormatter()
+        f.numberStyle = .currency
+        f.currencyCode = currency
+        f.maximumFractionDigits = 2
+        return f.string(from: NSNumber(value: value)) ?? "\(value)"
+    }
+}
+
+struct CashflowPayoutDetail: View {
+    let payout: CashflowPayout
+    let currency: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            // Group by sale date
+            ForEach(payout.salesDays) { day in
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack {
+                        Image(systemName: "calendar")
+                            .font(.caption)
+                            .foregroundStyle(AppTheme.teal)
+                        Text("Ventas del \(day.date)")
+                            .font(.caption.weight(.bold))
+                            .foregroundStyle(AppTheme.teal)
+                        Spacer()
+                        Text(m(day.subtotal, currency: currency))
+                            .font(.caption.weight(.bold))
+                            .foregroundStyle(AppTheme.teal)
+                    }
+                    ForEach(Array(day.orders.enumerated()), id: \.offset) { _, order in
+                        HStack {
+                            Image(systemName: "cart.fill")
+                                .font(.caption2)
+                                .foregroundStyle(AppTheme.muted)
+                            Text(order.orderNumber ?? "Pedido sin número")
+                                .font(.subheadline.weight(.semibold))
+                                .foregroundStyle(AppTheme.ink)
+                            Spacer()
+                            Text(m(order.amount, currency: currency))
+                                .font(.subheadline.weight(.bold))
+                                .foregroundStyle(AppTheme.inkSoft)
+                        }
+                        .padding(.leading, 12)
+                    }
+                }
+            }
+
+            HStack {
+                Image(systemName: "percent")
+                    .font(.caption2)
+                    .foregroundStyle(AppTheme.red)
+                Text("Comisión Shopify")
+                    .font(.caption)
+                    .foregroundStyle(AppTheme.muted)
+                Spacer()
+                Text(m(payout.shopifyFee, currency: currency))
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(AppTheme.red)
+            }
+
+            if payout.refunds != 0 {
+                HStack {
+                    Image(systemName: "arrow.uturn.left")
+                        .font(.caption2)
+                        .foregroundStyle(AppTheme.red)
+                    Text("Devolución")
+                        .font(.caption)
+                        .foregroundStyle(AppTheme.red)
+                    Spacer()
+                    Text(m(payout.refunds, currency: currency))
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(AppTheme.red)
+                }
+            }
+        }
+    }
+
+    private func m(_ value: Double, currency: String) -> String {
+        let f = NumberFormatter()
+        f.numberStyle = .currency
+        f.currencyCode = currency
+        f.maximumFractionDigits = 2
+        return f.string(from: NSNumber(value: value)) ?? "\(value)"
+    }
+}
+
+struct CashflowAllocationGrid: View {
+    let allocation: CashflowAllocation
+    let currency: String
+
+    var body: some View {
+        LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 10) {
+            CashflowAllocationTile(label: "Hacienda / IVA", amount: allocation.taxReserve, currency: currency, color: AppTheme.red, icon: "building.columns.fill")
+            CashflowAllocationTile(label: "Producción", amount: allocation.production, currency: currency, color: AppTheme.amber, icon: "tshirt.fill")
+            CashflowAllocationTile(label: "Envíos", amount: allocation.shipping, currency: currency, color: AppTheme.blue, icon: "shippingbox.fill")
+            CashflowAllocationTile(label: "Beneficio libre", amount: allocation.cashFree, currency: currency, color: AppTheme.green, icon: "banknote.fill")
+        }
+    }
+}
+
+struct CashflowAllocationTile: View {
+    let label: String
+    let amount: Double
+    let currency: String
+    let color: Color
+    let icon: String
+
+    private var formatted: String {
+        let f = NumberFormatter()
+        f.numberStyle = .currency
+        f.currencyCode = currency
+        f.maximumFractionDigits = 2
+        return f.string(from: NSNumber(value: amount)) ?? "\(amount)"
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Image(systemName: icon).font(.caption).foregroundStyle(color)
+                Spacer()
+            }
+            Text(formatted)
+                .font(.title3.weight(.heavy))
+                .foregroundStyle(color)
+            Text(label)
+                .font(.caption.weight(.medium))
+                .foregroundStyle(AppTheme.muted)
+                .lineLimit(1)
+        }
+        .padding(12)
+        .background(color.opacity(0.08))
+        .clipShape(RoundedRectangle(cornerRadius: 12))
+    }
+}
+
+struct CashflowPendingCard: View {
+    let pending: CashflowPending
+    let scheduled: CashflowPending
+    let currency: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Text("Pendiente de cobrar")
+                .font(.headline.weight(.bold))
+                .foregroundStyle(AppTheme.ink)
+
+            if pending.amount > 0 {
+                VStack(alignment: .leading, spacing: 10) {
+                    HStack {
+                        Text("En tránsito")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(AppTheme.muted)
+                        Spacer()
+                        Text(m(pending.amount))
+                            .font(.title2.weight(.heavy))
+                            .foregroundStyle(AppTheme.amber)
+                    }
+                    ForEach(pending.payouts) { payout in
+                        VStack(alignment: .leading, spacing: 6) {
+                            HStack {
+                                Text("Ingreso \(payout.date)")
+                                    .font(.subheadline.weight(.semibold))
+                                    .foregroundStyle(AppTheme.ink)
+                                Spacer()
+                                Text(m(payout.amount))
+                                    .font(.subheadline.weight(.bold))
+                                    .foregroundStyle(AppTheme.amber)
+                            }
+                            ForEach(payout.salesDays) { day in
+                                HStack {
+                                    Image(systemName: "calendar")
+                                        .font(.caption2)
+                                        .foregroundStyle(AppTheme.teal)
+                                    Text("Ventas del \(day.date) · \(day.orders.count) pedidos")
+                                        .font(.caption)
+                                        .foregroundStyle(AppTheme.teal)
+                                    Spacer()
+                                    Text(m(day.subtotal))
+                                        .font(.caption.weight(.semibold))
+                                        .foregroundStyle(AppTheme.teal)
+                                }
+                                .padding(.leading, 8)
+                            }
+                        }
+                        .padding(10)
+                        .background(AppTheme.amber.opacity(0.06))
+                        .clipShape(RoundedRectangle(cornerRadius: 10))
+                    }
+                }
+            }
+
+            if scheduled.amount > 0 {
+                VStack(alignment: .leading, spacing: 10) {
+                    HStack {
+                        Text("Programado")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(AppTheme.muted)
+                        Spacer()
+                        Text(m(scheduled.amount))
+                            .font(.title2.weight(.heavy))
+                            .foregroundStyle(AppTheme.purple)
+                    }
+                    ForEach(scheduled.payouts) { payout in
+                        HStack {
+                            Text("Ingreso \(payout.date)")
+                                .font(.subheadline.weight(.semibold))
+                                .foregroundStyle(AppTheme.ink)
+                            Spacer()
+                            Text(m(payout.amount))
+                                .font(.subheadline.weight(.bold))
+                                .foregroundStyle(AppTheme.purple)
+                        }
+                    }
+                }
+            }
+        }
+        .glassPanel(padding: 16, accent: AppTheme.amber)
+    }
+
+    private func m(_ value: Double) -> String {
+        let f = NumberFormatter()
+        f.numberStyle = .currency
+        f.currencyCode = currency
+        f.maximumFractionDigits = 2
+        return f.string(from: NSNumber(value: value)) ?? "\(value)"
+    }
+}
+
+struct BankAllocationSection: View {
+    let plan: AllocationPlan
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Reparto de ingresos")
+                .font(.headline.weight(.bold))
+                .foregroundStyle(AppTheme.ink)
+
+            ForEach(plan.payouts) { payout in
+                PayoutAllocationCard(payout: payout, currency: plan.currency)
+            }
+        }
+    }
+}
+
+struct PayoutAllocationCard: View {
+    let payout: PayoutAllocation
+    let currency: String
+
+    private var fmt: NumberFormatter {
+        let f = NumberFormatter()
+        f.numberStyle = .currency
+        f.currencyCode = currency
+        f.maximumFractionDigits = 2
+        return f
+    }
+
+    private func money(_ value: Double) -> String {
+        fmt.string(from: NSNumber(value: value)) ?? "\(value)"
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(payout.date)
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(AppTheme.muted)
+                    Text(payout.description)
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(AppTheme.ink)
+                        .lineLimit(1)
+                }
+                Spacer()
+                Text(money(payout.totalAmount))
+                    .font(.title3.weight(.heavy))
+                    .foregroundStyle(AppTheme.green)
+            }
+
+            AllocationBar(allocation: payout.allocation, total: payout.totalAmount)
+
+            VStack(spacing: 6) {
+                AllocationRow(label: "Hacienda / IVA", amount: payout.allocation.taxReserve, currency: currency, color: AppTheme.red)
+                AllocationRow(label: "Producción", amount: payout.allocation.production, currency: currency, color: AppTheme.amber)
+                AllocationRow(label: "Envíos", amount: payout.allocation.shipping, currency: currency, color: AppTheme.blue)
+                AllocationRow(label: "Beneficio libre", amount: payout.allocation.cashFree, currency: currency, color: AppTheme.green)
+            }
+        }
+        .glassPanel(padding: 14, accent: AppTheme.green)
+    }
+}
+
+struct AllocationBar: View {
+    let allocation: AllocationBreakdown
+    let total: Double
+
+    var body: some View {
+        GeometryReader { geo in
+            HStack(spacing: 2) {
+                let taxW = geo.size.width * (allocation.taxReserve / total)
+                let prodW = geo.size.width * (allocation.production / total)
+                let shipW = geo.size.width * (allocation.shipping / total)
+                let freeW = geo.size.width * max(0, allocation.cashFree / total)
+                RoundedRectangle(cornerRadius: 3).fill(AppTheme.red).frame(width: taxW)
+                RoundedRectangle(cornerRadius: 3).fill(AppTheme.amber).frame(width: prodW)
+                RoundedRectangle(cornerRadius: 3).fill(AppTheme.blue).frame(width: shipW)
+                RoundedRectangle(cornerRadius: 3).fill(AppTheme.green).frame(width: freeW)
+            }
+        }
+        .frame(height: 8)
+        .clipShape(RoundedRectangle(cornerRadius: 4))
+    }
+}
+
+struct AllocationRow: View {
+    let label: String
+    let amount: Double
+    let currency: String
+    let color: Color
+
+    private var formatted: String {
+        let f = NumberFormatter()
+        f.numberStyle = .currency
+        f.currencyCode = currency
+        f.maximumFractionDigits = 2
+        return f.string(from: NSNumber(value: amount)) ?? "\(amount)"
+    }
+
+    var body: some View {
+        HStack {
+            Circle().fill(color).frame(width: 8, height: 8)
+            Text(label)
+                .font(.subheadline.weight(.medium))
+                .foregroundStyle(AppTheme.ink)
+            Spacer()
+            Text(formatted)
+                .font(.subheadline.weight(.bold))
+                .foregroundStyle(color)
         }
     }
 }

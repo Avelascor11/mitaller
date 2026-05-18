@@ -21,8 +21,12 @@ export class BankController {
   }
 
   @Get('callback')
-  callback(@Query('ref') reference?: string, @Query('requisition_id') requisitionId?: string) {
-    return this.bank.callback(reference, requisitionId);
+  callback(
+    @Query('ref') reference?: string,
+    @Query('requisition_id') requisitionId?: string,
+    @Query('code') code?: string
+  ) {
+    return this.bank.callback(reference, requisitionId, code);
   }
 
   @Post('sync')
@@ -38,5 +42,10 @@ export class BankController {
   @Get('daily')
   daily(@Query('from') from?: string, @Query('to') to?: string) {
     return this.bank.daily(from, to);
+  }
+
+  @Get('allocation')
+  allocation() {
+    return this.bank.allocation();
   }
 }
