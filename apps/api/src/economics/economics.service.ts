@@ -73,6 +73,16 @@ export class EconomicsService {
     return this.summary(start, end);
   }
 
+  async range(from?: string, to?: string) {
+    const start = from ? new Date(`${from}T00:00:00.000`) : new Date();
+    const end = to ? new Date(`${to}T23:59:59.999`) : new Date(start);
+    if (!to) end.setHours(23, 59, 59, 999);
+    if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) {
+      throw new Error('Rango de fechas invalido');
+    }
+    return this.summary(start, end);
+  }
+
   async productMargins() {
     const orders = await this.prisma.order.findMany({
       where: { items: { some: {} } },

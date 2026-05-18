@@ -17,6 +17,11 @@ export class EconomicsController {
     return this.economics.month(y, m);
   }
 
+  @Get('range')
+  range(@Query('from') from?: string, @Query('to') to?: string) {
+    return this.economics.range(from, to);
+  }
+
   @Get('products')
   products() {
     return this.economics.productMargins();

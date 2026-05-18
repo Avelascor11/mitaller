@@ -206,6 +206,10 @@ struct APIClient {
 
     func economicsToday() async throws -> EconomicsSummary { try await get("/economics/today") }
     func economicsMonth() async throws -> EconomicsSummary { try await get("/economics/month") }
+    func economicsRange(from: Date, to: Date) async throws -> EconomicsSummary {
+        let formatter = DateFormatter.apiDay
+        return try await get("/economics/range?from=\(formatter.string(from: from))&to=\(formatter.string(from: to))")
+    }
     func economicsProducts() async throws -> [ProductMarginRow] { try await get("/economics/products") }
     func economicsPayouts() async throws -> ShopifyPayoutsSummary { try await get("/economics/payouts") }
     func economicsForOrder(_ id: String) async throws -> OrderBreakdown {
@@ -279,6 +283,17 @@ private extension JSONDecoder {
         decoder.dateDecodingStrategy = .iso8601
         return decoder
     }
+}
+
+private extension DateFormatter {
+    static let apiDay: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.calendar = Calendar(identifier: .gregorian)
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = .current
+        formatter.dateFormat = "yyyy-MM-dd"
+        return formatter
+    }()
 }
 
 private struct EmptyBody: Encodable {}

@@ -5467,25 +5467,28 @@ struct EconomicsView: View {
     @Environment(WorkshopStore.self) private var store
     @State private var today: EconomicsSummary?
     @State private var month: EconomicsSummary?
+    @State private var custom: EconomicsSummary?
     @State private var payouts: ShopifyPayoutsSummary?
     @State private var products: [ProductMarginRow] = []
     @State private var loading = false
     @State private var error: String?
     @State private var range: Range = .today
+    @State private var customFrom = Calendar.current.startOfDay(for: Date())
+    @State private var customTo = Calendar.current.startOfDay(for: Date())
     @AppStorage("economicsShippingReservePct") private var shippingReservePct = 8.0
     @AppStorage("economicsMaterialReservePct") private var materialReservePct = 35.0
     @AppStorage("economicsProfitReservePct") private var profitReservePct = 25.0
 
     enum Range: String, CaseIterable, Identifiable {
-        case today, month
+        case today, month, custom
         var id: String { rawValue }
         var label: String {
-            switch self { case .today: "Hoy"; case .month: "Este mes" }
+            switch self { case .today: "Hoy"; case .month: "Este mes"; case .custom: "Calendario" }
         }
     }
 
     var current: EconomicsSummary? {
-        switch range { case .today: today; case .month: month }
+        switch range { case .today: today; case .month: month; case .custom: custom }
     }
 
     var body: some View {
@@ -5505,6 +5508,20 @@ struct EconomicsView: View {
                         ForEach(Range.allCases) { Text($0.label).tag($0) }
                     }
                     .pickerStyle(.segmented)
+                    .onChange(of: range) { _, newValue in
+                        if newValue == .custom && custom == nil {
+                            Task { await reloadCustomRange() }
+                        }
+                    }
+
+                    if range == .custom {
+                        CustomEconomicsDatePicker(
+                            from: $customFrom,
+                            to: $customTo,
+                            loading: loading,
+                            onApply: { Task { await reloadCustomRange() } }
+                        )
+                    }
 
                     if loading && current == nil {
                         ProgressView().frame(maxWidth: .infinity)
@@ -5561,15 +5578,72 @@ struct EconomicsView: View {
         do {
             async let t = client.economicsToday()
             async let m = client.economicsMonth()
+            async let c = client.economicsRange(from: customFrom, to: customTo)
             async let p = client.economicsProducts()
             async let pay = client.economicsPayouts()
             today = try await t
             month = try await m
+            custom = try await c
             products = try await p
             payouts = try await pay
         } catch let err {
             error = err.localizedDescription
         }
+    }
+
+    private func reloadCustomRange() async {
+        guard let client = store.apiClient else { error = "API no configurada"; return }
+        loading = true
+        error = nil
+        defer { loading = false }
+        do {
+            custom = try await client.economicsRange(from: min(customFrom, customTo), to: max(customFrom, customTo))
+        } catch let err {
+            error = err.localizedDescription
+        }
+    }
+}
+
+struct CustomEconomicsDatePicker: View {
+    @Binding var from: Date
+    @Binding var to: Date
+    let loading: Bool
+    let onApply: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Label("Rango personalizado", systemImage: "calendar")
+                    .font(.headline.weight(.heavy))
+                    .foregroundStyle(AppTheme.ink)
+                Spacer()
+                Button(action: sameDay) {
+                    Label("Solo hoy", systemImage: "sun.max.fill")
+                }
+                .font(.caption.weight(.bold))
+                .buttonStyle(.bordered)
+            }
+
+            DatePicker("Desde", selection: $from, displayedComponents: .date)
+                .datePickerStyle(.compact)
+            DatePicker("Hasta", selection: $to, displayedComponents: .date)
+                .datePickerStyle(.compact)
+
+            Button(action: onApply) {
+                Label("Ver economía", systemImage: "chart.bar.xaxis")
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.borderedProminent)
+            .disabled(loading)
+        }
+        .glassPanel(padding: 14, accent: AppTheme.blue)
+    }
+
+    private func sameDay() {
+        let today = Calendar.current.startOfDay(for: Date())
+        from = today
+        to = today
+        onApply()
     }
 }
 
