@@ -5475,9 +5475,6 @@ struct EconomicsView: View {
     @State private var range: Range = .today
     @State private var customFrom = Calendar.current.startOfDay(for: Date())
     @State private var customTo = Calendar.current.startOfDay(for: Date())
-    @AppStorage("economicsShippingReservePct") private var shippingReservePct = 8.0
-    @AppStorage("economicsMaterialReservePct") private var materialReservePct = 35.0
-    @AppStorage("economicsProfitReservePct") private var profitReservePct = 25.0
 
     enum Range: String, CaseIterable, Identifiable {
         case today, month, custom
@@ -5526,12 +5523,7 @@ struct EconomicsView: View {
                     if loading && current == nil {
                         ProgressView().frame(maxWidth: .infinity)
                     } else if let summary = current {
-                        AllocationPlanCard(
-                            summary: summary,
-                            shippingPct: $shippingReservePct,
-                            materialPct: $materialReservePct,
-                            profitPct: $profitReservePct
-                        )
+                        AllocationPlanCard(summary: summary)
                         ShippingReserveCard(summary: summary)
                         EconomicsSummaryCard(summary: summary)
                         if let payouts {
@@ -5788,88 +5780,107 @@ struct ShopifyPayoutLineRow: View {
 
 struct AllocationPlanCard: View {
     let summary: EconomicsSummary
-    @Binding var shippingPct: Double
-    @Binding var materialPct: Double
-    @Binding var profitPct: Double
 
-    private var totalPct: Double { shippingPct + materialPct + profitPct }
-    private var remainingPct: Double { 100 - totalPct }
+    private var totalCost: Double {
+        summary.shippingCost + summary.productCost + summary.wasteCost + summary.shopifyFee
+    }
+
+    private func percent(_ value: Double) -> Double {
+        guard summary.grossRevenue > 0 else { return 0 }
+        return value / summary.grossRevenue * 100
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             HStack(alignment: .top) {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("Separar ventas")
+                    Text("Reparto definitivo")
                         .font(.headline.weight(.heavy))
                         .foregroundStyle(AppTheme.ink)
-                    Text("Porcentajes calculados sobre los ingresos del rango.")
+                    Text("Calculado con costes reales/estimados del rango. Embalaje 0 EUR y mano de obra fuera.")
                         .font(.caption)
                         .foregroundStyle(AppTheme.muted)
                 }
                 Spacer()
-                Text("\(Int(totalPct.rounded()))%")
+                Text(summary.netMarginPct.map { "\(Int($0.rounded()))%" } ?? "0%")
                     .font(.headline.weight(.black))
-                    .foregroundStyle(totalPct <= 100 ? AppTheme.blue : AppTheme.red)
+                    .foregroundStyle(summary.netMargin >= 0 ? AppTheme.green : AppTheme.red)
                     .padding(.horizontal, 10)
                     .padding(.vertical, 6)
-                    .background((totalPct <= 100 ? AppTheme.blueSoft : AppTheme.red.opacity(0.12)))
+                    .background(summary.netMargin >= 0 ? AppTheme.green.opacity(0.12) : AppTheme.red.opacity(0.12))
                     .clipShape(Capsule())
             }
 
             VStack(spacing: 12) {
-                AllocationSliderRow(
+                AllocationValueRow(
                     title: "Envíos",
                     icon: "shippingbox.fill",
                     color: AppTheme.amber,
-                    percent: $shippingPct,
-                    amount: summary.grossRevenue * shippingPct / 100,
-                    currency: summary.currency,
-                    realReference: summary.shippingCost
+                    percent: percent(summary.shippingCost),
+                    amount: summary.shippingCost,
+                    currency: summary.currency
                 )
-                AllocationSliderRow(
+                AllocationValueRow(
                     title: "Materia prima",
                     icon: "tshirt.fill",
                     color: AppTheme.blue,
-                    percent: $materialPct,
-                    amount: summary.grossRevenue * materialPct / 100,
+                    percent: percent(summary.productCost),
+                    amount: summary.productCost,
                     currency: summary.currency,
-                    realReference: summary.productCost + summary.wasteCost
+                    subtitle: "Prenda + impresion/DTF"
                 )
-                AllocationSliderRow(
-                    title: "Ganancia",
-                    icon: "eurosign.circle.fill",
-                    color: AppTheme.green,
-                    percent: $profitPct,
-                    amount: summary.grossRevenue * profitPct / 100,
+                AllocationValueRow(
+                    title: "Merma",
+                    icon: "percent",
+                    color: AppTheme.red,
+                    percent: percent(summary.wasteCost),
+                    amount: summary.wasteCost,
                     currency: summary.currency,
-                    realReference: summary.netMargin
+                    subtitle: "2% sobre materia prima"
+                )
+                AllocationValueRow(
+                    title: "Comisiones",
+                    icon: "creditcard.fill",
+                    color: AppTheme.purple,
+                    percent: percent(summary.shopifyFee),
+                    amount: summary.shopifyFee,
+                    currency: summary.currency,
+                    subtitle: "Shopify Payments estimado"
+                )
+                AllocationValueRow(
+                    title: "Beneficio neto",
+                    icon: "eurosign.circle.fill",
+                    color: summary.netMargin >= 0 ? AppTheme.green : AppTheme.red,
+                    percent: percent(summary.netMargin),
+                    amount: summary.netMargin,
+                    currency: summary.currency
                 )
             }
 
             Divider().background(AppTheme.line)
 
             HStack {
-                Label(remainingPct >= 0 ? "Resto / caja" : "Te pasas", systemImage: remainingPct >= 0 ? "tray.full.fill" : "exclamationmark.triangle.fill")
+                Label("Costes totales", systemImage: "sum")
                     .font(.caption.weight(.bold))
-                    .foregroundStyle(remainingPct >= 0 ? AppTheme.muted : AppTheme.red)
+                    .foregroundStyle(AppTheme.muted)
                 Spacer()
-                Text("\(Int(abs(remainingPct).rounded()))% · \(formatMoney(abs(summary.grossRevenue * remainingPct / 100), currency: summary.currency))")
+                Text("\(Int(percent(totalCost).rounded()))% · \(formatMoney(totalCost, currency: summary.currency))")
                     .font(.subheadline.weight(.heavy))
-                    .foregroundStyle(remainingPct >= 0 ? AppTheme.ink : AppTheme.red)
+                    .foregroundStyle(AppTheme.ink)
             }
         }
-        .glassPanel(padding: 16, accent: totalPct <= 100 ? AppTheme.blue : AppTheme.red)
+        .glassPanel(padding: 16, accent: summary.netMargin >= 0 ? AppTheme.green : AppTheme.red)
     }
 }
 
-struct AllocationSliderRow: View {
+struct AllocationValueRow: View {
     let title: String
     let icon: String
     let color: Color
-    @Binding var percent: Double
+    let percent: Double
     let amount: Double
     let currency: String
-    let realReference: Double
+    var subtitle: String?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -5882,9 +5893,11 @@ struct AllocationSliderRow: View {
                     Text(title)
                         .font(.subheadline.weight(.heavy))
                         .foregroundStyle(AppTheme.ink)
-                    Text("Real actual: \(formatMoney(realReference, currency: currency))")
-                        .font(.caption2.weight(.semibold))
-                        .foregroundStyle(AppTheme.muted)
+                    if let subtitle {
+                        Text(subtitle)
+                            .font(.caption2.weight(.semibold))
+                            .foregroundStyle(AppTheme.muted)
+                    }
                 }
                 Spacer()
                 VStack(alignment: .trailing, spacing: 2) {
@@ -5897,22 +5910,15 @@ struct AllocationSliderRow: View {
                 }
             }
 
-            HStack(spacing: 10) {
-                Button { percent = max(0, percent - 1) } label: {
-                    Image(systemName: "minus")
-                        .frame(width: 30, height: 30)
+            GeometryReader { proxy in
+                ZStack(alignment: .leading) {
+                    Capsule().fill(AppTheme.line.opacity(0.65))
+                    Capsule()
+                        .fill(color.opacity(0.85))
+                        .frame(width: proxy.size.width * min(max(abs(percent), 0), 100) / 100)
                 }
-                .buttonStyle(.bordered)
-
-                Slider(value: $percent, in: 0...100, step: 1)
-                    .tint(color)
-
-                Button { percent = min(100, percent + 1) } label: {
-                    Image(systemName: "plus")
-                        .frame(width: 30, height: 30)
-                }
-                .buttonStyle(.bordered)
             }
+            .frame(height: 8)
         }
         .padding(12)
         .background(AppTheme.surfaceSoft)
