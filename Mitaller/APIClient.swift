@@ -445,6 +445,13 @@ struct EconomicsSummary: Decodable {
     let productCost: Double
     let wasteCost: Double
     let shippingCost: Double
+    let taxReserve: Double
+    let replacementReserve: Double
+    let taxReserveRate: Double
+    let cashOut: Double
+    let cashFree: Double
+    let cashFreePct: Double?
+    let cashStatus: String?
     let netMargin: Double
     let netMarginPct: Double?
     let shippingReserve: Double
@@ -467,6 +474,8 @@ struct OrderBreakdown: Decodable, Identifiable {
     let productCost: Double
     let wasteCost: Double
     let shippingCost: Double
+    let taxReserve: Double
+    let cashFree: Double
     let netMargin: Double
     let netMarginPct: Double?
     let items: [OrderItemBreakdown]

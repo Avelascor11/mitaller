@@ -5523,6 +5523,7 @@ struct EconomicsView: View {
                     if loading && current == nil {
                         ProgressView().frame(maxWidth: .infinity)
                     } else if let summary = current {
+                        CashFlowHealthCard(summary: summary)
                         AllocationPlanCard(summary: summary)
                         ShippingReserveCard(summary: summary)
                         EconomicsSummaryCard(summary: summary)
@@ -5778,11 +5779,93 @@ struct ShopifyPayoutLineRow: View {
     }
 }
 
+struct CashFlowHealthCard: View {
+    let summary: EconomicsSummary
+
+    private var color: Color {
+        switch summary.cashStatus {
+        case "HEALTHY": AppTheme.green
+        case "WATCH": AppTheme.amber
+        default: AppTheme.red
+        }
+    }
+
+    private var title: String {
+        switch summary.cashStatus {
+        case "HEALTHY": "Caja sana"
+        case "WATCH": "Caja justa"
+        default: "No retirar"
+        }
+    }
+
+    private var message: String {
+        switch summary.cashStatus {
+        case "HEALTHY": "Puedes tocar la caja libre dejando cubiertos envios, reposicion, merma, comisiones e impuestos."
+        case "WATCH": "Aparta primero las reservas. La caja libre existe, pero conviene ser prudente."
+        default: "No retires dinero de este rango: primero hay que cubrir costes y reservas."
+        }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(alignment: .top) {
+                VStack(alignment: .leading, spacing: 5) {
+                    Label(title, systemImage: summary.cashStatus == "HEALTHY" ? "checkmark.seal.fill" : "exclamationmark.triangle.fill")
+                        .font(.headline.weight(.heavy))
+                        .foregroundStyle(color)
+                    Text(message)
+                        .font(.caption)
+                        .foregroundStyle(AppTheme.muted)
+                }
+                Spacer()
+                Text(formatMoney(summary.cashFree, currency: summary.currency))
+                    .font(.system(size: 28, weight: .heavy, design: .rounded))
+                    .foregroundStyle(color)
+            }
+
+            HStack(spacing: 10) {
+                MoneyTile(label: "Entra", value: summary.grossRevenue, currency: summary.currency, color: AppTheme.blue)
+                MoneyTile(label: "Apartar", value: summary.cashOut, currency: summary.currency, color: AppTheme.amber)
+                MoneyTile(label: "Libre", value: summary.cashFree, currency: summary.currency, color: color)
+            }
+
+            VStack(spacing: 8) {
+                ReserveLine(label: "Reposicion", value: summary.replacementReserve, currency: summary.currency, color: AppTheme.blue)
+                ReserveLine(label: "Envios", value: summary.shippingCost, currency: summary.currency, color: AppTheme.amber)
+                ReserveLine(label: "Comisiones", value: summary.shopifyFee, currency: summary.currency, color: AppTheme.purple)
+                ReserveLine(label: "Reserva fiscal \(Int((summary.taxReserveRate * 100).rounded()))%", value: summary.taxReserve, currency: summary.currency, color: AppTheme.red)
+            }
+        }
+        .glassPanel(padding: 16, accent: color)
+    }
+}
+
+struct ReserveLine: View {
+    let label: String
+    let value: Double
+    let currency: String
+    let color: Color
+
+    var body: some View {
+        HStack {
+            Circle().fill(color).frame(width: 8, height: 8)
+            Text(label)
+                .font(.caption.weight(.bold))
+                .foregroundStyle(AppTheme.muted)
+            Spacer()
+            Text(formatMoney(value, currency: currency))
+                .font(.caption.weight(.heavy))
+                .foregroundStyle(AppTheme.ink)
+        }
+        .padding(.vertical, 2)
+    }
+}
+
 struct AllocationPlanCard: View {
     let summary: EconomicsSummary
 
     private var totalCost: Double {
-        summary.shippingCost + summary.productCost + summary.wasteCost + summary.shopifyFee
+        summary.cashOut
     }
 
     private func percent(_ value: Double) -> Double {
@@ -5797,7 +5880,7 @@ struct AllocationPlanCard: View {
                     Text("Reparto definitivo")
                         .font(.headline.weight(.heavy))
                         .foregroundStyle(AppTheme.ink)
-                    Text("Calculado con costes reales/estimados del rango. Embalaje 0 EUR y mano de obra fuera.")
+                    Text("Calculado con costes reales/estimados. Embalaje 0 EUR y mano de obra fuera.")
                         .font(.caption)
                         .foregroundStyle(AppTheme.muted)
                 }
@@ -5848,11 +5931,20 @@ struct AllocationPlanCard: View {
                     subtitle: "Shopify Payments estimado"
                 )
                 AllocationValueRow(
-                    title: "Beneficio neto",
+                    title: "Reserva fiscal",
+                    icon: "building.columns.fill",
+                    color: AppTheme.red,
+                    percent: percent(summary.taxReserve),
+                    amount: summary.taxReserve,
+                    currency: summary.currency,
+                    subtitle: "\(Int((summary.taxReserveRate * 100).rounded()))% para mantener caja sana"
+                )
+                AllocationValueRow(
+                    title: "Caja libre",
                     icon: "eurosign.circle.fill",
-                    color: summary.netMargin >= 0 ? AppTheme.green : AppTheme.red,
-                    percent: percent(summary.netMargin),
-                    amount: summary.netMargin,
+                    color: summary.cashFree >= 0 ? AppTheme.green : AppTheme.red,
+                    percent: percent(summary.cashFree),
+                    amount: summary.cashFree,
                     currency: summary.currency
                 )
             }
@@ -5869,7 +5961,7 @@ struct AllocationPlanCard: View {
                     .foregroundStyle(AppTheme.ink)
             }
         }
-        .glassPanel(padding: 16, accent: summary.netMargin >= 0 ? AppTheme.green : AppTheme.red)
+        .glassPanel(padding: 16, accent: summary.cashFree >= 0 ? AppTheme.green : AppTheme.red)
     }
 }
 
@@ -5967,6 +6059,7 @@ struct EconomicsSummaryCard: View {
             CostRow(label: "Merma estimada (2%)", value: summary.wasteCost, currency: summary.currency)
             CostRow(label: "Coste envíos", value: summary.shippingCost, currency: summary.currency)
             CostRow(label: "Comisión Shopify (2.4%)", value: summary.shopifyFee, currency: summary.currency)
+            CostRow(label: "Reserva fiscal", value: summary.taxReserve, currency: summary.currency)
             if let pct = summary.netMarginPct {
                 HStack {
                     Text("Margen %")

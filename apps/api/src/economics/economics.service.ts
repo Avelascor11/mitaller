@@ -42,6 +42,8 @@ interface OrderBreakdown {
   productCost: number;
   wasteCost: number;
   shippingCost: number;
+  taxReserve: number;
+  cashFree: number;
   netMargin: number;
   netMarginPct: number | null;
   items: OrderItemBreakdown[];
@@ -215,6 +217,8 @@ export class EconomicsService {
         acc.productCost += breakdown.productCost;
         acc.wasteCost += breakdown.wasteCost;
         acc.shippingCost += breakdown.shippingCost;
+        acc.taxReserve += breakdown.taxReserve;
+        acc.cashFree += breakdown.cashFree;
         acc.netMargin += breakdown.netMargin;
         acc.orderCount += 1;
         return acc;
@@ -228,12 +232,19 @@ export class EconomicsService {
         productCost: 0,
         wasteCost: 0,
         shippingCost: 0,
+        taxReserve: 0,
+        cashFree: 0,
         netMargin: 0,
         orderCount: 0
       }
     );
 
     const shippingReserve = breakdowns.reduce((sum, breakdown) => sum + breakdown.shippingCost, 0);
+    const replacementReserve = totals.productCost + totals.wasteCost;
+    const cashOut = totals.shippingCost + replacementReserve + totals.shopifyFee + totals.taxReserve;
+    const cashFree = totals.grossRevenue - cashOut;
+    const cashFreePct = totals.grossRevenue > 0 ? (cashFree / totals.grossRevenue) * 100 : null;
+    const cashStatus = this.cashStatus(cashFree, totals.grossRevenue);
 
     return {
       from: start.toISOString(),
@@ -242,6 +253,12 @@ export class EconomicsService {
       ...totals,
       netMarginPct: totals.grossRevenue > 0 ? (totals.netMargin / totals.grossRevenue) * 100 : null,
       shippingReserve,
+      replacementReserve,
+      taxReserveRate: this.taxReserveRate(),
+      cashOut,
+      cashFree,
+      cashFreePct,
+      cashStatus,
       orders: breakdowns
     };
   }
@@ -281,6 +298,8 @@ export class EconomicsService {
     const shipmentCostKnown = Boolean(shipmentWithCost);
     const shippingCost = shipmentCostKnown ? shipmentWithCost.cost : this.estimatedShippingCost(order);
     const shopifyFee = grossRevenue * SHOPIFY_FEE_RATE;
+    const taxReserve = grossRevenue * this.taxReserveRate();
+    const cashFree = grossRevenue - productCost - wasteCost - shippingCost - shopifyFee - taxReserve;
     const netMargin = grossRevenue - productCost - wasteCost - shippingCost - shopifyFee;
     const hasItemPrices = items.some((item) => item.unitPrice > 0);
 
@@ -298,6 +317,8 @@ export class EconomicsService {
       productCost,
       wasteCost,
       shippingCost,
+      taxReserve,
+      cashFree,
       netMargin,
       netMarginPct: grossRevenue > 0 ? (netMargin / grossRevenue) * 100 : null,
       items,
@@ -343,6 +364,21 @@ export class EconomicsService {
     if (!raw) return 0.02;
     const parsed = Number(raw.replace(',', '.'));
     return Number.isFinite(parsed) && parsed >= 0 ? parsed : 0.02;
+  }
+
+  private taxReserveRate(): number {
+    const raw = this.config.get<string>('ECONOMICS_TAX_RESERVE_RATE');
+    if (!raw) return 0.15;
+    const parsed = Number(raw.replace(',', '.'));
+    return Number.isFinite(parsed) && parsed >= 0 ? parsed : 0.15;
+  }
+
+  private cashStatus(cashFree: number, grossRevenue: number): 'HEALTHY' | 'WATCH' | 'HOLD' {
+    if (grossRevenue <= 0 || cashFree <= 0) return 'HOLD';
+    const pct = cashFree / grossRevenue;
+    if (pct < 0.12) return 'HOLD';
+    if (pct < 0.22) return 'WATCH';
+    return 'HEALTHY';
   }
 
   private orderKeysFromTransactions(transactions: ShopifyBalanceTransaction[]) {

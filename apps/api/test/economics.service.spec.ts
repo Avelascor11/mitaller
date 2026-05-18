@@ -11,6 +11,8 @@ function service(config: Record<string, string> = {}) {
       shipmentCostKnown: boolean;
       productCost: number;
       wasteCost: number;
+      taxReserve: number;
+      cashFree: number;
       netMargin: number;
     };
   };
@@ -51,6 +53,8 @@ describe('EconomicsService', () => {
     expect(breakdown.shipmentCostKnown).toBe(false);
     expect(breakdown.productCost).toBe(3.29);
     expect(breakdown.wasteCost).toBeCloseTo(0.0658);
+    expect(breakdown.taxReserve).toBe(8.25);
+    expect(breakdown.cashFree).toBeCloseTo(38.2642);
   });
 
   it('usa el coste real de Sendcloud si la etiqueta lo trae', () => {
@@ -124,5 +128,26 @@ describe('EconomicsService', () => {
     });
 
     expect(breakdown.wasteCost).toBeCloseTo(0.1645);
+  });
+
+  it('permite ajustar la reserva fiscal por variable de entorno', () => {
+    const breakdown = service({ ECONOMICS_TAX_RESERVE_RATE: '0,21' }).computeOrderBreakdown({
+      id: 'order-1',
+      orderNumber: '#9493',
+      customerName: 'Cliente',
+      orderedAt: new Date('2026-05-06T10:00:00Z'),
+      currency: 'EUR',
+      shippingMethod: 'Correos Estandar',
+      shippingCountry: 'ES',
+      subtotalPrice: 100,
+      totalShipping: 0,
+      totalDiscount: 0,
+      totalPrice: 100,
+      shipments: [],
+      items: []
+    });
+
+    expect(breakdown.taxReserve).toBe(21);
+    expect(breakdown.cashFree).toBeCloseTo(72.79);
   });
 });
