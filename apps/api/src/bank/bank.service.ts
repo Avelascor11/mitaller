@@ -73,7 +73,7 @@ export class BankService {
 
     for (const providerAccountId of accounts) {
       const details = await this.gocardless.accountDetails(providerAccountId);
-      const account = details.account ?? details;
+      const account: any = details.account ?? details;
       await this.prisma.bankAccount.upsert({
         where: { providerAccountId },
         create: {

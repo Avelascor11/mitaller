@@ -205,7 +205,7 @@ export class TinkBankAdapter {
     });
     const text = await res.text();
     if (!res.ok) throw new Error(`Tink ${res.status}: ${text}`);
-    return text ? JSON.parse(text) : {};
+    return text ? JSON.parse(text) : ({} as T);
   }
 
   private baseUrl() {
