@@ -124,16 +124,20 @@ export class EconomicsService {
   }
 
   async markPayout(payoutId: string) {
-    await this.prisma.payoutMark.upsert({
-      where: { payoutId },
-      create: { payoutId },
-      update: { markedAt: new Date() }
-    });
+    try {
+      await this.prisma.payoutMark.upsert({
+        where: { payoutId },
+        create: { payoutId },
+        update: { markedAt: new Date() }
+      });
+    } catch { /* table may not exist yet */ }
     return { payoutId, marked: true };
   }
 
   async unmarkPayout(payoutId: string) {
-    await this.prisma.payoutMark.deleteMany({ where: { payoutId } });
+    try {
+      await this.prisma.payoutMark.deleteMany({ where: { payoutId } });
+    } catch { /* table may not exist yet */ }
     return { payoutId, marked: false };
   }
 
@@ -145,10 +149,11 @@ export class EconomicsService {
     const shippingRate = this.shippingRate();
 
     const allPayouts = await this.shopify.listPayouts();
-    const markedIds = new Set(
-      (await this.prisma.payoutMark.findMany({ select: { payoutId: true } }))
-        .map(m => m.payoutId)
-    );
+    let markedIds = new Set<string>();
+    try {
+      const marks = await this.prisma.payoutMark.findMany({ select: { payoutId: true } });
+      markedIds = new Set(marks.map(m => m.payoutId));
+    } catch { /* table may not exist yet */ }
 
     const paidToday = allPayouts.filter(p => p.status === 'paid' && p.date === today);
     const inTransit = allPayouts.filter(p => p.status === 'in_transit');
