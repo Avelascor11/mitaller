@@ -312,7 +312,13 @@ export class ShipmentsService {
     const shipments = await this.prisma.shipment.findMany({
       where: { status: { in: ['IN_TRANSIT', 'DELIVERED'] } },
       include: {
-        order: { select: { id: true, orderNumber: true, customerName: true, shippingMethod: true, packagePhoto: true, packagePhotoAt: true } }
+        order: {
+          select: {
+            id: true, orderNumber: true, customerName: true, shippingMethod: true,
+            packagePhoto: true, packagePhotoAt: true,
+            items: { select: { id: true, sku: true, title: true, variantTitle: true, quantity: true, color: true, size: true, unitPrice: true, imageUrl: true } }
+          }
+        }
       },
       orderBy: { updatedAt: 'desc' },
       take: 200
@@ -333,7 +339,8 @@ export class ShipmentsService {
       packagePhotoAt: shipment.packagePhotoAt ?? shipment.order.packagePhotoAt ?? null,
       cost: shipment.cost,
       createdAt: shipment.createdAt,
-      updatedAt: shipment.updatedAt
+      updatedAt: shipment.updatedAt,
+      items: shipment.order.items
     }));
   }
 
