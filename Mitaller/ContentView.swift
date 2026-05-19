@@ -1979,6 +1979,13 @@ struct PickingView: View {
                     }
                 }
                 ToolbarItem(placement: .topBarTrailing) {
+                    NavigationLink {
+                        FulfillableOrdersView()
+                    } label: {
+                        Image(systemName: "checklist")
+                    }
+                }
+                ToolbarItem(placement: .topBarTrailing) {
                     Button { rafagaActive = true } label: {
                         Image(systemName: "barcode.viewfinder")
                     }
@@ -3930,11 +3937,6 @@ struct PurchaseMatrixView: View {
             .screenBackground()
             .navigationTitle("Compras")
             .toolbar {
-                NavigationLink {
-                    FulfillableOrdersView()
-                } label: {
-                    Image(systemName: "checklist")
-                }
                 Button {
                     Task { await store.syncFromAPI() }
                 } label: {
