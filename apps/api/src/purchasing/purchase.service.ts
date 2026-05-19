@@ -484,6 +484,100 @@ export class PurchaseService {
     };
   }
 
+  async getFulfillableOrders() {
+    const pendingStatuses: OperationalStatus[] = [
+      OperationalStatus.NEW,
+      OperationalStatus.WAITING_STOCK,
+      OperationalStatus.WAITING_PRODUCTION,
+      OperationalStatus.IN_PRODUCTION,
+      OperationalStatus.PRODUCED,
+      OperationalStatus.WAITING_PICKING,
+      OperationalStatus.PICKED,
+      OperationalStatus.BLOCKED
+    ];
+
+    const [stockItems, productMappings, orders] = await Promise.all([
+      this.prisma.stockItem.findMany({ where: { type: 'BLANK_GARMENT' }, include: { levels: true } }),
+      this.prisma.productSubproductMapping.findMany(),
+      this.prisma.order.findMany({
+        where: { operationalStatus: { in: pendingStatuses } },
+        include: { items: { where: { status: { not: 'CANCELLED' } } } },
+        orderBy: { orderedAt: 'asc' }
+      })
+    ]);
+
+    const mappingIndex = this.buildMappingIndex(productMappings);
+    const stockIndex = new Map<string, { id: string; available: number; name: string }>();
+    for (const item of stockItems) {
+      const kind = this.inferGarmentKind(`${item.name} ${item.sku} ${item.supplierSku ?? ''}`);
+      const color = this.normalizeColor(item.color ?? item.name);
+      const size = this.normalizeSize(item.size ?? item.name);
+      if (!kind || !color || !size) continue;
+      const key = this.matrixKey(kind, color, size);
+      stockIndex.set(key, {
+        id: item.id,
+        available: item.levels.reduce((sum, l) => sum + l.quantity, 0),
+        name: item.name
+      });
+    }
+
+    const result = orders.map((order) => {
+      const lines: Array<{
+        key: string; subproductName: string; color: string; size: string;
+        required: number; available: number; canFulfill: boolean;
+      }> = [];
+      const unmapped: string[] = [];
+
+      const demand = new Map<string, { subproductName: string; color: string; size: string; required: number }>();
+      for (const item of order.items) {
+        const mapped = this.mapOrderItemToBlankGarment(item, mappingIndex);
+        if (!mapped) { unmapped.push(item.title); continue; }
+        const key = this.matrixKey(mapped.kind, mapped.color, mapped.size);
+        const cur = demand.get(key) ?? { subproductName: mapped.subproductName, color: mapped.color, size: mapped.size, required: 0 };
+        cur.required += item.quantity;
+        demand.set(key, cur);
+      }
+
+      let fulfillableCount = 0;
+      let totalCount = 0;
+      for (const [key, d] of demand) {
+        const stock = stockIndex.get(key);
+        const available = stock?.available ?? 0;
+        const canFulfill = available >= d.required;
+        if (canFulfill) fulfillableCount += d.required;
+        totalCount += d.required;
+        lines.push({ key, subproductName: d.subproductName, color: d.color, size: d.size, required: d.required, available, canFulfill });
+      }
+
+      const fulfillability = totalCount === 0 ? 'NONE'
+        : fulfillableCount === totalCount ? 'FULL'
+        : fulfillableCount > 0 ? 'PARTIAL'
+        : 'NONE';
+
+      return {
+        orderId: order.id,
+        orderNumber: order.orderNumber,
+        customer: order.customerName,
+        operationalStatus: order.operationalStatus,
+        orderedAt: order.orderedAt,
+        fulfillability,
+        fulfillableItems: fulfillableCount,
+        totalItems: totalCount,
+        lines,
+        unmapped
+      };
+    });
+
+    return {
+      orders: result,
+      summary: {
+        full: result.filter((o) => o.fulfillability === 'FULL').length,
+        partial: result.filter((o) => o.fulfillability === 'PARTIAL').length,
+        none: result.filter((o) => o.fulfillability === 'NONE').length
+      }
+    };
+  }
+
   @Cron('0 6 * * *')
   async generateDailyPurchaseNeeds() {
     const start = new Date();

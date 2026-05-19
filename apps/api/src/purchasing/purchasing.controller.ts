@@ -30,6 +30,11 @@ export class PurchasingController {
     return this.purchase.receivePurchaseLines(body.lines ?? []);
   }
 
+  @Get('fulfillable')
+  fulfillable() {
+    return this.purchase.getFulfillableOrders();
+  }
+
   @Get('order/:orderId/picking-list')
   orderPickingList(@Param('orderId') orderId: string) {
     return this.purchase.getOrderPickingList(orderId);
