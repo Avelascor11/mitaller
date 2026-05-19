@@ -5422,40 +5422,37 @@ struct GlassPanelModifier: ViewModifier {
 
 struct ScreenBackgroundModifier: ViewModifier {
     func body(content: Content) -> some View {
-        ZStack {
-            AppTheme.canvasTop.ignoresSafeArea()
+        content
+            .background {
+                ZStack {
+                    AppTheme.canvasTop
 
-            // Vibrant aurora blobs — glass refracts these for the liquid effect
-            Ellipse()
-                .fill(AppTheme.blue.opacity(0.55))
-                .frame(width: 420, height: 320)
-                .blur(radius: 90)
-                .offset(x: 140, y: -320)
+                    Ellipse()
+                        .fill(AppTheme.blue.opacity(0.55))
+                        .frame(width: 420, height: 320)
+                        .blur(radius: 90)
+                        .offset(x: 140, y: -320)
+
+                    Ellipse()
+                        .fill(AppTheme.teal.opacity(0.40))
+                        .frame(width: 340, height: 280)
+                        .blur(radius: 80)
+                        .offset(x: -130, y: 260)
+
+                    Ellipse()
+                        .fill(AppTheme.purple.opacity(0.35))
+                        .frame(width: 300, height: 260)
+                        .blur(radius: 75)
+                        .offset(x: 100, y: 80)
+
+                    Ellipse()
+                        .fill(AppTheme.magenta.opacity(0.20))
+                        .frame(width: 240, height: 200)
+                        .blur(radius: 65)
+                        .offset(x: -60, y: -120)
+                }
                 .ignoresSafeArea()
-
-            Ellipse()
-                .fill(AppTheme.teal.opacity(0.40))
-                .frame(width: 340, height: 280)
-                .blur(radius: 80)
-                .offset(x: -130, y: 260)
-                .ignoresSafeArea()
-
-            Ellipse()
-                .fill(AppTheme.purple.opacity(0.35))
-                .frame(width: 300, height: 260)
-                .blur(radius: 75)
-                .offset(x: 100, y: 80)
-                .ignoresSafeArea()
-
-            Ellipse()
-                .fill(AppTheme.magenta.opacity(0.20))
-                .frame(width: 240, height: 200)
-                .blur(radius: 65)
-                .offset(x: -60, y: -120)
-                .ignoresSafeArea()
-
-            content
-        }
+            }
     }
 }
 
