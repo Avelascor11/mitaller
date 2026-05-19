@@ -3718,7 +3718,15 @@ struct FulfillableOrdersView: View {
                 } else {
                     LazyVStack(spacing: 10) {
                         ForEach(filtered) { order in
-                            FulfillableOrderRow(order: order)
+                            let workshopOrder = store.orders.first { $0.number == order.orderNumber || $0.remoteID == order.orderId }
+                            if let wo = workshopOrder {
+                                NavigationLink(value: wo) {
+                                    FulfillableOrderRow(order: order)
+                                }
+                                .buttonStyle(.plain)
+                            } else {
+                                FulfillableOrderRow(order: order)
+                            }
                         }
                     }
                 }
@@ -3733,6 +3741,9 @@ struct FulfillableOrdersView: View {
         }
         .screenBackground()
         .navigationTitle("Stock disponible")
+        .navigationDestination(for: WorkshopOrder.self) { order in
+            OrderPreparationDetailView(order: order)
+        }
         .toolbar {
             Button { Task { await load() } } label: {
                 Image(systemName: "arrow.clockwise")
@@ -3788,7 +3799,6 @@ struct FilterChip: View {
 
 struct FulfillableOrderRow: View {
     let order: FulfillableOrder
-    @State private var expanded = false
 
     private var badgeColor: Color {
         switch order.fulfillability {
@@ -3807,35 +3817,32 @@ struct FulfillableOrderRow: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            Button { withAnimation(.spring(duration: 0.3)) { expanded.toggle() } } label: {
-                HStack(spacing: 10) {
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text(order.orderNumber)
-                            .font(.headline.weight(.heavy))
-                            .foregroundStyle(AppTheme.ink)
-                        Text(order.customer)
-                            .font(.caption).foregroundStyle(AppTheme.muted).lineLimit(1)
-                    }
-                    Spacer()
-                    VStack(alignment: .trailing, spacing: 3) {
-                        Text(badgeLabel)
-                            .font(.caption2.weight(.black))
-                            .padding(.horizontal, 8).padding(.vertical, 3)
-                            .background(badgeColor.opacity(0.18))
-                            .foregroundStyle(badgeColor)
-                            .overlay(RoundedRectangle(cornerRadius: 6).stroke(badgeColor.opacity(0.3)))
-                            .clipShape(RoundedRectangle(cornerRadius: 6))
-                        Text("\(order.fulfillableItems)/\(order.totalItems) uds")
-                            .font(.caption2).foregroundStyle(AppTheme.muted)
-                    }
-                    Image(systemName: expanded ? "chevron.up" : "chevron.down")
+            HStack(spacing: 10) {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(order.orderNumber)
+                        .font(.headline.weight(.heavy))
+                        .foregroundStyle(AppTheme.ink)
+                    Text(order.customer)
+                        .font(.caption).foregroundStyle(AppTheme.muted).lineLimit(1)
+                }
+                Spacer()
+                VStack(alignment: .trailing, spacing: 3) {
+                    Text(badgeLabel)
+                        .font(.caption2.weight(.black))
+                        .padding(.horizontal, 8).padding(.vertical, 3)
+                        .background(badgeColor.opacity(0.18))
+                        .foregroundStyle(badgeColor)
+                        .overlay(RoundedRectangle(cornerRadius: 6).stroke(badgeColor.opacity(0.3)))
+                        .clipShape(RoundedRectangle(cornerRadius: 6))
+                    Text("\(order.fulfillableItems)/\(order.totalItems) uds")
                         .font(.caption2).foregroundStyle(AppTheme.muted)
                 }
-                .padding(12)
+                Image(systemName: "chevron.right")
+                    .font(.caption2).foregroundStyle(AppTheme.muted)
             }
-            .buttonStyle(.plain)
+            .padding(12)
 
-            if expanded {
+            if !order.lines.isEmpty {
                 Divider().background(AppTheme.line).padding(.horizontal, 12)
                 VStack(spacing: 6) {
                     ForEach(order.lines, id: \.key) { line in
@@ -3864,7 +3871,7 @@ struct FulfillableOrderRow: View {
                 .padding(.horizontal, 14).padding(.vertical, 10)
             }
         }
-        .glassPanel(padding: 0, accent: badgeColor.opacity(expanded ? 0.3 : 0.15))
+        .glassPanel(padding: 0, accent: badgeColor.opacity(0.2))
     }
 }
 
