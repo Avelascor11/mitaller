@@ -1218,8 +1218,6 @@ struct MainTabView: View {
                 .tabItem { Label("Admin", systemImage: "chart.bar.xaxis") }
         }
         .tint(AppTheme.blue)
-        .toolbarBackground(.glass, for: .tabBar)
-        .toolbarBackground(.glass, for: .navigationBar)
     }
 }
 
