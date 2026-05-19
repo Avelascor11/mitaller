@@ -1,4 +1,4 @@
-import { Controller, Get, NotFoundException, Param, Query } from '@nestjs/common';
+import { Controller, Delete, Get, NotFoundException, Param, Post, Query } from '@nestjs/common';
 import { EconomicsService } from './economics.service';
 
 @Controller('economics')
@@ -30,6 +30,16 @@ export class EconomicsController {
   @Get('cashflow')
   cashflow() {
     return this.economics.cashflow();
+  }
+
+  @Post('cashflow/:payoutId/mark')
+  markPayout(@Param('payoutId') payoutId: string) {
+    return this.economics.markPayout(payoutId);
+  }
+
+  @Delete('cashflow/:payoutId/mark')
+  unmarkPayout(@Param('payoutId') payoutId: string) {
+    return this.economics.unmarkPayout(payoutId);
   }
 
   @Get('payouts')

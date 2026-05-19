@@ -245,6 +245,15 @@ struct APIClient {
 
     func bankAllocation() async throws -> AllocationPlan { try await get("/bank/allocation") }
     func cashflow() async throws -> CashflowSummary { try await get("/economics/cashflow") }
+    func markPayout(_ id: String) async throws {
+        let request = try jsonRequest(path: "/economics/cashflow/\(Self.pathSegment(id))/mark", method: "POST", body: EmptyBody())
+        let _: EmptyResponse = try await perform(request)
+    }
+    func unmarkPayout(_ id: String) async throws {
+        var request = try self.request(path: "/economics/cashflow/\(Self.pathSegment(id))/mark", method: "DELETE")
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        let _: EmptyResponse = try await perform(request)
+    }
 
     func bankDaily(from: Date, to: Date) async throws -> BankDailySummary {
         let formatter = DateFormatter.apiDay
@@ -610,6 +619,7 @@ struct CashflowPayout: Decodable, Identifiable {
     let date: String
     let amount: Double
     let currency: String
+    let marked: Bool
     let shopifyFee: Double
     let refunds: Double
     let orders: [CashflowOrder]

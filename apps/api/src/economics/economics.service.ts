@@ -123,6 +123,20 @@ export class EconomicsService {
     return this.computeOrderBreakdown(order);
   }
 
+  async markPayout(payoutId: string) {
+    await this.prisma.payoutMark.upsert({
+      where: { payoutId },
+      create: { payoutId },
+      update: { markedAt: new Date() }
+    });
+    return { payoutId, marked: true };
+  }
+
+  async unmarkPayout(payoutId: string) {
+    await this.prisma.payoutMark.deleteMany({ where: { payoutId } });
+    return { payoutId, marked: false };
+  }
+
   async cashflow() {
     const today = new Date().toISOString().slice(0, 10);
     const shopifyFeeRate = 0.024;
@@ -131,6 +145,10 @@ export class EconomicsService {
     const shippingRate = this.shippingRate();
 
     const allPayouts = await this.shopify.listPayouts();
+    const markedIds = new Set(
+      (await this.prisma.payoutMark.findMany({ select: { payoutId: true } }))
+        .map(m => m.payoutId)
+    );
 
     const paidToday = allPayouts.filter(p => p.status === 'paid' && p.date === today);
     const inTransit = allPayouts.filter(p => p.status === 'in_transit');
@@ -191,6 +209,7 @@ export class EconomicsService {
         date: payout.date,
         amount,
         currency: payout.currency,
+        marked: markedIds.has(String(payout.id)),
         shopifyFee: +(-(gross * shopifyFeeRate)).toFixed(2),
         refunds: +refunds.reduce((s, t) => s + this.money(t.amount), 0).toFixed(2),
         orders,

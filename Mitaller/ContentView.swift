@@ -5841,7 +5841,7 @@ struct CashflowView: View {
                     if loading {
                         ProgressView().frame(maxWidth: .infinity).padding(.top, 40)
                     } else if let summary {
-                        CashflowTodayCard(summary: summary)
+                        CashflowTodayCard(summary: summary, onToggleMark: { payout in await toggleMark(payout) })
                         if !summary.pending.payouts.isEmpty || !summary.scheduled.payouts.isEmpty {
                             CashflowPendingCard(pending: summary.pending, scheduled: summary.scheduled, currency: summary.currency)
                         }
@@ -5865,10 +5865,20 @@ struct CashflowView: View {
         do { summary = try await client.cashflow() }
         catch { self.error = error.localizedDescription }
     }
+
+    private func toggleMark(_ payout: CashflowPayout) async {
+        guard let client = store.apiClient else { return }
+        do {
+            if payout.marked { try await client.unmarkPayout(payout.id) }
+            else { try await client.markPayout(payout.id) }
+            summary = try await client.cashflow()
+        } catch { self.error = error.localizedDescription }
+    }
 }
 
 struct CashflowTodayCard: View {
     let summary: CashflowSummary
+    let onToggleMark: (CashflowPayout) async -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -5894,7 +5904,7 @@ struct CashflowTodayCard: View {
             } else {
                 Divider().background(AppTheme.line)
                 ForEach(summary.payouts) { payout in
-                    CashflowPayoutDetail(payout: payout, currency: summary.currency)
+                    CashflowPayoutDetail(payout: payout, currency: summary.currency, onToggleMark: onToggleMark)
                 }
             }
 
@@ -5921,9 +5931,25 @@ struct CashflowTodayCard: View {
 struct CashflowPayoutDetail: View {
     let payout: CashflowPayout
     let currency: String
+    let onToggleMark: (CashflowPayout) async -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
+            Button {
+                Task { await onToggleMark(payout) }
+            } label: {
+                HStack(spacing: 8) {
+                    Image(systemName: payout.marked ? "checkmark.circle.fill" : "circle")
+                        .font(.title3)
+                        .foregroundStyle(payout.marked ? AppTheme.green : AppTheme.muted)
+                    Text(payout.marked ? "Dinero separado" : "Marcar como separado")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(payout.marked ? AppTheme.green : AppTheme.muted)
+                    Spacer()
+                }
+            }
+            .buttonStyle(.plain)
+
             // Group by sale date
             ForEach(payout.salesDays) { day in
                 VStack(alignment: .leading, spacing: 6) {

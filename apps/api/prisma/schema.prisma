@@ -466,6 +466,12 @@ model BankTransaction {
   @@index([category])
 }
 
+model PayoutMark {
+  id        String   @id @default(cuid())
+  payoutId  String   @unique
+  markedAt  DateTime @default(now())
+}
+
 model ShippingRule {
   id                            String   @id @default(cuid())
   name                          String
