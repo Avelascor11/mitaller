@@ -3662,6 +3662,205 @@ func renderPDFPageForOCR(_ page: PDFPage) -> Data? {
     return image.jpegData(compressionQuality: 0.92)
 }
 
+struct FulfillableOrdersView: View {
+    @Environment(WorkshopStore.self) private var store
+    @State private var response: FulfillableOrdersResponse?
+    @State private var loading = false
+    @State private var error: String?
+    @State private var filter: Fulfillability? = nil
+
+    private var filtered: [FulfillableOrder] {
+        guard let orders = response?.orders else { return [] }
+        guard let f = filter else { return orders }
+        return orders.filter { $0.fulfillability == f }
+    }
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 16) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("¿Qué puedo hacer?")
+                        .font(.system(size: 34, weight: .black))
+                        .foregroundStyle(AppTheme.ink)
+                    Text("Pedidos que el stock actual puede cubrir.")
+                        .font(.subheadline.weight(.medium))
+                        .foregroundStyle(AppTheme.muted)
+                }
+
+                if let summary = response?.summary {
+                    HStack(spacing: 10) {
+                        FulfillChip(label: "Completos", count: summary.full, color: AppTheme.green)
+                        FulfillChip(label: "Parciales", count: summary.partial, color: AppTheme.amber)
+                        FulfillChip(label: "Sin stock", count: summary.none, color: AppTheme.red)
+                    }
+                    .glassPanel(padding: 12)
+                }
+
+                HStack(spacing: 8) {
+                    FilterChip(label: "Todos", active: filter == nil) { filter = nil }
+                    FilterChip(label: "Completos", active: filter == .full) { filter = filter == .full ? nil : .full }
+                    FilterChip(label: "Parciales", active: filter == .partial) { filter = filter == .partial ? nil : .partial }
+                    FilterChip(label: "Sin stock", active: filter == .none) { filter = filter == .none ? nil : .none }
+                }
+
+                if loading && response == nil {
+                    ProgressView().frame(maxWidth: .infinity).padding(40)
+                } else if filtered.isEmpty {
+                    ContentUnavailableView("Sin resultados", systemImage: "tray", description: Text("No hay pedidos con ese filtro."))
+                        .glassPanel()
+                } else {
+                    LazyVStack(spacing: 10) {
+                        ForEach(filtered) { order in
+                            FulfillableOrderRow(order: order)
+                        }
+                    }
+                }
+
+                if let error {
+                    Label(error, systemImage: "exclamationmark.triangle.fill")
+                        .font(.caption).foregroundStyle(AppTheme.red)
+                        .padding(10).glassPanel(padding: 10, accent: AppTheme.red)
+                }
+            }
+            .padding()
+        }
+        .screenBackground()
+        .navigationTitle("Stock disponible")
+        .toolbar {
+            Button { Task { await load() } } label: {
+                Image(systemName: "arrow.clockwise")
+            }.disabled(loading)
+        }
+        .task { await load() }
+        .refreshable { await load() }
+    }
+
+    private func load() async {
+        guard let client = store.apiClient else { return }
+        loading = true; defer { loading = false }
+        error = nil
+        do { response = try await client.fulfillableOrders() }
+        catch let err { error = err.localizedDescription }
+    }
+}
+
+struct FulfillChip: View {
+    let label: String
+    let count: Int
+    let color: Color
+    var body: some View {
+        VStack(spacing: 2) {
+            Text("\(count)")
+                .font(.system(size: 22, weight: .black))
+                .foregroundStyle(color)
+            Text(label)
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(AppTheme.muted)
+        }
+        .frame(maxWidth: .infinity)
+    }
+}
+
+struct FilterChip: View {
+    let label: String
+    let active: Bool
+    let action: () -> Void
+    var body: some View {
+        Button(action: action) {
+            Text(label)
+                .font(.caption.weight(.bold))
+                .padding(.horizontal, 12).padding(.vertical, 6)
+                .background(active ? AppTheme.teal.opacity(0.18) : AppTheme.surfaceSoft)
+                .foregroundStyle(active ? AppTheme.teal : AppTheme.muted)
+                .overlay(RoundedRectangle(cornerRadius: 20).stroke(active ? AppTheme.teal.opacity(0.4) : AppTheme.line))
+                .clipShape(RoundedRectangle(cornerRadius: 20))
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+struct FulfillableOrderRow: View {
+    let order: FulfillableOrder
+    @State private var expanded = false
+
+    private var badgeColor: Color {
+        switch order.fulfillability {
+        case .full: AppTheme.green
+        case .partial: AppTheme.amber
+        case .none: AppTheme.red
+        }
+    }
+    private var badgeLabel: String {
+        switch order.fulfillability {
+        case .full: "COMPLETO"
+        case .partial: "PARCIAL"
+        case .none: "SIN STOCK"
+        }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Button { withAnimation(.spring(duration: 0.3)) { expanded.toggle() } } label: {
+                HStack(spacing: 10) {
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(order.orderNumber)
+                            .font(.headline.weight(.heavy))
+                            .foregroundStyle(AppTheme.ink)
+                        Text(order.customer)
+                            .font(.caption).foregroundStyle(AppTheme.muted).lineLimit(1)
+                    }
+                    Spacer()
+                    VStack(alignment: .trailing, spacing: 3) {
+                        Text(badgeLabel)
+                            .font(.caption2.weight(.black))
+                            .padding(.horizontal, 8).padding(.vertical, 3)
+                            .background(badgeColor.opacity(0.18))
+                            .foregroundStyle(badgeColor)
+                            .overlay(RoundedRectangle(cornerRadius: 6).stroke(badgeColor.opacity(0.3)))
+                            .clipShape(RoundedRectangle(cornerRadius: 6))
+                        Text("\(order.fulfillableItems)/\(order.totalItems) uds")
+                            .font(.caption2).foregroundStyle(AppTheme.muted)
+                    }
+                    Image(systemName: expanded ? "chevron.up" : "chevron.down")
+                        .font(.caption2).foregroundStyle(AppTheme.muted)
+                }
+                .padding(12)
+            }
+            .buttonStyle(.plain)
+
+            if expanded {
+                Divider().background(AppTheme.line).padding(.horizontal, 12)
+                VStack(spacing: 6) {
+                    ForEach(order.lines, id: \.key) { line in
+                        HStack(spacing: 8) {
+                            Circle()
+                                .fill(line.canFulfill ? AppTheme.green : AppTheme.red)
+                                .frame(width: 7, height: 7)
+                            Text(line.subproductName)
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(AppTheme.ink)
+                                .lineLimit(1)
+                            Text(line.size)
+                                .font(.caption2.weight(.bold))
+                                .foregroundStyle(AppTheme.teal)
+                            Spacer()
+                            Text("Necesita \(line.required)")
+                                .font(.caption2).foregroundStyle(AppTheme.muted)
+                            Text("·")
+                                .foregroundStyle(AppTheme.line)
+                            Text("Stock \(line.available)")
+                                .font(.caption2.weight(.bold))
+                                .foregroundStyle(line.canFulfill ? AppTheme.green : AppTheme.red)
+                        }
+                    }
+                }
+                .padding(.horizontal, 14).padding(.vertical, 10)
+            }
+        }
+        .glassPanel(padding: 0, accent: badgeColor.opacity(expanded ? 0.3 : 0.15))
+    }
+}
+
 struct PurchaseMatrixView: View {
     @Environment(WorkshopStore.self) private var store
 
@@ -3731,6 +3930,11 @@ struct PurchaseMatrixView: View {
             .screenBackground()
             .navigationTitle("Compras")
             .toolbar {
+                NavigationLink {
+                    FulfillableOrdersView()
+                } label: {
+                    Image(systemName: "checklist")
+                }
                 Button {
                     Task { await store.syncFromAPI() }
                 } label: {

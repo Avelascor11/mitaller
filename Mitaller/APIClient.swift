@@ -171,6 +171,10 @@ struct APIClient {
         try await get("/purchase-needs/order/\(Self.pathSegment(orderId))/picking-list")
     }
 
+    func fulfillableOrders() async throws -> FulfillableOrdersResponse {
+        try await get("/purchase-needs/fulfillable")
+    }
+
     func markRecommendedPurchasesOrdered() async throws -> PurchaseOrderResponse {
         let request = try jsonRequest(path: "/purchase-needs/mark-ordered", method: "POST", body: EmptyBody())
         return try await perform(request)
@@ -652,6 +656,46 @@ struct CashflowAllocation: Decodable {
 struct CashflowPending: Decodable {
     let amount: Double
     let payouts: [CashflowPayout]
+}
+
+struct FulfillableLine: Decodable {
+    let key: String
+    let subproductName: String
+    let color: String
+    let size: String
+    let required: Int
+    let available: Int
+    let canFulfill: Bool
+}
+
+enum Fulfillability: String, Decodable {
+    case full = "FULL"
+    case partial = "PARTIAL"
+    case none = "NONE"
+}
+
+struct FulfillableOrder: Decodable, Identifiable {
+    let orderId: String
+    let orderNumber: String
+    let customer: String
+    let operationalStatus: String
+    let orderedAt: Date
+    let fulfillability: Fulfillability
+    let fulfillableItems: Int
+    let totalItems: Int
+    let lines: [FulfillableLine]
+    var id: String { orderId }
+}
+
+struct FulfillableSummary: Decodable {
+    let full: Int
+    let partial: Int
+    let none: Int
+}
+
+struct FulfillableOrdersResponse: Decodable {
+    let orders: [FulfillableOrder]
+    let summary: FulfillableSummary
 }
 
 struct AllocationPlan: Decodable {
