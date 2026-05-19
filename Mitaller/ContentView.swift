@@ -7267,6 +7267,57 @@ func translateShipmentStatus(_ raw: String) -> String {
     }
 }
 
+struct FinalizedItemRow: View {
+    let item: FinalizedShipmentItem
+
+    var body: some View {
+        HStack(spacing: 10) {
+            if let url = item.imageUrl.flatMap({ URL(string: $0) }) {
+                AsyncImage(url: url) { phase in
+                    switch phase {
+                    case .success(let img): img.resizable().scaledToFill()
+                    default: Color.clear
+                    }
+                }
+                .frame(width: 44, height: 44)
+                .clipShape(RoundedRectangle(cornerRadius: 8))
+            } else {
+                RoundedRectangle(cornerRadius: 8)
+                    .fill(AppTheme.surfaceSoft)
+                    .frame(width: 44, height: 44)
+                    .overlay(Image(systemName: "tshirt.fill").foregroundStyle(AppTheme.mutedSoft).font(.caption))
+            }
+            VStack(alignment: .leading, spacing: 2) {
+                Text(item.title)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(AppTheme.ink)
+                    .lineLimit(1)
+                HStack(spacing: 6) {
+                    if let color = item.color, !color.isEmpty {
+                        Text(color).font(.caption).foregroundStyle(AppTheme.muted)
+                    }
+                    if let size = item.size, !size.isEmpty {
+                        Text(size).font(.caption.weight(.bold)).foregroundStyle(AppTheme.teal)
+                    }
+                    if let variant = item.variantTitle, !variant.isEmpty, variant != item.color, variant != item.size {
+                        Text(variant).font(.caption2).foregroundStyle(AppTheme.muted)
+                    }
+                }
+            }
+            Spacer()
+            VStack(alignment: .trailing, spacing: 2) {
+                Text("×\(item.quantity)")
+                    .font(.headline.weight(.heavy))
+                    .foregroundStyle(AppTheme.ink)
+                if let price = item.unitPrice {
+                    Text(String(format: "%.2f €", price * Double(item.quantity)))
+                        .font(.caption2).foregroundStyle(AppTheme.muted)
+                }
+            }
+        }
+    }
+}
+
 struct FinalizedDetailView: View {
     @Environment(WorkshopStore.self) private var store
     let shipment: FinalizedShipment
@@ -7317,6 +7368,16 @@ struct FinalizedDetailView: View {
                 .buttonStyle(.borderedProminent)
                 .tint(AppTheme.amber)
                 .controlSize(.large)
+
+                if !shipment.items.isEmpty {
+                    SectionHeader(title: "Contenido del pedido", subtitle: "\(shipment.items.reduce(0) { $0 + $1.quantity }) unidades enviadas")
+                    VStack(spacing: 8) {
+                        ForEach(shipment.items) { item in
+                            FinalizedItemRow(item: item)
+                        }
+                    }
+                    .glassPanel(padding: 12)
+                }
 
                 SectionHeader(title: "Seguimiento en tiempo real", subtitle: "Se actualiza cada 30 s automáticamente")
                 trackingPanel

@@ -734,6 +734,18 @@ struct ShopifyPayoutLine: Decodable, Identifiable {
     let shippingCost: Double?
 }
 
+struct FinalizedShipmentItem: Decodable, Identifiable {
+    let id: String
+    let sku: String
+    let title: String
+    let variantTitle: String?
+    let quantity: Int
+    let color: String?
+    let size: String?
+    let unitPrice: Double?
+    let imageUrl: String?
+}
+
 struct FinalizedShipment: Decodable, Identifiable {
     let id: String
     let orderId: String
@@ -751,6 +763,7 @@ struct FinalizedShipment: Decodable, Identifiable {
     let cost: Double?
     let createdAt: Date
     let updatedAt: Date
+    let items: [FinalizedShipmentItem]
 }
 
 struct ShipmentTrackingResponse: Decodable {
