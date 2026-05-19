@@ -1218,6 +1218,8 @@ struct MainTabView: View {
                 .tabItem { Label("Admin", systemImage: "chart.bar.xaxis") }
         }
         .tint(AppTheme.blue)
+        .toolbarBackground(.glass, for: .tabBar)
+        .toolbarBackground(.glass, for: .navigationBar)
     }
 }
 
@@ -5390,41 +5392,70 @@ struct GlassPanelModifier: ViewModifier {
                 Rectangle()
                     .fill(accent)
                     .frame(width: 3)
+                    .clipShape(
+                        UnevenRoundedRectangle(
+                            topLeadingRadius: 16,
+                            bottomLeadingRadius: 16,
+                            bottomTrailingRadius: 0,
+                            topTrailingRadius: 0
+                        )
+                    )
             }
             content
                 .padding(padding)
                 .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .background(RoundedRectangle(cornerRadius: 16, style: .continuous).fill(AppTheme.surface))
+        .glassEffect(in: RoundedRectangle(cornerRadius: 16, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .stroke(AppTheme.line, lineWidth: 1)
+                .stroke(
+                    LinearGradient(
+                        colors: [Color.white.opacity(0.18), Color.white.opacity(0.04)],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    ),
+                    lineWidth: 1
+                )
         )
-        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-        .shadow(color: Color.black.opacity(0.04), radius: 14, x: 0, y: 6)
-        .shadow(color: Color.black.opacity(0.02), radius: 2, x: 0, y: 1)
+        .shadow(color: Color.black.opacity(0.18), radius: 20, x: 0, y: 8)
+        .shadow(color: Color.black.opacity(0.08), radius: 4, x: 0, y: 2)
     }
 }
 
 struct ScreenBackgroundModifier: ViewModifier {
     func body(content: Content) -> some View {
         ZStack {
-            // Base canvas
             AppTheme.canvasTop.ignoresSafeArea()
-            // Subtle indigo wash top-trailing
-            LinearGradient(
-                colors: [AppTheme.blue.opacity(0.08), Color.clear],
-                startPoint: .topTrailing,
-                endPoint: .center
-            )
-            .ignoresSafeArea()
-            // Subtle teal wash bottom-leading
-            LinearGradient(
-                colors: [Color.clear, AppTheme.teal.opacity(0.06)],
-                startPoint: .center,
-                endPoint: .bottomLeading
-            )
-            .ignoresSafeArea()
+
+            // Vibrant aurora blobs — glass refracts these for the liquid effect
+            Ellipse()
+                .fill(AppTheme.blue.opacity(0.55))
+                .frame(width: 420, height: 320)
+                .blur(radius: 90)
+                .offset(x: 140, y: -320)
+                .ignoresSafeArea()
+
+            Ellipse()
+                .fill(AppTheme.teal.opacity(0.40))
+                .frame(width: 340, height: 280)
+                .blur(radius: 80)
+                .offset(x: -130, y: 260)
+                .ignoresSafeArea()
+
+            Ellipse()
+                .fill(AppTheme.purple.opacity(0.35))
+                .frame(width: 300, height: 260)
+                .blur(radius: 75)
+                .offset(x: 100, y: 80)
+                .ignoresSafeArea()
+
+            Ellipse()
+                .fill(AppTheme.magenta.opacity(0.20))
+                .frame(width: 240, height: 200)
+                .blur(radius: 65)
+                .offset(x: -60, y: -120)
+                .ignoresSafeArea()
+
             content
         }
     }
