@@ -34,6 +34,8 @@ export class LabelPrinterService {
       'fit-to-page',
       '-o',
       `media=${this.paperSize}`,
+      '-P',
+      '1',
       labelFile
     ];
 
