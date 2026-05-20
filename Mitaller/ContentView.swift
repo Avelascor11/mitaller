@@ -2246,6 +2246,10 @@ struct BatchSelectionSummary: View {
     let onSelectAll: () -> Void
     let onClear: () -> Void
 
+    @State private var actionFired = false
+
+    private var blocked: Bool { isPrimaryDisabled || count == 0 || isProcessing || actionFired }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack {
@@ -2253,7 +2257,7 @@ struct BatchSelectionSummary: View {
                     .font(.headline.weight(.black))
                     .foregroundStyle(AppTheme.ink)
                 Spacer()
-                if isProcessing {
+                if isProcessing || actionFired {
                     ProgressView()
                 }
             }
@@ -2273,15 +2277,22 @@ struct BatchSelectionSummary: View {
                         .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.bordered)
-                Button(action: onPrimary) {
+                Button {
+                    guard !blocked else { return }
+                    actionFired = true
+                    onPrimary()
+                } label: {
                     Label(primaryTitle, systemImage: primaryIcon)
                         .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.borderedProminent)
-                .disabled(isPrimaryDisabled || count == 0 || isProcessing)
+                .disabled(blocked)
             }
         }
         .glassPanel(accent: AppTheme.blue)
+        .onChange(of: isProcessing) { _, processing in
+            if !processing { actionFired = false }
+        }
     }
 }
 

@@ -109,7 +109,7 @@ async function printFile(file, orderNumber) {
 }
 
 async function printPosix(file) {
-  const args = ['-d', PRINTER_NAME, '-o', 'fit-to-page', '-o', `media=${PAPER_SIZE}`, file];
+  const args = ['-d', PRINTER_NAME, '-o', 'fit-to-page', '-o', `media=${PAPER_SIZE}`, '-P', '1', file];
   const result = await execFileAsync('lp', args);
   return {
     platform: process.platform,
@@ -129,7 +129,7 @@ async function printWindows(file) {
       'o define LABEL_PRINTER_BIN con la ruta a SumatraPDF.exe.'
     );
   }
-  const settings = process.env.LABEL_PRINT_SETTINGS ?? 'noscale';
+  const settings = process.env.LABEL_PRINT_SETTINGS ?? 'noscale,1-1';
   const args = ['-print-to', PRINTER_NAME, '-print-settings', settings, '-silent', '-exit-when-done', file];
   const result = await execFileAsync(bin, args);
   return {
