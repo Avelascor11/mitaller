@@ -23,4 +23,4 @@ COPY --from=build /app/apps/admin-web/package.json ./apps/admin-web/package.json
 COPY --from=build /app/apps/admin-web/.next ./apps/admin-web/.next
 COPY --from=build /app/packages ./packages
 EXPOSE 3000
-CMD ["npm", "run", "start", "--workspace", "@mitaller/admin-web"]
+CMD ["sh", "-c", "npm run start --workspace @mitaller/admin-web -- -p ${PORT:-3000}"]
