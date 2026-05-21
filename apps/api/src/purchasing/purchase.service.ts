@@ -564,7 +564,18 @@ export class PurchaseService {
         fulfillableItems: fulfillableCount,
         totalItems: totalCount,
         lines,
-        unmapped
+        unmapped,
+        items: order.items.map((i) => ({
+          id: i.id,
+          title: i.title,
+          variantTitle: i.variantTitle,
+          sku: i.sku,
+          quantity: i.quantity,
+          color: i.color,
+          size: i.size,
+          unitPrice: i.unitPrice,
+          imageUrl: i.imageUrl
+        }))
       };
     });
 
