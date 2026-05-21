@@ -661,7 +661,15 @@ export class PurchaseService {
     const mappedSubproduct = mappingIndex?.get(`name:${this.normalizeText(item.title)}`) ?? (this.isReliableSku(item.sku) ? mappingIndex?.get(`sku:${item.sku}`) : undefined);
     if (mappedSubproduct) {
       const mapped = this.mapSubproductName(mappedSubproduct);
-      if (mapped) return mapped;
+      if (mapped) {
+        // Mapping defines kind+color; size must come from the actual order item variant
+        const actualSize = this.normalizeSize(`${item.size ?? ''} ${item.variantTitle ?? ''}`) ?? mapped.size;
+        return {
+          ...mapped,
+          size: actualSize,
+          subproductName: `${mapped.kind === 'SUDADERA' ? 'Sudadera' : 'Camiseta'} ${this.colorSingularLabel(mapped.color)} - ${actualSize}`
+        };
+      }
     }
 
     const direct = this.mapDirectProductAttributes(item);
