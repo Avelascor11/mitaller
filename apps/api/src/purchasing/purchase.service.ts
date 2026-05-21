@@ -15,7 +15,7 @@ export class PurchaseService {
     currentInternalStock: number;
     alreadyOrderedQuantity: number;
   }) {
-    return Math.max(0, input.pendingOrderNeed + input.minStockTarget + (input.forecastNeed ?? 0) - input.currentInternalStock - input.alreadyOrderedQuantity);
+    return Math.max(0, input.pendingOrderNeed + input.minStockTarget + (input.forecastNeed ?? 0) - input.currentInternalStock);
   }
 
   getTodayNeeds() {

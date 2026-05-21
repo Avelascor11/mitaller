@@ -2,14 +2,14 @@ import { describe, expect, it } from 'vitest';
 import { PurchaseService } from '../src/purchasing/purchase.service';
 
 describe('PurchaseService', () => {
-  it('calcula compra recomendada con pedidos, stock de seguridad y stock interno', () => {
+  it('calcula compra recomendada ignorando unidades ya pedidas', () => {
     const service = new PurchaseService({} as never, { get: () => undefined } as never);
     expect(service.calculateRecommendedPurchaseQuantity({
       pendingOrderNeed: 6,
       minStockTarget: 5,
       currentInternalStock: 3,
       alreadyOrderedQuantity: 2
-    })).toBe(6);
+    })).toBe(8);
   });
 
   it('no recomienda cantidades negativas', () => {
