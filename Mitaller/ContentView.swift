@@ -3680,6 +3680,123 @@ func renderPDFPageForOCR(_ page: PDFPage) -> Data? {
     return image.jpegData(compressionQuality: 0.92)
 }
 
+extension FulfillableOrder: Hashable {
+    static func == (lhs: FulfillableOrder, rhs: FulfillableOrder) -> Bool { lhs.orderId == rhs.orderId }
+    func hash(into hasher: inout Hasher) { hasher.combine(orderId) }
+}
+
+struct FulfillableOrderDetailView: View {
+    @Environment(WorkshopStore.self) private var store
+    let order: FulfillableOrder
+
+    private var badgeColor: Color {
+        switch order.fulfillability {
+        case .full: AppTheme.green
+        case .partial: AppTheme.amber
+        case .none: AppTheme.red
+        }
+    }
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 16) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(order.orderNumber)
+                        .font(.system(size: 30, weight: .black, design: .rounded))
+                        .foregroundStyle(AppTheme.ink)
+                    Text(order.customer)
+                        .font(.subheadline.weight(.medium))
+                        .foregroundStyle(AppTheme.muted)
+                }
+                .glassPanel(padding: 16)
+
+                SectionHeader(title: "Contenido del pedido", subtitle: "\(order.items.reduce(0) { $0 + $1.quantity }) artículos")
+                VStack(spacing: 8) {
+                    ForEach(order.items) { item in
+                        HStack(spacing: 10) {
+                            if let url = item.imageUrl.flatMap({ URL(string: $0) }) {
+                                AsyncImage(url: url) { phase in
+                                    if case .success(let img) = phase { img.resizable().scaledToFill() }
+                                    else { Color.clear }
+                                }
+                                .frame(width: 52, height: 52)
+                                .clipShape(RoundedRectangle(cornerRadius: 8))
+                            } else {
+                                RoundedRectangle(cornerRadius: 8).fill(AppTheme.surfaceSoft)
+                                    .frame(width: 52, height: 52)
+                                    .overlay(Image(systemName: "tshirt.fill").foregroundStyle(AppTheme.mutedSoft))
+                            }
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text(item.title)
+                                    .font(.subheadline.weight(.semibold))
+                                    .foregroundStyle(AppTheme.ink).lineLimit(2)
+                                HStack(spacing: 6) {
+                                    if let color = item.color, !color.isEmpty {
+                                        Text(color).font(.caption).foregroundStyle(AppTheme.muted)
+                                    }
+                                    if let size = item.size, !size.isEmpty {
+                                        Text(size).font(.caption.weight(.black)).foregroundStyle(AppTheme.teal)
+                                    } else if let variant = item.variantTitle, !variant.isEmpty {
+                                        Text(variant).font(.caption).foregroundStyle(AppTheme.muted)
+                                    }
+                                }
+                            }
+                            Spacer()
+                            Text("×\(item.quantity)")
+                                .font(.title3.weight(.black))
+                                .foregroundStyle(AppTheme.ink)
+                        }
+                        .padding(10)
+                        .glassPanel(padding: 0)
+                    }
+                }
+
+                SectionHeader(title: "Stock necesario", subtitle: "Prendas base a coger del almacén")
+                VStack(spacing: 6) {
+                    ForEach(order.lines, id: \.key) { line in
+                        HStack(spacing: 8) {
+                            Circle().fill(line.canFulfill ? AppTheme.green : AppTheme.red)
+                                .frame(width: 8, height: 8)
+                            Text(line.subproductName)
+                                .font(.subheadline.weight(.semibold))
+                                .foregroundStyle(AppTheme.ink).lineLimit(1)
+                            Text(line.size)
+                                .font(.caption.weight(.black)).foregroundStyle(AppTheme.teal)
+                            Spacer()
+                            Text("Necesita \(line.required)")
+                                .font(.caption2).foregroundStyle(AppTheme.muted)
+                            Text("·").foregroundStyle(AppTheme.line)
+                            Text("Stock \(line.available)")
+                                .font(.caption2.weight(.bold))
+                                .foregroundStyle(line.canFulfill ? AppTheme.green : AppTheme.red)
+                        }
+                        .padding(.horizontal, 12).padding(.vertical, 8)
+                        .glassPanel(padding: 0, accent: line.canFulfill ? AppTheme.green.opacity(0.15) : AppTheme.red.opacity(0.1))
+                    }
+                }
+
+                let workshopOrder = store.orders.first { $0.number == order.orderNumber || $0.remoteID == order.orderId }
+                if let wo = workshopOrder {
+                    NavigationLink(value: wo) {
+                        Label("Preparar pedido", systemImage: "tshirt.fill")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(badgeColor)
+                    .controlSize(.large)
+                }
+            }
+            .padding()
+        }
+        .screenBackground()
+        .navigationTitle(order.orderNumber)
+        .navigationBarTitleDisplayMode(.inline)
+        .navigationDestination(for: WorkshopOrder.self) { wo in
+            OrderPreparationDetailView(order: wo)
+        }
+    }
+}
+
 struct FulfillableOrdersView: View {
     @Environment(WorkshopStore.self) private var store
     @State private var response: FulfillableOrdersResponse?
@@ -3729,15 +3846,10 @@ struct FulfillableOrdersView: View {
                 } else {
                     LazyVStack(spacing: 10) {
                         ForEach(filtered) { order in
-                            let workshopOrder = store.orders.first { $0.number == order.orderNumber || $0.remoteID == order.orderId }
-                            if let wo = workshopOrder {
-                                NavigationLink(value: wo) {
-                                    FulfillableOrderRow(order: order)
-                                }
-                                .buttonStyle(.plain)
-                            } else {
+                            NavigationLink(value: order) {
                                 FulfillableOrderRow(order: order)
                             }
+                            .buttonStyle(.plain)
                         }
                     }
                 }
@@ -3752,8 +3864,8 @@ struct FulfillableOrdersView: View {
         }
         .screenBackground()
         .navigationTitle("Stock disponible")
-        .navigationDestination(for: WorkshopOrder.self) { order in
-            OrderPreparationDetailView(order: order)
+        .navigationDestination(for: FulfillableOrder.self) { order in
+            FulfillableOrderDetailView(order: order)
         }
         .toolbar {
             Button { Task { await load() } } label: {

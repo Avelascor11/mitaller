@@ -674,6 +674,18 @@ enum Fulfillability: String, Decodable {
     case none = "NONE"
 }
 
+struct FulfillableOrderItem: Decodable, Identifiable {
+    let id: String
+    let title: String
+    let variantTitle: String?
+    let sku: String
+    let quantity: Int
+    let color: String?
+    let size: String?
+    let unitPrice: Double?
+    let imageUrl: String?
+}
+
 struct FulfillableOrder: Decodable, Identifiable {
     let orderId: String
     let orderNumber: String
@@ -684,6 +696,7 @@ struct FulfillableOrder: Decodable, Identifiable {
     let fulfillableItems: Int
     let totalItems: Int
     let lines: [FulfillableLine]
+    let items: [FulfillableOrderItem]
     var id: String { orderId }
 }
 
