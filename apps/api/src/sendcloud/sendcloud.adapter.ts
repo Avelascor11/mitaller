@@ -192,6 +192,107 @@ export class SendcloudAdapter {
     return { parcelId, cancelled: true, mode: 'real' };
   }
 
+  async createReturn(input: SendcloudReturnInput) {
+    if (!this.hasCredentials()) {
+      throw new BadRequestException('Sendcloud no esta configurado. Define SENDCLOUD_PUBLIC_KEY y SENDCLOUD_SECRET_KEY.');
+    }
+
+    const shippingProductCode =
+      this.config.get<string>('SENDCLOUD_RETURN_SHIPPING_PRODUCT_CODE')?.trim() || 'correos:paqretorno';
+
+    const fromCustomer = this.normalizeAddress(input.customerAddressJson);
+    const fromCustomerSplit = this.splitAddressLine(fromCustomer.address1);
+    const toWarehouse = await this.resolveFromAddress();
+
+    const payload = {
+      label_details: { mime_type: 'application/pdf', dpi: this.labelDpi() },
+      weight: {
+        value: String(this.config.get('SENDCLOUD_DEFAULT_WEIGHT_KG') ?? '0.5'),
+        unit: 'kg'
+      },
+      from_address: {
+        name: fromCustomer.name ?? input.customerName,
+        company_name: '',
+        address_line_1: fromCustomerSplit.addressLine1,
+        address_line_2: fromCustomer.address2 ?? '',
+        house_number: fromCustomerSplit.houseNumber,
+        postal_code: fromCustomer.zip,
+        city: fromCustomer.city,
+        country_code: fromCustomer.country,
+        phone_number: fromCustomer.phone ?? '',
+        email: input.customerEmail
+      },
+      to_address: toWarehouse,
+      ship_with: { shipping_product_code: shippingProductCode },
+      order_number: `RETURN-${input.orderNumber}`,
+      send_tracking_emails: false
+    };
+
+    const createResponse = await this.requestV3<{ return_id?: number; parcel_id?: number }>('/returns', {
+      method: 'POST',
+      body: JSON.stringify(payload)
+    });
+
+    const returnId = createResponse.return_id;
+    const parcelId = createResponse.parcel_id;
+    if (!returnId) {
+      return { returnId: '', parcelId: parcelId ? String(parcelId) : undefined };
+    }
+
+    // Fetch full return details to get label URL + tracking
+    const details = await this.requestV3<SendcloudReturnDetailsV3>(`/returns/${returnId}`, { method: 'GET' });
+
+    return {
+      returnId: String(returnId),
+      parcelId: parcelId ? String(parcelId) : undefined,
+      trackingNumber: details.tracking_number,
+      carrier: details.carrier?.name ?? details.carrier?.code,
+      labelUrl: details.label_url ?? details.label?.label_printer ?? details.label?.normal_printer?.[0],
+      cost: details.label_cost?.value,
+      costCurrency: details.label_cost?.currency
+    };
+  }
+
+  /** Get the actual delivery date of a parcel by its order_number (original shipment) */
+  async getDeliveryDate(orderNumber: string): Promise<Date | null> {
+    if (!this.hasCredentials()) return null;
+    try {
+      const response = await this.request<{ parcels?: Array<{ status?: { id?: number; message?: string }; date_updated?: string; status_history?: Array<{ parent_status?: string; carrier_update_timestamp?: string }> }> }>(
+        `/parcels?order_number=${encodeURIComponent(orderNumber)}`,
+        { method: 'GET' }
+      );
+      const parcels = response.parcels ?? [];
+      for (const parcel of parcels) {
+        const history = parcel.status_history ?? [];
+        const delivered = history.find((h) => h.parent_status === 'delivered');
+        if (delivered?.carrier_update_timestamp) {
+          return new Date(delivered.carrier_update_timestamp);
+        }
+        // fallback: status id 11 means delivered
+        if (parcel.status?.id === 11 && parcel.date_updated) {
+          return new Date(parcel.date_updated);
+        }
+      }
+      return null;
+    } catch (error) {
+      console.error('[SendcloudAdapter] getDeliveryDate error:', error instanceof Error ? error.message : error);
+      return null;
+    }
+  }
+
+  /** Download return label PDF (proxy bytes with auth) */
+  async downloadReturnLabel(parcelId: string): Promise<Buffer> {
+    if (!this.hasCredentials()) throw new BadRequestException('Sendcloud no esta configurado.');
+    const url = `${this.apiV3BaseURL}/parcels/${parcelId}/documents/label`;
+    const response = await fetch(url, {
+      headers: { Authorization: `Basic ${Buffer.from(`${this.publicKey}:${this.secretKey}`).toString('base64')}` }
+    });
+    if (!response.ok) {
+      throw new BadGatewayException(`Sendcloud label download error ${response.status}`);
+    }
+    return Buffer.from(await response.arrayBuffer());
+  }
+
   async listShippingMethods() {
     if (!this.hasCredentials()) {
       throw new BadRequestException('Sendcloud no esta configurado. Define SENDCLOUD_PUBLIC_KEY y SENDCLOUD_SECRET_KEY.');
@@ -782,6 +883,32 @@ interface SendcloudAddressPayload {
 
 interface SendcloudSenderAddressesResponse {
   data?: SendcloudSenderAddress[];
+}
+
+export interface SendcloudReturnInput {
+  orderNumber: string;
+  customerName: string;
+  customerEmail: string;
+  customerAddressJson: unknown;
+}
+
+interface SendcloudReturnV3Response {
+  data?: SendcloudShipmentV3Data & { id?: string };
+  id?: string;
+  parcels?: SendcloudShipmentV3Parcel[];
+  carrier?: { code?: string; name?: string };
+}
+
+interface SendcloudReturnDetailsV3 {
+  id: number;
+  tracking_number?: string;
+  carrier?: { code?: string; name?: string };
+  label_url?: string;
+  label?: {
+    label_printer?: string;
+    normal_printer?: string[];
+  };
+  label_cost?: { value?: number; currency?: string };
 }
 
 interface SendcloudSenderAddress {

@@ -296,6 +296,107 @@ export class ShopifyAdapter {
     };
   }
 
+  /** Get catalog: all active products with variants (for exchange picker) */
+  async getProductCatalog(): Promise<ShopifyCatalogProduct[]> {
+    this.assertConfigured();
+    const products: ShopifyCatalogProduct[] = [];
+    let after: string | null = null;
+
+    while (true) {
+      const data: { products: { pageInfo: { hasNextPage: boolean; endCursor: string }; nodes: ShopifyCatalogProductRaw[] } } =
+        await this.graphql(`
+          query Catalog($first: Int!, $after: String) {
+            products(first: $first, after: $after, query: "status:active", sortKey: TITLE) {
+              pageInfo { hasNextPage endCursor }
+              nodes {
+                id
+                title
+                productType
+                handle
+                featuredImage { url }
+                variants(first: 50) {
+                  nodes {
+                    id
+                    title
+                    price
+                    sku
+                    availableForSale
+                    inventoryQuantity
+                    selectedOptions { name value }
+                    image { url }
+                  }
+                }
+              }
+            }
+          }
+        `, { first: 100, after });
+
+      for (const p of data.products.nodes) {
+        products.push({
+          id: p.id,
+          title: p.title,
+          productType: p.productType ?? null,
+          handle: p.handle,
+          imageUrl: p.featuredImage?.url ?? null,
+          variants: p.variants.nodes
+            .filter((v) => v.availableForSale)
+            .map((v) => ({
+              id: v.id,
+              title: v.title,
+              price: Number(v.price),
+              sku: v.sku ?? '',
+              available: v.availableForSale,
+              imageUrl: v.image?.url ?? p.featuredImage?.url ?? null,
+              size: v.selectedOptions?.find((o) => /size|talla/i.test(o.name))?.value ?? null,
+              color: v.selectedOptions?.find((o) => /color/i.test(o.name))?.value ?? null
+            }))
+        });
+      }
+
+      if (!data.products.pageInfo.hasNextPage || products.length >= 500) break;
+      after = data.products.pageInfo.endCursor;
+    }
+
+    return products;
+  }
+
+  /** Create Shopify Draft Order — customer pays via Shopify checkout */
+  async createDraftOrder(input: ShopifyDraftOrderInput): Promise<{ id: string; invoiceUrl: string; totalPrice: number }> {
+    this.assertConfigured();
+
+    const lineItems = input.lineItems.map((item) => ({
+      ...(item.variantId ? { variantId: item.variantId } : {}),
+      ...(item.variantId ? {} : { title: item.title, originalUnitPrice: (item.price ?? 0).toFixed(2) }),
+      quantity: item.quantity
+    }));
+
+    const data = await this.graphql<{ draftOrderCreate: { draftOrder: { id: string; invoiceUrl: string; totalPrice: string }; userErrors: Array<{ field: string; message: string }> } }>(`
+      mutation CreateDraft($input: DraftOrderInput!) {
+        draftOrderCreate(input: $input) {
+          draftOrder { id invoiceUrl totalPrice }
+          userErrors { field message }
+        }
+      }
+    `, {
+      input: {
+        email: input.customerEmail,
+        note: input.note,
+        tags: input.tags ?? ['return-portal'],
+        shippingAddress: input.shippingAddress,
+        lineItems,
+        useCustomerDefaultAddress: false
+      }
+    });
+
+    if (data.draftOrderCreate.userErrors.length > 0) {
+      const errs = data.draftOrderCreate.userErrors.map((e) => `${e.field}: ${e.message}`).join('; ');
+      throw new BadGatewayException(`Shopify draftOrderCreate error: ${errs}`);
+    }
+
+    const draft = data.draftOrderCreate.draftOrder;
+    return { id: draft.id, invoiceUrl: draft.invoiceUrl, totalPrice: Number(draft.totalPrice) };
+  }
+
   private async graphql<T>(query: string, variables: Record<string, unknown>): Promise<T> {
     let response: Response;
     try {
@@ -629,3 +730,67 @@ interface ShopifyWebhookLineItem {
   product_type?: string;
   properties?: Array<{ name?: string; value?: string }>;
 }
+
+
+// === Returns portal exchange/draft order types ===
+export interface ShopifyCatalogProduct {
+  id: string;
+  title: string;
+  productType: string | null;
+  handle: string;
+  imageUrl: string | null;
+  variants: Array<{
+    id: string;
+    title: string;
+    price: number;
+    sku: string;
+    available: boolean;
+    imageUrl: string | null;
+    size: string | null;
+    color: string | null;
+  }>;
+}
+
+interface ShopifyCatalogProductRaw {
+  id: string;
+  title: string;
+  productType?: string | null;
+  handle: string;
+  featuredImage?: { url?: string } | null;
+  variants: {
+    nodes: Array<{
+      id: string;
+      title: string;
+      price: string;
+      sku?: string | null;
+      availableForSale: boolean;
+      inventoryQuantity?: number | null;
+      selectedOptions?: Array<{ name: string; value: string }>;
+      image?: { url?: string } | null;
+    }>;
+  };
+}
+
+export interface ShopifyDraftOrderInput {
+  customerEmail: string;
+  note?: string;
+  tags?: string[];
+  shippingAddress?: {
+    firstName?: string;
+    lastName?: string;
+    address1?: string;
+    address2?: string;
+    city?: string;
+    province?: string;
+    zip?: string;
+    countryCode?: string;
+    phone?: string;
+  };
+  lineItems: Array<{
+    variantId?: string;
+    title?: string;
+    price?: number;
+    quantity: number;
+  }>;
+}
+

@@ -175,16 +175,6 @@ struct APIClient {
         try await get("/purchase-needs/fulfillable")
     }
 
-    func markRecommendedPurchasesOrdered() async throws -> PurchaseOrderResponse {
-        let request = try jsonRequest(path: "/purchase-needs/mark-ordered", method: "POST", body: EmptyBody())
-        return try await perform(request)
-    }
-
-    func receivePurchase(lines: [ReceivePurchaseLineRequest]) async throws -> ReceivePurchaseResponse {
-        let request = try jsonRequest(path: "/purchase-needs/receive", method: "POST", body: ReceivePurchaseRequest(lines: lines))
-        return try await perform(request)
-    }
-
     func scanStockReceipt(rawText: String, photo: Data? = nil) async throws -> StockReceipt {
         let request = try jsonRequest(
             path: "/stock/receipts/scan",
@@ -458,15 +448,6 @@ struct OrderPickingUnmapped: Decodable, Identifiable {
     let quantity: Int
 }
 
-struct ReceivePurchaseLineRequest: Encodable {
-    let stockItemId: String
-    let quantity: Int
-}
-
-private struct ReceivePurchaseRequest: Encodable {
-    let lines: [ReceivePurchaseLineRequest]
-}
-
 private struct ScanStockReceiptRequest: Encodable {
     let rawText: String
     let photoBase64: String?
@@ -475,14 +456,6 @@ private struct ScanStockReceiptRequest: Encodable {
 
 private struct ConfirmStockReceiptRequest: Encodable {
     let lines: [StockReceiptConfirmLine]
-}
-
-struct PurchaseOrderResponse: Decodable {
-    let ordered: Int
-}
-
-struct ReceivePurchaseResponse: Decodable {
-    let received: Int
 }
 
 struct ManualPrintResponse: Decodable {

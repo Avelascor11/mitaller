@@ -792,35 +792,6 @@ final class WorkshopStore {
         }
     }
 
-    func markRecommendedPurchasesOrdered() async {
-        guard let client = apiClient else { return }
-        syncError = nil
-        do {
-            _ = try await client.markRecommendedPurchasesOrdered()
-            try await loadSnapshot(from: client)
-        } catch {
-            syncError = "No se pudo marcar compra pendiente: \(error.localizedDescription)"
-        }
-    }
-
-    func receiveAllOrderedPurchases() async {
-        guard let client = apiClient else { return }
-        let lines = purchaseMatrix.flatMap { group in
-            group.entries.compactMap { entry -> ReceivePurchaseLineRequest? in
-                guard let stockItemId = entry.stockItemId, entry.alreadyOrderedQuantity > 0 else { return nil }
-                return ReceivePurchaseLineRequest(stockItemId: stockItemId, quantity: entry.alreadyOrderedQuantity)
-            }
-        }
-        guard !lines.isEmpty else { return }
-        syncError = nil
-        do {
-            _ = try await client.receivePurchase(lines: lines)
-            try await loadSnapshot(from: client)
-        } catch {
-            syncError = "No se pudo recibir compra: \(error.localizedDescription)"
-        }
-    }
-
     func scanStockReceipt(rawText: String, photo: Data?) async throws -> StockReceipt {
         guard let client = apiClient else { throw APIClientError.invalidURL }
         syncError = nil
@@ -4023,35 +3994,9 @@ struct PurchaseMatrixView: View {
                         MetricTile(title: "Comprar", value: garmentGroups.reduce(0) { $0 + $1.totalRecommended }, color: AppTheme.magenta, icon: "cart.badge.plus")
                         MetricTile(title: "Pedidos", value: garmentGroups.reduce(0) { $0 + $1.totalPending }, color: AppTheme.blue, icon: "shippingbox.fill")
                         MetricTile(title: "Stock", value: garmentGroups.reduce(0) { $0 + $1.totalStock }, color: AppTheme.green, icon: "archivebox.fill")
-                        MetricTile(title: "Por recibir", value: garmentGroups.reduce(0) { total, group in total + group.entries.reduce(0) { $0 + $1.alreadyOrderedQuantity } }, color: AppTheme.amber, icon: "tray.and.arrow.down.fill")
                     }
 
                     let groups = garmentGroups.filter { $0.totalRecommended > 0 }
-                    let hasIncoming = garmentGroups.contains { group in
-                        group.entries.contains { $0.alreadyOrderedQuantity > 0 }
-                    }
-                    HStack(spacing: 10) {
-                        Button {
-                            Task { await store.markRecommendedPurchasesOrdered() }
-                        } label: {
-                            Label("Marcar compra hecha", systemImage: "cart.fill.badge.plus")
-                                .frame(maxWidth: .infinity)
-                        }
-                        .buttonStyle(.borderedProminent)
-                        .tint(AppTheme.magenta)
-                        .disabled(garmentGroups.reduce(0) { $0 + $1.totalRecommended } == 0)
-
-                        Button {
-                            Task { await store.receiveAllOrderedPurchases() }
-                        } label: {
-                            Label("Recibir todo", systemImage: "tray.and.arrow.down.fill")
-                                .frame(maxWidth: .infinity)
-                        }
-                        .buttonStyle(.bordered)
-                        .tint(AppTheme.green)
-                        .disabled(!hasIncoming)
-                    }
-                    .glassPanel(padding: 12)
 
                     if groups.isEmpty {
                         ContentUnavailableView("No hay compras pendientes", systemImage: "checkmark.seal", description: Text("El stock actual cubre los pedidos sin preparar."))
@@ -4214,12 +4159,6 @@ struct PurchaseBuyRow: View {
                 .clipShape(RoundedRectangle(cornerRadius: 14))
             }
 
-            if entry.alreadyOrderedQuantity > 0 {
-                Label("Por recibir: \(entry.alreadyOrderedQuantity)", systemImage: "tray.and.arrow.down.fill")
-                    .font(.caption.weight(.bold))
-                    .foregroundStyle(AppTheme.amber)
-            }
-
             if !entry.demandOrders.isEmpty {
                 Button {
                     withAnimation(.snappy) { showOrders.toggle() }
@@ -4345,11 +4284,6 @@ struct MatrixQuantityCell: View {
                 Text("ped \(entry.pendingOrderNeed) · stk \(entry.currentInternalStock) · ss \(entry.minStockTarget)")
                     .font(.caption2.weight(.semibold))
                     .foregroundStyle(AppTheme.muted)
-            }
-            if mode == .recommended && entry.alreadyOrderedQuantity > 0 {
-                Text("por recibir \(entry.alreadyOrderedQuantity)")
-                    .font(.caption2.weight(.bold))
-                    .foregroundStyle(AppTheme.amber)
             }
             if mode != .recommended {
                 Text(entry.subproductName.replacingOccurrences(of: "Camiseta ", with: "").replacingOccurrences(of: "Sudadera ", with: ""))

@@ -20,16 +20,6 @@ export class PurchasingController {
     return this.purchase.generateDailyPurchaseNeeds();
   }
 
-  @Post('mark-ordered')
-  markOrdered() {
-    return this.purchase.markRecommendedAsOrdered();
-  }
-
-  @Post('receive')
-  receive(@Body() body: { lines?: Array<{ stockItemId: string; quantity: number }> }) {
-    return this.purchase.receivePurchaseLines(body.lines ?? []);
-  }
-
   @Get('fulfillable')
   fulfillable() {
     return this.purchase.getFulfillableOrders();

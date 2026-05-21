@@ -8,6 +8,7 @@ import {
   Factory,
   Lock,
   PackageCheck,
+  RotateCcw,
   Search,
   Settings,
   ShoppingCart,
@@ -50,7 +51,7 @@ const production: ReadonlyArray<readonly [string, string, string, number, Priori
   ['Camiseta NANO INMORTAL','Blanco', 'M', 1, 'NORMAL']
 ];
 
-const sections: ReadonlyArray<readonly [string, IconType]> = [
+const sections: ReadonlyArray<readonly [string, IconType, string?]> = [
   ['Dashboard',     ClipboardList],
   ['Pedidos',       PackageCheck],
   ['Produccion',    Factory],
@@ -59,6 +60,7 @@ const sections: ReadonlyArray<readonly [string, IconType]> = [
   ['Falk & Ross',   Wand2],
   ['Recetas/BOM',   ClipboardList],
   ['Sendcloud',     Truck],
+  ['Devoluciones',  RotateCcw,   '/admin/devoluciones'],
   ['Configuracion', Settings]
 ];
 
@@ -99,10 +101,10 @@ export default function Page() {
 
         <nav>
           <div className="navLabel">Menú</div>
-          {sections.map(([label, Icon], i) => (
+          {sections.map(([label, Icon, href], i) => (
             <a
               key={label}
-              href={`#${label.toLowerCase().replaceAll(' ', '-')}`}
+              href={href ?? `#${label.toLowerCase().replaceAll(' ', '-')}`}
               className={i === 0 ? 'active' : ''}
             >
               <Icon size={17} />

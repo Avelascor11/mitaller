@@ -12,6 +12,7 @@ import { PrismaModule } from './prisma/prisma.module';
 import { ProductionModule } from './production/production.module';
 import { PurchasingModule } from './purchasing/purchasing.module';
 import { RecipesModule } from './recipes/recipes.module';
+import { ReturnsModule } from './returns/returns.module';
 import { SendcloudModule } from './sendcloud/sendcloud.module';
 import { ShipmentsModule } from './shipments/shipments.module';
 import { ShopifyModule } from './shopify/shopify.module';
@@ -34,6 +35,7 @@ import { SupplierModule } from './supplier/supplier.module';
     ShipmentsModule,
     ShopifyModule,
     RecipesModule,
+    ReturnsModule,
     SupplierModule,
     ManualPrintModule,
     EconomicsModule

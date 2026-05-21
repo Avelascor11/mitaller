@@ -93,6 +93,43 @@ enum ShipmentStatus {
   ERROR
 }
 
+enum ReturnStatus {
+  REQUESTED
+  LABEL_CREATED
+  RECEIVED
+  APPROVED
+  REJECTED
+  CANCELLED
+}
+
+enum ReturnReason {
+  WRONG_SIZE
+  DEFECTIVE
+  NOT_AS_DESCRIBED
+  CHANGED_MIND
+  WRONG_ITEM
+  OTHER
+}
+
+enum ReturnType {
+  RETURN
+  EXCHANGE
+}
+
+enum PaymentStatus {
+  PENDING
+  PAID
+  FAILED
+  REFUNDED
+}
+
+enum ExceptionType {
+  EXTEND_WINDOW
+  FREE_LABEL
+  ACCEPT_EXPIRED
+  BLOCK
+}
+
 enum StockReceiptStatus {
   DRAFT
   CONFIRMED
@@ -161,6 +198,7 @@ model Order {
   productionTasks     ProductionTask[]
   stockMovements      StockMovement[]
   shipments           Shipment[]
+  returns             Return[]
 }
 
 model OrderItem {
@@ -185,6 +223,7 @@ model OrderItem {
   updatedAt          DateTime         @updatedAt
   order              Order            @relation(fields: [orderId], references: [id], onDelete: Cascade)
   productionTasks    ProductionTask[]
+  returnItems        ReturnItem[]
 }
 
 model ProductionTask {
@@ -494,4 +533,76 @@ model ActivityLog {
   metadataJson Json?
   createdAt    DateTime @default(now())
   user         User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+}
+
+model Return {
+  id                   String        @id @default(cuid())
+  orderId              String
+  shopifyOrderNumber   String
+  customerEmail        String
+  customerName         String
+  type                 ReturnType    @default(RETURN)
+  status               ReturnStatus  @default(REQUESTED)
+  paymentStatus        PaymentStatus @default(PENDING)
+  notes                String?
+  sendcloudReturnId    String?
+  labelUrl             String?
+  trackingNumber       String?
+  carrier              String?
+  deliveredAt          DateTime?
+  shopifyDraftOrderId  String?
+  checkoutUrl          String?
+  refundAmount         Float?
+  chargeAmount         Float?
+  labelFee             Float?
+  totalAmount          Float?
+  paidAt               DateTime?
+  createdAt            DateTime      @default(now())
+  updatedAt            DateTime      @updatedAt
+  order                Order         @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  items                ReturnItem[]
+}
+
+model ReturnConfig {
+  id                    String   @id @default("singleton")
+  windowDays            Int      @default(15)
+  labelPrice            Float    @default(4.95)
+  shippingProductCode   String?
+  exchangePolicy        String   @default("ANY")
+  termsText             String?
+  enabled               Boolean  @default(true)
+  updatedAt             DateTime @updatedAt
+}
+
+model ReturnException {
+  id            String        @id @default(cuid())
+  orderNumber   String?
+  customerEmail String?
+  type          ExceptionType
+  extraDays     Int?
+  notes         String?
+  expiresAt     DateTime?
+  active        Boolean       @default(true)
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+
+  @@index([orderNumber])
+  @@index([customerEmail])
+}
+
+model ReturnItem {
+  id                    String       @id @default(cuid())
+  returnId              String
+  orderItemId           String
+  quantity              Int
+  reason                ReturnReason
+  notes                 String?
+  replacementVariantId  String?
+  replacementProductId  String?
+  replacementTitle      String?
+  replacementImageUrl   String?
+  replacementPrice      Float?
+  createdAt             DateTime     @default(now())
+  return                Return       @relation(fields: [returnId], references: [id], onDelete: Cascade)
+  orderItem             OrderItem    @relation(fields: [orderItemId], references: [id], onDelete: Cascade)
 }
