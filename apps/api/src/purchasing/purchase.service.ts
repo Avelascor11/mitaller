@@ -667,7 +667,8 @@ export class PurchaseService {
     const direct = this.mapDirectProductAttributes(item);
     if (direct) return direct;
 
-    const kind = this.inferGarmentKind(`${item.productType ?? ''} ${item.title} ${item.sku}`);
+    const kind = this.inferGarmentKind(`${item.title} ${item.sku} ${item.variantTitle ?? ''}`)
+      ?? this.inferGarmentKind(item.productType ?? '');
     const color = this.normalizeColor(`${item.color ?? ''} ${item.variantTitle ?? ''} ${item.title}`);
     const size = this.normalizeSize(`${item.size ?? ''} ${item.variantTitle ?? ''} ${item.title}`);
     if (!kind || !color || !size) return null;
@@ -680,7 +681,8 @@ export class PurchaseService {
   }
 
   private mapDirectProductAttributes(item: { productType?: string | null; title: string; color?: string | null; size?: string | null; variantTitle?: string | null }) {
-    const kind = this.inferGarmentKind(`${item.productType ?? ''} ${item.title}`);
+    const kind = this.inferGarmentKind(`${item.title} ${item.variantTitle ?? ''}`)
+      ?? this.inferGarmentKind(item.productType ?? '');
     const color = this.normalizeColor(`${item.color ?? ''} ${item.variantTitle ?? ''} ${item.title}`);
     const size = this.normalizeSize(`${item.size ?? ''} ${item.variantTitle ?? ''} ${item.title}`);
     if (!kind || !color || !size) return null;
@@ -891,8 +893,8 @@ export class PurchaseService {
 
   private inferGarmentKind(value: string) {
     const normalized = this.normalizeText(value);
-    if (/\b(sudadera|hoodie|hd)\b/.test(normalized)) return 'SUDADERA';
-    if (/\b(camiseta|shirt|tshirt|ts)\b/.test(normalized)) return 'CAMISETA';
+    if (/\b(sudadera|hoodie|sweatshirt|hooded|hd|wg)\b/.test(normalized)) return 'SUDADERA';
+    if (/\b(camiseta|tshirt|t-shirt|tee|shirt|ts|tg)\b/.test(normalized)) return 'CAMISETA';
     return null;
   }
 
