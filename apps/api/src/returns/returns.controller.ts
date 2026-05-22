@@ -124,4 +124,21 @@ export class ReturnsController {
   updateStatus(@Param('id') id: string, @Body('status') status: string) {
     return this.returnsService.updateStatus(id, status);
   }
+
+  /** Admin — mark package as received */
+  @Patch(':id/received')
+  @UseGuards(JwtAuthGuard)
+  markReceived(@Param('id') id: string) {
+    return this.returnsService.markReceived(id);
+  }
+
+  /** Admin — verify received package */
+  @Patch(':id/verify')
+  @UseGuards(JwtAuthGuard)
+  verifyReturn(
+    @Param('id') id: string,
+    @Body() body: { verificationStatus: 'OK' | 'ISSUE'; verificationNotes?: string }
+  ) {
+    return this.returnsService.verifyReturn(id, body);
+  }
 }

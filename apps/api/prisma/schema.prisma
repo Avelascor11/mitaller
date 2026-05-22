@@ -557,6 +557,10 @@ model Return {
   labelFee             Float?
   totalAmount          Float?
   paidAt               DateTime?
+  receivedAt           DateTime?
+  verifiedAt           DateTime?
+  verificationNotes    String?
+  verificationStatus   String?
   createdAt            DateTime      @default(now())
   updatedAt            DateTime      @updatedAt
   order                Order         @relation(fields: [orderId], references: [id], onDelete: Cascade)

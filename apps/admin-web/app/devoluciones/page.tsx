@@ -213,11 +213,9 @@ export default function DevolucionesPage() {
       return;
     }
 
-    // Group by action type — for simplicity, the type is determined by whether ANY item is EXCHANGE
     const hasExchange = selectedEntries.some(([, s]) => s.action === 'EXCHANGE');
     const type: Action = hasExchange ? 'EXCHANGE' : 'RETURN';
 
-    // Validate
     for (const [, s] of selectedEntries) {
       if (!s.reason) {
         setError('Elige un motivo para cada artículo.');
@@ -265,7 +263,6 @@ export default function DevolucionesPage() {
 
   const selectedCount = Object.values(selections).filter((s) => s.selected).length;
 
-  // Summary computation
   const summary = (() => {
     if (!lookup) return null;
     const selectedItems = Object.entries(selections).filter(([, s]) => s.selected);
@@ -292,297 +289,825 @@ export default function DevolucionesPage() {
   );
 
   return (
-    <div style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'flex-start', padding: '40px 16px' }}>
-      <div style={{ marginBottom: 32, textAlign: 'center' }}>
-        <div style={{ fontSize: 28, fontWeight: 700, color: 'var(--ink)', marginBottom: 6 }}>Portal de Devoluciones</div>
-        <div style={{ color: 'var(--muted)', fontSize: 15 }}>Gestiona tu devolución o cambio de forma rápida y sencilla</div>
-      </div>
+    <>
+      <style>{`
+        :root {
+          --ios-blue: #007AFF;
+          --ios-green: #34C759;
+          --ios-orange: #FF9500;
+          --ios-red: #FF3B30;
+          --ios-bg: #F2F2F7;
+          --ios-white: #FFFFFF;
+          --ios-text: #1C1C1E;
+          --ios-secondary: #8E8E93;
+          --ios-separator: #C6C6C8;
+          --ios-label2: #3A3A3C;
+          --ios-fill: #E5E5EA;
+          --ios-blue-soft: rgba(0,122,255,0.10);
+          --ios-green-soft: rgba(52,199,89,0.12);
+          --ios-red-soft: rgba(255,59,48,0.10);
+          --ios-orange-soft: rgba(255,149,0,0.10);
+        }
+        * { box-sizing: border-box; }
+        body { background: var(--ios-bg); }
+        .ios-page {
+          min-height: 100vh;
+          background: var(--ios-bg);
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          padding: 48px 16px 40px;
+          font-family: -apple-system, 'SF Pro Display', 'SF Pro Text', BlinkMacSystemFont, 'Helvetica Neue', sans-serif;
+        }
+        .ios-input {
+          width: 100%;
+          padding: 14px 16px;
+          border-radius: 12px;
+          border: 1.5px solid var(--ios-separator);
+          background: var(--ios-white);
+          font-size: 16px;
+          color: var(--ios-text);
+          outline: none;
+          transition: border-color 0.15s;
+          font-family: inherit;
+          appearance: none;
+          -webkit-appearance: none;
+        }
+        .ios-input:focus { border-color: var(--ios-blue); }
+        .ios-input::placeholder { color: var(--ios-secondary); }
+        .ios-btn-primary {
+          width: 100%;
+          padding: 16px 20px;
+          background: var(--ios-blue);
+          color: #fff;
+          border: none;
+          border-radius: 10px;
+          font-size: 17px;
+          font-weight: 600;
+          cursor: pointer;
+          letter-spacing: -0.2px;
+          font-family: inherit;
+          transition: opacity 0.15s, transform 0.1s;
+        }
+        .ios-btn-primary:active { opacity: 0.85; transform: scale(0.99); }
+        .ios-btn-primary:disabled { opacity: 0.45; cursor: not-allowed; }
+        .ios-btn-secondary {
+          padding: 12px 18px;
+          background: var(--ios-white);
+          color: var(--ios-blue);
+          border: 1.5px solid var(--ios-blue);
+          border-radius: 10px;
+          font-size: 15px;
+          font-weight: 600;
+          cursor: pointer;
+          font-family: inherit;
+          transition: opacity 0.15s;
+          text-align: center;
+        }
+        .ios-btn-secondary:active { opacity: 0.7; }
+        .ios-card {
+          background: var(--ios-white);
+          border-radius: 16px;
+          box-shadow: 0 2px 12px rgba(0,0,0,0.08);
+          width: 100%;
+          max-width: 480px;
+          overflow: hidden;
+        }
+        .ios-card-wide { max-width: 720px; }
+        .ios-error-banner {
+          display: flex;
+          align-items: flex-start;
+          gap: 10px;
+          background: var(--ios-red-soft);
+          border: 1px solid rgba(255,59,48,0.25);
+          border-radius: 12px;
+          padding: 12px 14px;
+          color: var(--ios-red);
+          font-size: 14px;
+          font-weight: 500;
+          margin-top: 12px;
+        }
+        .ios-error-dismiss {
+          background: none;
+          border: none;
+          color: var(--ios-red);
+          cursor: pointer;
+          font-size: 16px;
+          padding: 0;
+          line-height: 1;
+          margin-left: auto;
+          flex-shrink: 0;
+        }
+        .ios-step-dot {
+          width: 8px;
+          height: 8px;
+          border-radius: 50%;
+          background: var(--ios-separator);
+          transition: all 0.2s;
+        }
+        .ios-step-dot.active {
+          width: 24px;
+          border-radius: 4px;
+          background: var(--ios-blue);
+        }
+        .ios-step-dot.done { background: var(--ios-green); }
+        .ios-item-card {
+          background: var(--ios-white);
+          border-radius: 16px;
+          box-shadow: 0 2px 12px rgba(0,0,0,0.08);
+          overflow: hidden;
+          transition: box-shadow 0.2s;
+        }
+        .ios-item-card.selected { box-shadow: 0 2px 16px rgba(0,122,255,0.18); }
+        .ios-segment {
+          display: flex;
+          background: var(--ios-fill);
+          border-radius: 9px;
+          padding: 2px;
+          gap: 2px;
+        }
+        .ios-segment-btn {
+          flex: 1;
+          padding: 8px 12px;
+          border-radius: 7px;
+          border: none;
+          background: transparent;
+          font-size: 13px;
+          font-weight: 600;
+          cursor: pointer;
+          color: var(--ios-secondary);
+          font-family: inherit;
+          transition: all 0.15s;
+        }
+        .ios-segment-btn.active {
+          background: var(--ios-white);
+          color: var(--ios-blue);
+          box-shadow: 0 1px 4px rgba(0,0,0,0.12);
+        }
+        .ios-checkbox {
+          width: 24px;
+          height: 24px;
+          border-radius: 50%;
+          border: 2px solid var(--ios-separator);
+          background: var(--ios-white);
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          cursor: pointer;
+          flex-shrink: 0;
+          transition: all 0.15s;
+        }
+        .ios-checkbox.checked {
+          background: var(--ios-blue);
+          border-color: var(--ios-blue);
+        }
+        .ios-checkbox-check {
+          color: #fff;
+          font-size: 13px;
+          font-weight: 700;
+          line-height: 1;
+        }
+        .ios-image-placeholder {
+          width: 56px;
+          height: 56px;
+          border-radius: 10px;
+          background: var(--ios-fill);
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          flex-shrink: 0;
+          font-size: 22px;
+        }
+        .ios-summary-row {
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          padding: 6px 0;
+          font-size: 15px;
+          color: var(--ios-text);
+        }
+        .ios-summary-row.total {
+          font-weight: 700;
+          font-size: 17px;
+          border-top: 1px solid var(--ios-separator);
+          margin-top: 6px;
+          padding-top: 12px;
+        }
+        .ios-select {
+          width: 100%;
+          padding: 14px 40px 14px 16px;
+          border-radius: 12px;
+          border: 1.5px solid var(--ios-separator);
+          background: var(--ios-white);
+          font-size: 15px;
+          color: var(--ios-text);
+          outline: none;
+          font-family: inherit;
+          appearance: none;
+          -webkit-appearance: none;
+          background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='M1 1l5 5 5-5' stroke='%238E8E93' stroke-width='1.5' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+          background-repeat: no-repeat;
+          background-position: right 14px center;
+          cursor: pointer;
+          transition: border-color 0.15s;
+        }
+        .ios-select:focus { border-color: var(--ios-blue); }
+        @keyframes shimmer {
+          0% { background-position: -400px 0; }
+          100% { background-position: 400px 0; }
+        }
+        .ios-spinner {
+          width: 20px;
+          height: 20px;
+          border: 2.5px solid rgba(255,255,255,0.3);
+          border-top-color: #fff;
+          border-radius: 50%;
+          display: inline-block;
+          animation: spin 0.7s linear infinite;
+        }
+        .ios-spinner-blue {
+          width: 32px;
+          height: 32px;
+          border: 3px solid var(--ios-fill);
+          border-top-color: var(--ios-blue);
+          border-radius: 50%;
+          animation: spin 0.7s linear infinite;
+          margin: 0 auto;
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        @keyframes success-pop {
+          0% { transform: scale(0.5); opacity: 0; }
+          60% { transform: scale(1.15); }
+          100% { transform: scale(1); opacity: 1; }
+        }
+        .ios-success-icon {
+          width: 72px;
+          height: 72px;
+          border-radius: 50%;
+          background: var(--ios-green);
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          margin: 0 auto 20px;
+          animation: success-pop 0.45s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
+        }
+        .ios-success-checkmark {
+          color: #fff;
+          font-size: 36px;
+          font-weight: 700;
+          line-height: 1;
+        }
+        .ios-download-btn {
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          gap: 10px;
+          width: 100%;
+          padding: 16px 20px;
+          background: var(--ios-blue);
+          color: #fff;
+          border-radius: 10px;
+          font-size: 17px;
+          font-weight: 600;
+          text-decoration: none;
+          letter-spacing: -0.2px;
+          transition: opacity 0.15s;
+        }
+        .ios-download-btn:active { opacity: 0.85; }
+        .ios-tracking-chip {
+          background: var(--ios-fill);
+          border-radius: 10px;
+          padding: 12px 16px;
+          display: flex;
+          align-items: center;
+          gap: 10px;
+          margin-bottom: 16px;
+        }
+        .ios-modal-overlay {
+          position: fixed;
+          inset: 0;
+          background: rgba(0,0,0,0.5);
+          backdrop-filter: blur(4px);
+          display: flex;
+          align-items: flex-end;
+          justify-content: center;
+          padding: 0;
+          z-index: 100;
+        }
+        .ios-modal {
+          background: var(--ios-white);
+          border-radius: 20px 20px 0 0;
+          width: 100%;
+          max-width: 720px;
+          max-height: 90vh;
+          display: flex;
+          flex-direction: column;
+          overflow: hidden;
+        }
+        .ios-modal-handle {
+          width: 36px;
+          height: 5px;
+          border-radius: 3px;
+          background: var(--ios-separator);
+          margin: 12px auto 0;
+        }
+        .ios-product-card {
+          background: var(--ios-white);
+          border: 1.5px solid var(--ios-separator);
+          border-radius: 14px;
+          padding: 12px;
+          cursor: pointer;
+          transition: border-color 0.15s, background 0.15s;
+        }
+        .ios-product-card.expanded {
+          border-color: var(--ios-blue);
+          background: var(--ios-blue-soft);
+        }
+        .ios-variant-btn {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          width: 100%;
+          padding: 10px 12px;
+          background: var(--ios-fill);
+          border: none;
+          border-radius: 10px;
+          font-size: 14px;
+          font-weight: 500;
+          cursor: pointer;
+          font-family: inherit;
+          color: var(--ios-text);
+          transition: background 0.12s;
+        }
+        .ios-variant-btn:active { background: var(--ios-separator); }
+        .ios-replacement-chip {
+          display: flex;
+          align-items: center;
+          gap: 10px;
+          padding: 10px 12px;
+          background: var(--ios-green-soft);
+          border-radius: 12px;
+          border: 1px solid rgba(52,199,89,0.2);
+        }
+        .ios-section-label {
+          font-size: 12px;
+          font-weight: 600;
+          color: var(--ios-secondary);
+          text-transform: uppercase;
+          letter-spacing: 0.06em;
+          margin-bottom: 8px;
+        }
+      `}</style>
 
-      {/* Steps indicator */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 32, flexWrap: 'wrap', justifyContent: 'center' }}>
-        {['Buscar pedido', 'Seleccionar artículos', 'Etiqueta lista'].map((label, i) => (
-          <div key={label} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <div style={{
-              display: 'flex', alignItems: 'center', gap: 6,
-              color: step === i + 1 ? 'var(--accent)' : step > i + 1 ? 'var(--success)' : 'var(--muted)',
-              fontWeight: step === i + 1 ? 600 : 400,
-              fontSize: 14
-            }}>
-              <span style={{
-                width: 24, height: 24, borderRadius: '50%',
-                background: step === i + 1 ? 'var(--accent)' : step > i + 1 ? 'var(--success)' : 'var(--line)',
-                color: step >= i + 1 ? '#fff' : 'var(--muted)',
-                display: 'flex', alignItems: 'center', justifyContent: 'center',
-                fontSize: 12, fontWeight: 700, flexShrink: 0
-              }}>{step > i + 1 ? '✓' : i + 1}</span>
-              <span>{label}</span>
-            </div>
-            {i < 2 && <div style={{ width: 32, height: 1, background: 'var(--line)' }} />}
-          </div>
-        ))}
-      </div>
+      <div className="ios-page">
 
-      <div style={{
-        background: 'var(--surface)',
-        borderRadius: 'var(--radius)',
-        boxShadow: 'var(--shadow-md)',
-        border: '1px solid var(--line)',
-        width: '100%',
-        maxWidth: step === 2 ? 720 : 560,
-        padding: '32px 28px'
-      }}>
-
-        {/* ── STEP 1 ── */}
-        {step === 1 && (
-          <form onSubmit={handleLookup}>
-            <h2 style={{ margin: '0 0 6px', fontSize: 18, fontWeight: 700 }}>Encuentra tu pedido</h2>
-            <p style={{ margin: '0 0 24px', color: 'var(--muted)', fontSize: 14 }}>
-              Introduce el número de pedido y el email con el que realizaste la compra.
-            </p>
-
-            <label style={labelStyle}>
-              Número de pedido
-              <input style={inputStyle} type="text" placeholder="#12345" value={orderNumber} onChange={(e) => setOrderNumber(e.target.value)} required />
-            </label>
-
-            <label style={{ ...labelStyle, marginTop: 16 }}>
-              Email
-              <input style={inputStyle} type="email" placeholder="tu@email.com" value={email} onChange={(e) => setEmail(e.target.value)} required />
-            </label>
-
-            {error && <div style={errorStyle}>{error}</div>}
-
-            <button type="submit" style={btnPrimaryStyle} disabled={loading}>
-              {loading ? 'Buscando...' : 'Buscar pedido →'}
-            </button>
-          </form>
-        )}
-
-        {/* ── STEP 2 ── */}
-        {step === 2 && lookup && (
-          <form onSubmit={handleSubmitReturn}>
-            <div style={{ marginBottom: 20 }}>
-              <h2 style={{ margin: '0 0 4px', fontSize: 18, fontWeight: 700 }}>Selecciona los artículos</h2>
-              <div style={{ color: 'var(--muted)', fontSize: 14 }}>
-                Pedido {lookup.orderNumber} · {lookup.customerName}
-                {lookup.deliveredAt && ` · Entregado hace ${lookup.daysSince} días`}
-              </div>
-            </div>
-
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 12, marginBottom: 20 }}>
-              {lookup.items.map((item) => {
-                const sel = selections[item.id];
-                if (!sel) return null;
-                return (
-                  <div key={item.id} style={{
-                    border: `2px solid ${sel.selected ? 'var(--accent)' : 'var(--line)'}`,
-                    borderRadius: 'var(--radius-sm)',
-                    padding: '12px 14px',
-                    background: sel.selected ? 'var(--accent-soft)' : 'var(--surface-2)'
-                  }}>
-                    <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12 }}>
-                      {item.imageUrl && (
-                        // eslint-disable-next-line @next/next/no-img-element
-                        <img src={item.imageUrl} alt={item.title} style={{ width: 52, height: 52, objectFit: 'cover', borderRadius: 6, flexShrink: 0 }} />
-                      )}
-                      <div style={{ flex: 1 }}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 4 }}>
-                          <input type="checkbox" checked={sel.selected}
-                            onChange={(e) => updateSelection(item.id, { selected: e.target.checked })}
-                            style={{ width: 16, height: 16, accentColor: 'var(--accent)', cursor: 'pointer' }} />
-                          <span style={{ fontWeight: 600, fontSize: 14 }}>
-                            {item.title}{item.variantTitle ? ` — ${item.variantTitle}` : ''}
-                          </span>
-                          {item.unitPrice != null && (
-                            <span style={{ fontSize: 13, color: 'var(--muted)', marginLeft: 'auto' }}>
-                              {item.unitPrice.toFixed(2)}€
-                            </span>
-                          )}
-                        </div>
-                        <div style={{ fontSize: 12, color: 'var(--muted)', marginLeft: 26 }}>
-                          x{item.returnableQuantity} disponible{item.returnableQuantity !== 1 ? 's' : ''}
-                        </div>
-                      </div>
-                    </div>
-
-                    {sel.selected && (
-                      <div style={{ marginTop: 12, paddingTop: 12, borderTop: '1px solid var(--line)', display: 'flex', flexDirection: 'column', gap: 10 }}>
-                        {/* Tipo de acción */}
-                        <div style={{ display: 'flex', gap: 8 }}>
-                          <button type="button"
-                            onClick={() => updateSelection(item.id, { action: 'RETURN', replacement: undefined })}
-                            style={pillStyle(sel.action === 'RETURN')}>
-                            ↩️ Devolución
-                          </button>
-                          <button type="button"
-                            onClick={() => updateSelection(item.id, { action: 'EXCHANGE' })}
-                            style={pillStyle(sel.action === 'EXCHANGE')}>
-                            🔄 Cambio
-                          </button>
-                        </div>
-
-                        {/* Selector cambio */}
-                        {sel.action === 'EXCHANGE' && (
-                          <div>
-                            {sel.replacement ? (
-                              <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: 8, background: 'var(--success-soft)', borderRadius: 6 }}>
-                                {sel.replacement.imageUrl && (
-                                  // eslint-disable-next-line @next/next/no-img-element
-                                  <img src={sel.replacement.imageUrl} alt="" style={{ width: 40, height: 40, objectFit: 'cover', borderRadius: 4 }} />
-                                )}
-                                <div style={{ flex: 1, fontSize: 13 }}>
-                                  <div style={{ fontWeight: 600 }}>{sel.replacement.title}</div>
-                                  <div style={{ color: 'var(--muted)', fontSize: 12 }}>{sel.replacement.price.toFixed(2)}€</div>
-                                </div>
-                                <button type="button" onClick={() => openPicker(item.id)}
-                                  style={{ ...btnSecondaryStyle, padding: '6px 10px', fontSize: 12 }}>Cambiar</button>
-                              </div>
-                            ) : (
-                              <button type="button" onClick={() => openPicker(item.id)} style={{ ...btnSecondaryStyle, width: '100%' }}>
-                                + Elegir producto de cambio
-                              </button>
-                            )}
-                          </div>
-                        )}
-
-                        {/* Motivo */}
-                        <label style={{ ...labelStyle, margin: 0 }}>
-                          <span style={{ fontSize: 12 }}>Motivo *</span>
-                          <select style={{ ...inputStyle, fontSize: 13 }} value={sel.reason}
-                            onChange={(e) => updateSelection(item.id, { reason: e.target.value })} required={sel.selected}>
-                            <option value="">Selecciona motivo…</option>
-                            {Object.entries(lookup.reasons).map(([key, label]) => (
-                              <option key={key} value={key}>{label}</option>
-                            ))}
-                          </select>
-                        </label>
-
-                        <label style={{ ...labelStyle, margin: 0 }}>
-                          <span style={{ fontSize: 12 }}>Notas (opcional)</span>
-                          <input style={{ ...inputStyle, fontSize: 13 }} type="text"
-                            placeholder="Ej: talla muy pequeña…"
-                            value={sel.notes}
-                            onChange={(e) => updateSelection(item.id, { notes: e.target.value })} />
-                        </label>
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-
-            {/* Resumen importe */}
-            {summary && summary.exchangeCount + summary.returnCount > 0 && (
-              <div style={{ background: 'var(--surface-2)', border: '1px solid var(--line)', borderRadius: 'var(--radius-sm)', padding: '14px 16px', marginBottom: 16, fontSize: 14 }}>
-                <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--muted)', textTransform: 'uppercase', marginBottom: 8, letterSpacing: '0.05em' }}>Resumen</div>
-                {summary.exchangeCount > 0 && (
-                  <>
-                    <div style={summaryRow}><span>Reembolso por devuelto</span><span>−{summary.refund.toFixed(2)}€</span></div>
-                    <div style={summaryRow}><span>Cargo por nuevo producto</span><span>+{summary.charge.toFixed(2)}€</span></div>
-                    {summary.netDiff < 0 && (
-                      <div style={{ ...summaryRow, color: 'var(--success)', fontSize: 12 }}>
-                        <span>Diferencia a favor (se reembolsa al recibir)</span><span>{Math.abs(summary.netDiff).toFixed(2)}€</span>
-                      </div>
-                    )}
-                  </>
-                )}
-                <div style={summaryRow}><span>Etiqueta Correos</span><span>+{summary.labelFee.toFixed(2)}€</span></div>
-                <div style={{ ...summaryRow, fontWeight: 700, fontSize: 15, paddingTop: 8, borderTop: '1px solid var(--line)', marginTop: 6 }}>
-                  <span>Total a pagar</span><span>{summary.totalToPay.toFixed(2)}€</span>
-                </div>
-              </div>
-            )}
-
-            {error && <div style={errorStyle}>{error}</div>}
-
-            <div style={{ display: 'flex', gap: 10 }}>
-              <button type="button" style={btnSecondaryStyle} onClick={() => { setStep(1); setError(null); }}>← Volver</button>
-              <button type="submit" style={{ ...btnPrimaryStyle, flex: 1, marginTop: 0 }} disabled={loading || selectedCount === 0}>
-                {loading ? 'Procesando…' : `Continuar al pago (${selectedCount})`}
-              </button>
-            </div>
-          </form>
-        )}
-
-        {/* ── STEP 3 ── */}
-        {step === 3 && (
-          <Step3
-            result={returnResult}
-            pollStatus={pollStatus}
-            polling={polling}
-            apiUrl={API_URL}
-            onReset={() => {
-              setStep(1); setOrderNumber(''); setEmail(''); setLookup(null);
-              setSelections({}); setReturnResult(null); setPollStatus(null); setError(null);
-              window.history.replaceState({}, '', '/devoluciones');
-            }}
-          />
-        )}
-      </div>
-
-      <div style={{ marginTop: 24, fontSize: 12, color: 'var(--muted-soft)', textAlign: 'center' }}>
-        ¿Problemas? Contáctanos en tu email de compra.
-      </div>
-
-      {/* ── Catalog Picker Modal ── */}
-      {pickerForItem && (
-        <div style={{
-          position: 'fixed', inset: 0, background: 'rgba(15,23,42,0.6)',
-          display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16, zIndex: 100
-        }} onClick={() => { setPickerForItem(null); setExpandedProduct(null); }}>
-          <div onClick={(e) => e.stopPropagation()} style={{
-            background: 'var(--surface)', borderRadius: 'var(--radius)', width: '100%',
-            maxWidth: 720, maxHeight: '85vh', display: 'flex', flexDirection: 'column'
+        {/* Logo + Header */}
+        <div style={{ textAlign: 'center', marginBottom: 32 }}>
+          <div style={{
+            width: 64, height: 64, borderRadius: '50%',
+            background: 'var(--ios-blue)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            margin: '0 auto 16px',
+            boxShadow: '0 4px 20px rgba(0,122,255,0.3)'
           }}>
-            <div style={{ padding: '16px 20px', borderBottom: '1px solid var(--line)', display: 'flex', alignItems: 'center', gap: 12 }}>
-              <div style={{ fontSize: 16, fontWeight: 700, flex: 1 }}>Elige producto de cambio</div>
-              <button type="button" onClick={() => { setPickerForItem(null); setExpandedProduct(null); }}
-                style={{ ...btnSecondaryStyle, padding: '4px 10px', fontSize: 18 }}>✕</button>
-            </div>
-            <div style={{ padding: 16, borderBottom: '1px solid var(--line)' }}>
-              <input style={inputStyle} type="text" placeholder="Buscar producto…"
-                value={catalogQuery} onChange={(e) => setCatalogQuery(e.target.value)} />
-            </div>
-            <div style={{ flex: 1, overflowY: 'auto', padding: 16 }}>
-              {catalogLoading ? (
-                <div style={{ textAlign: 'center', color: 'var(--muted)', padding: 40 }}>Cargando productos…</div>
-              ) : filteredCatalog.length === 0 ? (
-                <div style={{ textAlign: 'center', color: 'var(--muted)', padding: 40 }}>Sin resultados</div>
-              ) : (
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))', gap: 12 }}>
-                  {filteredCatalog.slice(0, 100).map((product) => (
-                    <div key={product.id} style={{
-                      border: '1px solid var(--line)', borderRadius: 8, padding: 8, cursor: 'pointer',
-                      background: expandedProduct === product.id ? 'var(--accent-soft)' : 'var(--surface)'
-                    }} onClick={() => setExpandedProduct(expandedProduct === product.id ? null : product.id)}>
-                      {product.imageUrl && (
-                        // eslint-disable-next-line @next/next/no-img-element
-                        <img src={product.imageUrl} alt={product.title} style={{ width: '100%', height: 120, objectFit: 'cover', borderRadius: 4, marginBottom: 8 }} />
-                      )}
-                      <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 4 }}>{product.title}</div>
-                      <div style={{ fontSize: 12, color: 'var(--muted)' }}>
-                        {product.variants[0]?.price?.toFixed(2)}€ · {product.variants.length} variante{product.variants.length !== 1 ? 's' : ''}
-                      </div>
-                      {expandedProduct === product.id && (
-                        <div style={{ marginTop: 10, paddingTop: 10, borderTop: '1px solid var(--line)', display: 'flex', flexDirection: 'column', gap: 4 }}>
-                          {product.variants.map((v) => (
-                            <button key={v.id} type="button"
-                              onClick={(e) => { e.stopPropagation(); pickReplacement(v, product); }}
-                              style={{ ...btnSecondaryStyle, padding: '6px 10px', fontSize: 12, justifyContent: 'space-between', display: 'flex' }}>
-                              <span>{v.title}</span><span>{v.price.toFixed(2)}€</span>
-                            </button>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
+            <span style={{ color: '#fff', fontSize: 28, fontWeight: 800, letterSpacing: -1 }}>S</span>
+          </div>
+          <div style={{ fontSize: 26, fontWeight: 700, color: 'var(--ios-text)', letterSpacing: -0.5, marginBottom: 6 }}>
+            Devoluciones & Cambios
+          </div>
+          <div style={{ color: 'var(--ios-secondary)', fontSize: 15 }}>
+            Gestiona tu devolución de forma rápida
           </div>
         </div>
-      )}
-    </div>
+
+        {/* Steps indicator */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 28 }}>
+          {[1, 2, 3].map((s) => (
+            <div
+              key={s}
+              className={`ios-step-dot ${step === s ? 'active' : step > s ? 'done' : ''}`}
+            />
+          ))}
+        </div>
+
+        {/* Step labels */}
+        <div style={{ fontSize: 13, color: 'var(--ios-secondary)', marginBottom: 24, fontWeight: 500 }}>
+          {step === 1 && 'Paso 1 de 3 — Buscar pedido'}
+          {step === 2 && 'Paso 2 de 3 — Seleccionar artículos'}
+          {step === 3 && 'Paso 3 de 3 — Confirmación'}
+        </div>
+
+        <div className={`ios-card${step === 2 ? ' ios-card-wide' : ''}`} style={{ padding: '28px 24px' }}>
+
+          {/* ── STEP 1 ── */}
+          {step === 1 && (
+            <form onSubmit={handleLookup}>
+              <div style={{ marginBottom: 28, textAlign: 'center' }}>
+                <h2 style={{ margin: '0 0 6px', fontSize: 22, fontWeight: 700, color: 'var(--ios-text)', letterSpacing: -0.3 }}>
+                  Encuentra tu pedido
+                </h2>
+                <p style={{ margin: 0, color: 'var(--ios-secondary)', fontSize: 15, lineHeight: 1.5 }}>
+                  Introduce el número de pedido y el email con el que realizaste la compra.
+                </p>
+              </div>
+
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                <div>
+                  <div className="ios-section-label">Número de pedido</div>
+                  <input
+                    className="ios-input"
+                    type="text"
+                    placeholder="#12345"
+                    value={orderNumber}
+                    onChange={(e) => setOrderNumber(e.target.value)}
+                    required
+                  />
+                </div>
+
+                <div>
+                  <div className="ios-section-label">Email</div>
+                  <input
+                    className="ios-input"
+                    type="email"
+                    placeholder="tu@email.com"
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    required
+                  />
+                </div>
+              </div>
+
+              {error && (
+                <div className="ios-error-banner">
+                  <span>⚠</span>
+                  <span style={{ flex: 1 }}>{error}</span>
+                  <button type="button" className="ios-error-dismiss" onClick={() => setError(null)}>✕</button>
+                </div>
+              )}
+
+              <button
+                type="submit"
+                className="ios-btn-primary"
+                style={{ marginTop: 24, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10 }}
+                disabled={loading}
+              >
+                {loading ? <><span className="ios-spinner" />Buscando...</> : 'Buscar pedido'}
+              </button>
+            </form>
+          )}
+
+          {/* ── STEP 2 ── */}
+          {step === 2 && lookup && (
+            <form onSubmit={handleSubmitReturn}>
+              <div style={{ marginBottom: 24 }}>
+                <h2 style={{ margin: '0 0 4px', fontSize: 20, fontWeight: 700, color: 'var(--ios-text)', letterSpacing: -0.3 }}>
+                  Selecciona artículos
+                </h2>
+                <div style={{ color: 'var(--ios-secondary)', fontSize: 14 }}>
+                  Pedido {lookup.orderNumber} · {lookup.customerName}
+                  {lookup.deliveredAt && ` · Entregado hace ${lookup.daysSince} días`}
+                </div>
+              </div>
+
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 12, marginBottom: 20 }}>
+                {lookup.items.map((item) => {
+                  const sel = selections[item.id];
+                  if (!sel) return null;
+                  return (
+                    <div key={item.id} className={`ios-item-card${sel.selected ? ' selected' : ''}`}>
+                      {/* Item header row */}
+                      <div
+                        style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '16px 16px', cursor: 'pointer' }}
+                        onClick={() => updateSelection(item.id, { selected: !sel.selected })}
+                      >
+                        {item.imageUrl ? (
+                          // eslint-disable-next-line @next/next/no-img-element
+                          <img
+                            src={item.imageUrl}
+                            alt={item.title}
+                            style={{ width: 56, height: 56, objectFit: 'cover', borderRadius: 10, flexShrink: 0 }}
+                          />
+                        ) : (
+                          <div className="ios-image-placeholder">👕</div>
+                        )}
+
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ fontSize: 16, fontWeight: 600, color: 'var(--ios-text)', marginBottom: 3, letterSpacing: -0.2 }}>
+                            {item.title}
+                          </div>
+                          {item.variantTitle && (
+                            <div style={{ fontSize: 13, color: 'var(--ios-secondary)', marginBottom: 2 }}>
+                              {item.variantTitle}
+                            </div>
+                          )}
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                            {item.unitPrice != null && (
+                              <span style={{ fontSize: 14, fontWeight: 600, color: 'var(--ios-blue)' }}>
+                                {item.unitPrice.toFixed(2)}€
+                              </span>
+                            )}
+                            <span style={{ fontSize: 12, color: 'var(--ios-secondary)' }}>
+                              ×{item.returnableQuantity} disponible{item.returnableQuantity !== 1 ? 's' : ''}
+                            </span>
+                          </div>
+                        </div>
+
+                        <div
+                          className={`ios-checkbox${sel.selected ? ' checked' : ''}`}
+                          style={{ flexShrink: 0 }}
+                        >
+                          {sel.selected && <span className="ios-checkbox-check">✓</span>}
+                        </div>
+                      </div>
+
+                      {/* Expanded options */}
+                      {sel.selected && (
+                        <div style={{ borderTop: '1px solid var(--ios-fill)', padding: '16px 16px', display: 'flex', flexDirection: 'column', gap: 14 }}>
+
+                          {/* Action segmented control */}
+                          <div>
+                            <div className="ios-section-label">Tipo de gestión</div>
+                            <div className="ios-segment">
+                              <button
+                                type="button"
+                                className={`ios-segment-btn${sel.action === 'RETURN' ? ' active' : ''}`}
+                                onClick={() => updateSelection(item.id, { action: 'RETURN', replacement: undefined })}
+                              >
+                                Devolver
+                              </button>
+                              <button
+                                type="button"
+                                className={`ios-segment-btn${sel.action === 'EXCHANGE' ? ' active' : ''}`}
+                                onClick={() => updateSelection(item.id, { action: 'EXCHANGE' })}
+                              >
+                                Cambiar
+                              </button>
+                            </div>
+                          </div>
+
+                          {/* Exchange replacement picker */}
+                          {sel.action === 'EXCHANGE' && (
+                            <div>
+                              <div className="ios-section-label">Producto de cambio</div>
+                              {sel.replacement ? (
+                                <div className="ios-replacement-chip">
+                                  {sel.replacement.imageUrl && (
+                                    // eslint-disable-next-line @next/next/no-img-element
+                                    <img src={sel.replacement.imageUrl} alt="" style={{ width: 40, height: 40, objectFit: 'cover', borderRadius: 8, flexShrink: 0 }} />
+                                  )}
+                                  <div style={{ flex: 1, minWidth: 0 }}>
+                                    <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--ios-text)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                                      {sel.replacement.title}
+                                    </div>
+                                    <div style={{ fontSize: 13, color: 'var(--ios-secondary)' }}>{sel.replacement.price.toFixed(2)}€</div>
+                                  </div>
+                                  <button
+                                    type="button"
+                                    className="ios-btn-secondary"
+                                    style={{ padding: '8px 12px', fontSize: 13 }}
+                                    onClick={() => openPicker(item.id)}
+                                  >
+                                    Cambiar
+                                  </button>
+                                </div>
+                              ) : (
+                                <button
+                                  type="button"
+                                  className="ios-btn-secondary"
+                                  style={{ width: '100%', padding: '13px 16px' }}
+                                  onClick={() => openPicker(item.id)}
+                                >
+                                  + Elegir producto de cambio
+                                </button>
+                              )}
+                            </div>
+                          )}
+
+                          {/* Reason */}
+                          <div>
+                            <div className="ios-section-label">Motivo *</div>
+                            <select
+                              className="ios-select"
+                              value={sel.reason}
+                              onChange={(e) => updateSelection(item.id, { reason: e.target.value })}
+                              required={sel.selected}
+                            >
+                              <option value="">Selecciona un motivo…</option>
+                              {Object.entries(lookup.reasons).map(([key, label]) => (
+                                <option key={key} value={key}>{label}</option>
+                              ))}
+                            </select>
+                          </div>
+
+                          {/* Notes */}
+                          <div>
+                            <div className="ios-section-label">Notas (opcional)</div>
+                            <input
+                              className="ios-input"
+                              type="text"
+                              placeholder="Ej: talla muy pequeña…"
+                              value={sel.notes}
+                              onChange={(e) => updateSelection(item.id, { notes: e.target.value })}
+                            />
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* Summary card */}
+              {summary && summary.exchangeCount + summary.returnCount > 0 && (
+                <div style={{
+                  background: 'var(--ios-bg)',
+                  borderRadius: 16,
+                  padding: '16px 18px',
+                  marginBottom: 20
+                }}>
+                  <div className="ios-section-label">Resumen</div>
+                  {summary.exchangeCount > 0 && (
+                    <>
+                      <div className="ios-summary-row">
+                        <span style={{ color: 'var(--ios-secondary)' }}>Reembolso por devuelto</span>
+                        <span>−{summary.refund.toFixed(2)}€</span>
+                      </div>
+                      <div className="ios-summary-row">
+                        <span style={{ color: 'var(--ios-secondary)' }}>Cargo por nuevo producto</span>
+                        <span>+{summary.charge.toFixed(2)}€</span>
+                      </div>
+                      {summary.netDiff < 0 && (
+                        <div className="ios-summary-row" style={{ color: 'var(--ios-green)', fontSize: 13 }}>
+                          <span>Diferencia a favor</span>
+                          <span>{Math.abs(summary.netDiff).toFixed(2)}€</span>
+                        </div>
+                      )}
+                    </>
+                  )}
+                  <div className="ios-summary-row">
+                    <span style={{ color: 'var(--ios-secondary)' }}>Etiqueta Correos</span>
+                    <span>+{summary.labelFee.toFixed(2)}€</span>
+                  </div>
+                  <div className="ios-summary-row total">
+                    <span>Total a pagar</span>
+                    <span style={{ color: 'var(--ios-blue)' }}>{summary.totalToPay.toFixed(2)}€</span>
+                  </div>
+                </div>
+              )}
+
+              {error && (
+                <div className="ios-error-banner" style={{ marginBottom: 16 }}>
+                  <span>⚠</span>
+                  <span style={{ flex: 1 }}>{error}</span>
+                  <button type="button" className="ios-error-dismiss" onClick={() => setError(null)}>✕</button>
+                </div>
+              )}
+
+              <div style={{ display: 'flex', gap: 10 }}>
+                <button
+                  type="button"
+                  className="ios-btn-secondary"
+                  style={{ flexShrink: 0 }}
+                  onClick={() => { setStep(1); setError(null); }}
+                >
+                  Volver
+                </button>
+                <button
+                  type="submit"
+                  className="ios-btn-primary"
+                  style={{ flex: 1, margin: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10 }}
+                  disabled={loading || selectedCount === 0}
+                >
+                  {loading
+                    ? <><span className="ios-spinner" />Procesando…</>
+                    : `Continuar (${selectedCount} artículo${selectedCount !== 1 ? 's' : ''})`
+                  }
+                </button>
+              </div>
+            </form>
+          )}
+
+          {/* ── STEP 3 ── */}
+          {step === 3 && (
+            <Step3
+              result={returnResult}
+              pollStatus={pollStatus}
+              polling={polling}
+              apiUrl={API_URL}
+              onReset={() => {
+                setStep(1); setOrderNumber(''); setEmail(''); setLookup(null);
+                setSelections({}); setReturnResult(null); setPollStatus(null); setError(null);
+                window.history.replaceState({}, '', '/devoluciones');
+              }}
+            />
+          )}
+        </div>
+
+        <div style={{ marginTop: 24, fontSize: 13, color: 'var(--ios-secondary)', textAlign: 'center' }}>
+          ¿Problemas? Contáctanos en tu email de compra.
+        </div>
+
+        {/* ── Catalog Picker Modal ── */}
+        {pickerForItem && (
+          <div
+            className="ios-modal-overlay"
+            onClick={() => { setPickerForItem(null); setExpandedProduct(null); }}
+          >
+            <div
+              className="ios-modal"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="ios-modal-handle" />
+
+              <div style={{ padding: '16px 20px 12px', display: 'flex', alignItems: 'center', gap: 12 }}>
+                <div style={{ fontSize: 17, fontWeight: 700, color: 'var(--ios-text)', flex: 1, letterSpacing: -0.3 }}>
+                  Elige producto de cambio
+                </div>
+                <button
+                  type="button"
+                  onClick={() => { setPickerForItem(null); setExpandedProduct(null); }}
+                  style={{
+                    width: 30, height: 30, borderRadius: '50%',
+                    background: 'var(--ios-fill)', border: 'none',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    cursor: 'pointer', fontSize: 14, color: 'var(--ios-secondary)'
+                  }}
+                >
+                  ✕
+                </button>
+              </div>
+
+              <div style={{ padding: '0 16px 12px' }}>
+                <input
+                  className="ios-input"
+                  type="text"
+                  placeholder="Buscar producto…"
+                  value={catalogQuery}
+                  onChange={(e) => setCatalogQuery(e.target.value)}
+                />
+              </div>
+
+              <div style={{ flex: 1, overflowY: 'auto', padding: '0 16px 24px' }}>
+                {catalogLoading ? (
+                  <div style={{ textAlign: 'center', padding: 40 }}>
+                    <div className="ios-spinner-blue" style={{ marginBottom: 12 }} />
+                    <div style={{ color: 'var(--ios-secondary)', fontSize: 15 }}>Cargando productos…</div>
+                  </div>
+                ) : filteredCatalog.length === 0 ? (
+                  <div style={{ textAlign: 'center', color: 'var(--ios-secondary)', padding: 40, fontSize: 15 }}>
+                    Sin resultados
+                  </div>
+                ) : (
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(150px, 1fr))', gap: 10 }}>
+                    {filteredCatalog.slice(0, 100).map((product) => (
+                      <div
+                        key={product.id}
+                        className={`ios-product-card${expandedProduct === product.id ? ' expanded' : ''}`}
+                        onClick={() => setExpandedProduct(expandedProduct === product.id ? null : product.id)}
+                      >
+                        {product.imageUrl ? (
+                          // eslint-disable-next-line @next/next/no-img-element
+                          <img
+                            src={product.imageUrl}
+                            alt={product.title}
+                            style={{ width: '100%', height: 110, objectFit: 'cover', borderRadius: 8, marginBottom: 8 }}
+                          />
+                        ) : (
+                          <div style={{ width: '100%', height: 110, background: 'var(--ios-fill)', borderRadius: 8, marginBottom: 8, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 32 }}>
+                            👕
+                          </div>
+                        )}
+                        <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--ios-text)', marginBottom: 3, lineHeight: 1.3 }}>
+                          {product.title}
+                        </div>
+                        <div style={{ fontSize: 12, color: 'var(--ios-secondary)' }}>
+                          Desde {product.variants[0]?.price?.toFixed(2)}€
+                        </div>
+                        {expandedProduct === product.id && (
+                          <div style={{ marginTop: 10, display: 'flex', flexDirection: 'column', gap: 6 }}>
+                            {product.variants.map((v) => (
+                              <button
+                                key={v.id}
+                                type="button"
+                                className="ios-variant-btn"
+                                onClick={(e) => { e.stopPropagation(); pickReplacement(v, product); }}
+                              >
+                                <span style={{ fontWeight: 500 }}>{v.title}</span>
+                                <span style={{ color: 'var(--ios-blue)', fontWeight: 600 }}>{v.price.toFixed(2)}€</span>
+                              </button>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+    </>
   );
 }
 
@@ -593,17 +1118,20 @@ function Step3({ result, pollStatus, polling, apiUrl, onReset }: {
   apiUrl: string;
   onReset: () => void;
 }) {
-  // If returning from Shopify with return_id in URL, use pollStatus
   const isPaid = pollStatus?.paymentStatus === 'PAID' || result?.paymentStatus === 'PAID';
   const labelUrl = pollStatus?.labelUrl ?? null;
   const trackingNumber = pollStatus?.trackingNumber ?? null;
 
   if (polling && !isPaid) {
     return (
-      <div style={{ textAlign: 'center', padding: 20 }}>
-        <div style={{ fontSize: 40, marginBottom: 12 }}>⏳</div>
-        <h2 style={{ margin: '0 0 8px', fontSize: 18, fontWeight: 700 }}>Confirmando pago…</h2>
-        <p style={{ margin: 0, color: 'var(--muted)', fontSize: 14 }}>
+      <div style={{ textAlign: 'center', padding: '20px 0' }}>
+        <div style={{ marginBottom: 20 }}>
+          <div className="ios-spinner-blue" />
+        </div>
+        <h2 style={{ margin: '0 0 8px', fontSize: 20, fontWeight: 700, color: 'var(--ios-text)', letterSpacing: -0.3 }}>
+          Confirmando pago…
+        </h2>
+        <p style={{ margin: 0, color: 'var(--ios-secondary)', fontSize: 15, lineHeight: 1.5 }}>
           Esperando confirmación de Shopify. La etiqueta se generará en cuanto recibamos el pago.
         </p>
       </div>
@@ -613,132 +1141,122 @@ function Step3({ result, pollStatus, polling, apiUrl, onReset }: {
   if (isPaid && labelUrl) {
     return (
       <div>
-        <div style={{ textAlign: 'center', marginBottom: 24 }}>
-          <div style={{
-            width: 56, height: 56, borderRadius: '50%',
-            background: 'var(--success-soft)', color: 'var(--success)',
-            margin: '0 auto 12px',
-            display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 24
-          }}>✓</div>
-          <h2 style={{ margin: '0 0 6px', fontSize: 20, fontWeight: 700 }}>¡Etiqueta lista!</h2>
-          <p style={{ margin: 0, color: 'var(--muted)', fontSize: 14 }}>
+        <div style={{ textAlign: 'center', marginBottom: 28 }}>
+          <div className="ios-success-icon">
+            <span className="ios-success-checkmark">✓</span>
+          </div>
+          <h2 style={{ margin: '0 0 8px', fontSize: 22, fontWeight: 700, color: 'var(--ios-text)', letterSpacing: -0.3 }}>
+            ¡Etiqueta lista!
+          </h2>
+          <p style={{ margin: 0, color: 'var(--ios-secondary)', fontSize: 15, lineHeight: 1.5 }}>
             Tu pago se ha confirmado. Descarga, imprime y pega en el paquete.
           </p>
         </div>
 
         {trackingNumber && (
-          <div style={{ background: 'var(--surface-2)', border: '1px solid var(--line)', borderRadius: 'var(--radius-sm)', padding: '10px 14px', marginBottom: 16, fontSize: 13 }}>
-            <span style={{ color: 'var(--muted)' }}>Tracking: </span>
-            <span style={{ fontWeight: 600 }}>{trackingNumber}</span>
+          <div className="ios-tracking-chip">
+            <span style={{ fontSize: 20 }}>📦</span>
+            <div>
+              <div style={{ fontSize: 11, color: 'var(--ios-secondary)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 2 }}>
+                Número de tracking
+              </div>
+              <div style={{ fontSize: 15, fontWeight: 600, color: 'var(--ios-text)' }}>{trackingNumber}</div>
+            </div>
           </div>
         )}
 
-        <a href={labelUrl.startsWith('http') ? labelUrl : `${apiUrl}${labelUrl}`}
-          target="_blank" rel="noopener noreferrer"
-          style={{
-            display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
-            background: 'var(--accent)', color: '#fff',
-            borderRadius: 'var(--radius-sm)', padding: '12px 20px',
-            fontWeight: 600, fontSize: 15, textDecoration: 'none', marginBottom: 12
-          }}>
-          📥 Descargar etiqueta PDF
+        <a
+          href={labelUrl.startsWith('http') ? labelUrl : `${apiUrl}${labelUrl}`}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="ios-download-btn"
+          style={{ marginBottom: 12 }}
+        >
+          <span style={{ fontSize: 20 }}>⬇</span>
+          Descargar etiqueta PDF
         </a>
 
-        <button type="button" style={btnSecondaryStyle} onClick={onReset}>Nueva devolución</button>
+        <button type="button" className="ios-btn-secondary" style={{ width: '100%' }} onClick={onReset}>
+          Nueva devolución
+        </button>
       </div>
     );
   }
 
-  // Pending payment — show checkout link
   if (result?.checkoutUrl) {
     const returnUrl = `${typeof window !== 'undefined' ? window.location.origin : ''}/devoluciones?return_id=${result.returnId}`;
     return (
       <div>
-        <div style={{ textAlign: 'center', marginBottom: 20 }}>
+        <div style={{ textAlign: 'center', marginBottom: 24 }}>
           <div style={{
-            width: 56, height: 56, borderRadius: '50%',
-            background: 'var(--accent-soft)', color: 'var(--accent)',
-            margin: '0 auto 12px',
-            display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 24
-          }}>💳</div>
-          <h2 style={{ margin: '0 0 6px', fontSize: 20, fontWeight: 700 }}>Último paso: pagar</h2>
-          <p style={{ margin: 0, color: 'var(--muted)', fontSize: 14 }}>
+            width: 72, height: 72, borderRadius: '50%',
+            background: 'var(--ios-blue-soft)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            margin: '0 auto 16px', fontSize: 32
+          }}>
+            💳
+          </div>
+          <h2 style={{ margin: '0 0 8px', fontSize: 22, fontWeight: 700, color: 'var(--ios-text)', letterSpacing: -0.3 }}>
+            Último paso: pagar
+          </h2>
+          <p style={{ margin: 0, color: 'var(--ios-secondary)', fontSize: 15, lineHeight: 1.5 }}>
             {result.type === 'EXCHANGE'
               ? 'Para procesar el cambio, paga la diferencia + etiqueta.'
               : 'Para procesar la devolución, paga la etiqueta de Correos.'}
           </p>
         </div>
 
-        <div style={{ background: 'var(--surface-2)', border: '1px solid var(--line)', borderRadius: 'var(--radius-sm)', padding: '14px 16px', marginBottom: 16, fontSize: 14 }}>
+        <div style={{ background: 'var(--ios-bg)', borderRadius: 16, padding: '16px 18px', marginBottom: 20 }}>
+          <div
+            style={{ fontSize: 12, fontWeight: 600, color: 'var(--ios-secondary)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 10 }}
+          >
+            Desglose
+          </div>
           {result.type === 'EXCHANGE' && (
             <>
-              <div style={summaryRow}><span>Reembolso</span><span>−{result.refundAmount?.toFixed(2) ?? '0.00'}€</span></div>
-              <div style={summaryRow}><span>Cargo</span><span>+{result.chargeAmount?.toFixed(2) ?? '0.00'}€</span></div>
+              <div className="ios-summary-row">
+                <span style={{ color: 'var(--ios-secondary)' }}>Reembolso</span>
+                <span>−{result.refundAmount?.toFixed(2) ?? '0.00'}€</span>
+              </div>
+              <div className="ios-summary-row">
+                <span style={{ color: 'var(--ios-secondary)' }}>Cargo</span>
+                <span>+{result.chargeAmount?.toFixed(2) ?? '0.00'}€</span>
+              </div>
             </>
           )}
-          <div style={summaryRow}><span>Etiqueta Correos</span><span>+{result.labelFee?.toFixed(2) ?? '0.00'}€</span></div>
-          <div style={{ ...summaryRow, fontWeight: 700, fontSize: 16, paddingTop: 8, borderTop: '1px solid var(--line)', marginTop: 6 }}>
-            <span>Total</span><span>{result.totalAmount?.toFixed(2) ?? '0.00'}€</span>
+          <div className="ios-summary-row">
+            <span style={{ color: 'var(--ios-secondary)' }}>Etiqueta Correos</span>
+            <span>+{result.labelFee?.toFixed(2) ?? '0.00'}€</span>
+          </div>
+          <div className="ios-summary-row total">
+            <span>Total</span>
+            <span style={{ color: 'var(--ios-blue)' }}>{result.totalAmount?.toFixed(2) ?? '0.00'}€</span>
           </div>
         </div>
 
-        <a href={`${result.checkoutUrl}?return_url=${encodeURIComponent(returnUrl)}`}
-          style={{
-            display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
-            background: 'var(--accent)', color: '#fff',
-            borderRadius: 'var(--radius-sm)', padding: '14px 20px',
-            fontWeight: 600, fontSize: 16, textDecoration: 'none', marginBottom: 12
-          }}>
-          Pagar {result.totalAmount?.toFixed(2)}€ →
+        <a
+          href={`${result.checkoutUrl}?return_url=${encodeURIComponent(returnUrl)}`}
+          className="ios-download-btn"
+          style={{ marginBottom: 12 }}
+        >
+          Pagar {result.totalAmount?.toFixed(2)}€
         </a>
 
-        <p style={{ fontSize: 12, color: 'var(--muted)', textAlign: 'center', marginBottom: 16 }}>
+        <p style={{ fontSize: 13, color: 'var(--ios-secondary)', textAlign: 'center', margin: '0 0 16px' }}>
           Serás redirigido al checkout seguro de Shopify. Al volver, tendrás tu etiqueta lista.
         </p>
 
-        <button type="button" style={btnSecondaryStyle} onClick={onReset}>Cancelar</button>
+        <button type="button" className="ios-btn-secondary" style={{ width: '100%' }} onClick={onReset}>
+          Cancelar
+        </button>
       </div>
     );
   }
 
   return (
-    <div style={{ textAlign: 'center', padding: 20 }}>
-      <p style={{ color: 'var(--muted)' }}>Cargando…</p>
+    <div style={{ textAlign: 'center', padding: '20px 0' }}>
+      <div className="ios-spinner-blue" style={{ marginBottom: 12 }} />
+      <p style={{ color: 'var(--ios-secondary)', fontSize: 15 }}>Cargando…</p>
     </div>
   );
 }
-
-// Styles
-const labelStyle: React.CSSProperties = {
-  display: 'flex', flexDirection: 'column', gap: 4,
-  fontSize: 14, fontWeight: 500, color: 'var(--ink-soft)'
-};
-const inputStyle: React.CSSProperties = {
-  padding: '9px 12px', borderRadius: 'var(--radius-sm)', border: '1px solid var(--line)',
-  fontSize: 15, color: 'var(--ink)', background: 'var(--surface)', outline: 'none', width: '100%'
-};
-const btnPrimaryStyle: React.CSSProperties = {
-  marginTop: 20, width: '100%', padding: '12px 20px',
-  background: 'var(--accent)', color: '#fff', border: 'none',
-  borderRadius: 'var(--radius-sm)', fontSize: 15, fontWeight: 600, cursor: 'pointer'
-};
-const btnSecondaryStyle: React.CSSProperties = {
-  padding: '10px 16px', background: 'var(--surface)', color: 'var(--ink)',
-  border: '1px solid var(--line)', borderRadius: 'var(--radius-sm)',
-  fontSize: 14, fontWeight: 500, cursor: 'pointer', textAlign: 'center'
-};
-const errorStyle: React.CSSProperties = {
-  marginTop: 12, padding: '10px 14px', background: 'var(--danger-soft)',
-  color: 'var(--danger)', borderRadius: 'var(--radius-sm)',
-  fontSize: 14, border: '1px solid #fca5a5'
-};
-const summaryRow: React.CSSProperties = {
-  display: 'flex', justifyContent: 'space-between', padding: '4px 0'
-};
-const pillStyle = (active: boolean): React.CSSProperties => ({
-  flex: 1, padding: '8px 12px',
-  background: active ? 'var(--accent)' : 'var(--surface)',
-  color: active ? '#fff' : 'var(--ink)',
-  border: `1px solid ${active ? 'var(--accent)' : 'var(--line)'}`,
-  borderRadius: 6, fontSize: 13, fontWeight: 600, cursor: 'pointer'
-});

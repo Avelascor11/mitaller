@@ -224,7 +224,7 @@ export class SendcloudAdapter {
       },
       to_address: toWarehouse,
       ship_with: { shipping_product_code: shippingProductCode },
-      order_number: `RETURN-${input.orderNumber}`,
+      order_number: `${(input.returnType ?? 'RETURN').toUpperCase() === 'EXCHANGE' ? 'CAMBIO' : 'DEVOLUCION'} PEDIDO ${input.orderNumber}`,
       send_tracking_emails: false
     };
 
@@ -890,6 +890,7 @@ export interface SendcloudReturnInput {
   customerName: string;
   customerEmail: string;
   customerAddressJson: unknown;
+  returnType?: string;
 }
 
 interface SendcloudReturnV3Response {

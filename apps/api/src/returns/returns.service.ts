@@ -243,7 +243,8 @@ export class ReturnsService {
           orderNumber: order.orderNumber,
           customerName: order.customerName,
           customerEmail: order.customerEmail ?? dto.email,
-          customerAddressJson: order.shippingAddressJson
+          customerAddressJson: order.shippingAddressJson,
+          returnType: type
         });
         sendcloudParcelId = sc.parcelId || sc.returnId || null;
         sendcloudTracking = sc.trackingNumber ?? null;
@@ -344,7 +345,8 @@ export class ReturnsService {
         orderNumber: order.orderNumber,
         customerName: order.customerName,
         customerEmail: order.customerEmail ?? returnRecord.customerEmail,
-        customerAddressJson: order.shippingAddressJson
+        customerAddressJson: order.shippingAddressJson,
+        returnType: returnRecord.type
       });
     } catch (error) {
       console.error('[ReturnsService] SendCloud error after payment:', error);
@@ -440,6 +442,43 @@ export class ReturnsService {
       metadataJson: { status }
     });
     return record;
+  }
+
+  async verifyReturn(id: string, data: { verificationStatus: 'OK' | 'ISSUE'; verificationNotes?: string }) {
+    const record = await this.prisma.return.findUnique({ where: { id } });
+    if (!record) throw new NotFoundException(`Devolución ${id} no encontrada`);
+
+    const newStatus = data.verificationStatus === 'OK' ? 'APPROVED' : 'REJECTED';
+
+    const updated = await this.prisma.return.update({
+      where: { id },
+      data: {
+        verificationStatus: data.verificationStatus,
+        verificationNotes: data.verificationNotes,
+        verifiedAt: new Date(),
+        receivedAt: record.receivedAt ?? new Date(),
+        status: newStatus as never
+      }
+    });
+
+    await this.activity.log({
+      entityType: 'Return',
+      entityId: id,
+      action: 'RETURN_VERIFIED',
+      message: `Verificación ${data.verificationStatus} para ${record.shopifyOrderNumber}${data.verificationNotes ? ': ' + data.verificationNotes : ''}`,
+      metadataJson: { verificationStatus: data.verificationStatus }
+    });
+
+    return updated;
+  }
+
+  async markReceived(id: string) {
+    const record = await this.prisma.return.findUnique({ where: { id } });
+    if (!record) throw new NotFoundException(`Devolución ${id} no encontrada`);
+    return this.prisma.return.update({
+      where: { id },
+      data: { receivedAt: new Date(), status: 'RECEIVED' as never }
+    });
   }
 
   private shippingAddressFromOrder(shippingAddressJson: unknown, fallbackName: string) {

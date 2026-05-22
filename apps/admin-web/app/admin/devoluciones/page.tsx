@@ -43,6 +43,10 @@ interface ReturnRecord {
   notes?: string | null;
   totalAmount?: number | null;
   createdAt: string;
+  receivedAt?: string | null;
+  verifiedAt?: string | null;
+  verificationStatus?: string | null;
+  verificationNotes?: string | null;
   order: { orderNumber: string; customerName: string; customerEmail?: string | null };
   items: Array<{
     id: string;
@@ -77,6 +81,31 @@ interface ReturnException {
 }
 
 type Tab = 'list' | 'config' | 'exceptions';
+
+function VerifyPanel({ returnId, onVerify }: { returnId: string; onVerify: (id: string, status: 'OK' | 'ISSUE', notes?: string) => void }) {
+  const [notes, setNotes] = useState('');
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+      <input
+        type="text"
+        placeholder="Notas de verificación (opcional)"
+        value={notes}
+        onChange={(e) => setNotes(e.target.value)}
+        style={{ padding: '7px 10px', borderRadius: 8, border: '1px solid var(--line)', fontSize: 13, width: '100%' }}
+      />
+      <div style={{ display: 'flex', gap: 8 }}>
+        <button onClick={() => onVerify(returnId, 'OK', notes || undefined)}
+          style={{ flex: 1, padding: '7px 0', fontSize: 13, fontWeight: 700, background: '#d1fae5', color: '#047857', border: '1px solid #047857', borderRadius: 8, cursor: 'pointer' }}>
+          ✅ Todo correcto
+        </button>
+        <button onClick={() => onVerify(returnId, 'ISSUE', notes || 'Incidencia detectada')}
+          style={{ flex: 1, padding: '7px 0', fontSize: 13, fontWeight: 700, background: '#fee2e2', color: '#b91c1c', border: '1px solid #b91c1c', borderRadius: 8, cursor: 'pointer' }}>
+          ⚠️ Hay incidencia
+        </button>
+      </div>
+    </div>
+  );
+}
 
 function StatusBadge({ status }: { status: string }) {
   const meta = STATUS_META[status] ?? { label: status, color: '#64748b', bg: '#f1f5f9' };
@@ -211,6 +240,26 @@ export default function AdminDevolucionesPage() {
     } catch (err) { alert(err instanceof Error ? err.message : 'Error'); }
   }
 
+  async function markReceived(returnId: string) {
+    try {
+      await fetch(`${API_URL}/returns/${returnId}/received`, {
+        method: 'PATCH', headers: auth(token)
+      });
+      loadAll(token);
+    } catch (err) { alert(err instanceof Error ? err.message : 'Error'); }
+  }
+
+  async function verifyReturn(returnId: string, verificationStatus: 'OK' | 'ISSUE', verificationNotes?: string) {
+    try {
+      await fetch(`${API_URL}/returns/${returnId}/verify`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', ...auth(token) },
+        body: JSON.stringify({ verificationStatus, verificationNotes })
+      });
+      loadAll(token);
+    } catch (err) { alert(err instanceof Error ? err.message : 'Error'); }
+  }
+
   async function toggleException(id: string, active: boolean) {
     await fetch(`${API_URL}/returns/admin/exceptions/${id}`, {
       method: 'PATCH',
@@ -332,6 +381,40 @@ export default function AdminDevolucionesPage() {
                         </div>
                       ))}
                     </div>
+                    {/* Verification panel */}
+                    <div style={{ margin: '12px 0 16px', padding: 14, background: 'var(--surface)', border: '1px solid var(--line)', borderRadius: 10 }}>
+                      <div style={{ fontSize: 12, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--muted)', marginBottom: 10 }}>
+                        📦 Verificación al recibir
+                      </div>
+                      {ret.verificationStatus ? (
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                          <span style={{
+                            fontSize: 13, fontWeight: 700, padding: '4px 12px', borderRadius: 20,
+                            background: ret.verificationStatus === 'OK' ? '#d1fae5' : '#fee2e2',
+                            color: ret.verificationStatus === 'OK' ? '#047857' : '#b91c1c'
+                          }}>
+                            {ret.verificationStatus === 'OK' ? '✅ Correcto' : '⚠️ Incidencia'}
+                          </span>
+                          {ret.verificationNotes && <span style={{ fontSize: 13, color: 'var(--muted)' }}>{ret.verificationNotes}</span>}
+                          {ret.verifiedAt && <span style={{ fontSize: 11, color: 'var(--muted)', marginLeft: 'auto' }}>{new Date(ret.verifiedAt).toLocaleDateString('es-ES', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })}</span>}
+                        </div>
+                      ) : ret.status === 'RECEIVED' ? (
+                        <VerifyPanel returnId={ret.id} onVerify={verifyReturn} />
+                      ) : (
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                          <span style={{ fontSize: 13, color: 'var(--muted)' }}>
+                            {ret.receivedAt ? `Recibido ${new Date(ret.receivedAt).toLocaleDateString('es-ES')}` : 'Pendiente de recibir'}
+                          </span>
+                          {!ret.receivedAt && ['LABEL_CREATED', 'REQUESTED'].includes(ret.status) && (
+                            <button onClick={() => markReceived(ret.id)}
+                              style={{ padding: '5px 14px', fontSize: 12, fontWeight: 600, background: '#ede9fe', color: '#6d28d9', border: '1px solid #6d28d933', borderRadius: 20, cursor: 'pointer' }}>
+                              📬 Marcar como recibido
+                            </button>
+                          )}
+                        </div>
+                      )}
+                    </div>
+
                     <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
                       <span style={{ fontSize: 13, color: 'var(--muted)', fontWeight: 500 }}>Cambiar estado:</span>
                       {Object.entries(STATUS_META).filter(([k]) => k !== ret.status).map(([key, meta]) => (
