@@ -296,17 +296,17 @@ export default function DevolucionesPage() {
           --ios-green: #34C759;
           --ios-orange: #FF9500;
           --ios-red: #FF3B30;
-          --ios-bg: #F2F2F7;
-          --ios-white: #FFFFFF;
-          --ios-text: #1C1C1E;
-          --ios-secondary: #8E8E93;
-          --ios-separator: #C6C6C8;
-          --ios-label2: #3A3A3C;
-          --ios-fill: #E5E5EA;
-          --ios-blue-soft: rgba(0,122,255,0.10);
-          --ios-green-soft: rgba(52,199,89,0.12);
-          --ios-red-soft: rgba(255,59,48,0.10);
-          --ios-orange-soft: rgba(255,149,0,0.10);
+          --ios-bg: #333333;
+          --ios-white: #3D3D3D;
+          --ios-text: #FFFFFF;
+          --ios-secondary: rgba(255,255,255,0.55);
+          --ios-separator: rgba(255,255,255,0.15);
+          --ios-label2: rgba(255,255,255,0.7);
+          --ios-fill: rgba(255,255,255,0.08);
+          --ios-blue-soft: rgba(0,122,255,0.18);
+          --ios-green-soft: rgba(52,199,89,0.15);
+          --ios-red-soft: rgba(255,59,48,0.15);
+          --ios-orange-soft: rgba(255,149,0,0.15);
         }
         * { box-sizing: border-box; }
         body { background: var(--ios-bg); }
@@ -368,7 +368,7 @@ export default function DevolucionesPage() {
         .ios-card {
           background: var(--ios-white);
           border-radius: 16px;
-          box-shadow: 0 2px 12px rgba(0,0,0,0.08);
+          box-shadow: 0 2px 16px rgba(0,0,0,0.35);
           width: 100%;
           max-width: 480px;
           overflow: hidden;
@@ -414,7 +414,7 @@ export default function DevolucionesPage() {
         .ios-item-card {
           background: var(--ios-white);
           border-radius: 16px;
-          box-shadow: 0 2px 12px rgba(0,0,0,0.08);
+          box-shadow: 0 2px 16px rgba(0,0,0,0.35);
           overflow: hidden;
           transition: box-shadow 0.2s;
         }
@@ -505,7 +505,7 @@ export default function DevolucionesPage() {
           font-family: inherit;
           appearance: none;
           -webkit-appearance: none;
-          background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='M1 1l5 5 5-5' stroke='%238E8E93' stroke-width='1.5' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+          background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='M1 1l5 5 5-5' stroke='%23FFFFFF' stroke-width='1.5' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
           background-repeat: no-repeat;
           background-position: right 14px center;
           cursor: pointer;
@@ -663,14 +663,11 @@ export default function DevolucionesPage() {
 
         {/* Logo + Header */}
         <div style={{ textAlign: 'center', marginBottom: 32 }}>
-          <div style={{
-            width: 64, height: 64, borderRadius: '50%',
-            background: 'var(--ios-blue)',
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-            margin: '0 auto 16px',
-            boxShadow: '0 4px 20px rgba(0,122,255,0.3)'
-          }}>
-            <span style={{ color: '#fff', fontSize: 28, fontWeight: 800, letterSpacing: -1 }}>S</span>
+          <div style={{ margin: '0 auto 16px', width: 80, height: 80 }}>
+            <svg width="80" height="80" viewBox="0 0 80 80" fill="none" xmlns="http://www.w3.org/2000/svg">
+              {/* S */}
+              <text x="6" y="58" fontFamily="-apple-system, 'SF Pro Display', 'Helvetica Neue', sans-serif" fontSize="56" fontWeight="800" fill="white" letterSpacing="-4">SW</text>
+            </svg>
           </div>
           <div style={{ fontSize: 26, fontWeight: 700, color: 'var(--ios-text)', letterSpacing: -0.5, marginBottom: 6 }}>
             Devoluciones & Cambios
