@@ -143,9 +143,10 @@ export default function AdminDevolucionesPage() {
   });
 
   useEffect(() => {
-    const stored = localStorage.getItem('mitaller_token');
+    // Support both old key and new login key
+    const stored = localStorage.getItem('token') || localStorage.getItem('mitaller_token');
     if (stored) { setToken(stored); loadAll(stored); }
-    else setLoading(false);
+    else { window.location.href = '/login'; }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -159,16 +160,16 @@ export default function AdminDevolucionesPage() {
     try {
       if (tab === 'list') {
         const r = await fetch(`${API_URL}/returns`, { headers: auth(jwt) });
-        if (r.status === 401) { setError('Token inválido'); setToken(''); return; }
+        if (r.status === 401) { logout(); return; }
         setReturns(await r.json());
       } else if (tab === 'config') {
         const r = await fetch(`${API_URL}/returns/admin/config`, { headers: auth(jwt) });
-        if (r.status === 401) { setError('Token inválido'); setToken(''); return; }
+        if (r.status === 401) { logout(); return; }
         const c = await r.json();
         setConfig(c); setConfigDraft(c);
       } else if (tab === 'exceptions') {
         const r = await fetch(`${API_URL}/returns/admin/exceptions`, { headers: auth(jwt) });
-        if (r.status === 401) { setError('Token inválido'); setToken(''); return; }
+        if (r.status === 401) { logout(); return; }
         setExceptions(await r.json());
       }
     } catch (err) {
@@ -178,9 +179,17 @@ export default function AdminDevolucionesPage() {
 
   function auth(t: string) { return { Authorization: `Bearer ${t}` }; }
 
+  function logout() {
+    localStorage.removeItem('token');
+    localStorage.removeItem('mitaller_token');
+    document.cookie = 'admin-token=; path=/; max-age=0';
+    window.location.href = '/login';
+  }
+
   function handleLogin(e: React.FormEvent) {
     e.preventDefault();
     if (!tokenInput.trim()) return;
+    localStorage.setItem('token', tokenInput.trim());
     localStorage.setItem('mitaller_token', tokenInput.trim());
     setToken(tokenInput.trim());
     loadAll(tokenInput.trim());
@@ -298,7 +307,7 @@ export default function AdminDevolucionesPage() {
       {/* Header */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
         <h1 style={{ margin: 0, fontSize: 22, fontWeight: 700 }}>Devoluciones</h1>
-        <button onClick={() => { localStorage.removeItem('mitaller_token'); setToken(''); }}
+        <button onClick={logout}
           style={{ ...btnSecondaryStyle, padding: '6px 12px' }}>Salir</button>
       </div>
 
