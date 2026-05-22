@@ -204,7 +204,7 @@ export class ShopifyAdapter {
             number: trackingNumber,
             company: carrier
           },
-          notify_customer: false
+          notify_customer: true
         }
       })
     });
