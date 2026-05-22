@@ -47,6 +47,9 @@ interface ReturnRecord {
   verifiedAt?: string | null;
   verificationStatus?: string | null;
   verificationNotes?: string | null;
+  refundedAt?: string | null;
+  refundId?: string | null;
+  shopifyRefundAmount?: number | null;
   order: { orderNumber: string; customerName: string; customerEmail?: string | null };
   items: Array<{
     id: string;
@@ -103,6 +106,59 @@ function VerifyPanel({ returnId, onVerify }: { returnId: string; onVerify: (id: 
           ⚠️ Hay incidencia
         </button>
       </div>
+    </div>
+  );
+}
+
+function PhotoSection({ returnId, token }: { returnId: string; token: string }) {
+  const [photos, setPhotos] = useState<string[]>([]);
+  const [uploading, setUploading] = useState(false);
+
+  useEffect(() => {
+    fetch(`${API_URL}/returns/${returnId}/photos`, {
+      headers: { Authorization: `Bearer ${token}` }
+    }).then(r => r.json()).then(data => setPhotos(data.map((p: { data: string }) => p.data))).catch(() => {});
+  }, [returnId, token]);
+
+  async function handleFile(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setUploading(true);
+    const reader = new FileReader();
+    reader.onload = async () => {
+      const data = reader.result as string;
+      await fetch(`${API_URL}/returns/${returnId}/photos`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ data })
+      });
+      setPhotos(prev => [...prev, data]);
+      setUploading(false);
+    };
+    reader.readAsDataURL(file);
+  }
+
+  return (
+    <div style={{ marginTop: 16 }}>
+      <div style={{ fontSize: 13, fontWeight: 600, color: '#555', marginBottom: 8 }}>
+        📸 Prueba fotográfica
+      </div>
+      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 8 }}>
+        {photos.map((src, i) => (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img key={i} src={src} alt={`foto ${i + 1}`}
+            style={{ width: 80, height: 80, objectFit: 'cover', borderRadius: 8, border: '1px solid #ddd', cursor: 'pointer' }}
+            onClick={() => window.open(src, '_blank')} />
+        ))}
+      </div>
+      <label style={{
+        display: 'inline-flex', alignItems: 'center', gap: 6,
+        padding: '8px 14px', background: '#f0f0f0', borderRadius: 8,
+        cursor: 'pointer', fontSize: 13, fontWeight: 500
+      }}>
+        <input type="file" accept="image/*" capture="environment" style={{ display: 'none' }} onChange={handleFile} disabled={uploading} />
+        {uploading ? '⏳ Subiendo...' : '📷 Añadir foto'}
+      </label>
     </div>
   );
 }
@@ -425,7 +481,20 @@ export default function AdminDevolucionesPage() {
                       )}
                     </div>
 
-                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
+                    {/* Refund info */}
+                    {ret.status === 'APPROVED' && ret.refundedAt && (
+                      <div style={{ margin: '0 0 12px', padding: '8px 14px', background: '#d1fae5', borderRadius: 8, display: 'inline-flex', gap: 8, alignItems: 'center' }}>
+                        <span style={{ fontSize: 12, color: '#047857', fontWeight: 600 }}>
+                          ✓ Reembolso enviado {new Date(ret.refundedAt).toLocaleDateString('es-ES')}
+                          {ret.shopifyRefundAmount != null && ` · €${ret.shopifyRefundAmount.toFixed(2)}`}
+                        </span>
+                      </div>
+                    )}
+
+                    {/* Photo evidence */}
+                    <PhotoSection returnId={ret.id} token={token} />
+
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center', marginTop: 16 }}>
                       <span style={{ fontSize: 13, color: 'var(--muted)', fontWeight: 500 }}>Cambiar estado:</span>
                       {Object.entries(STATUS_META).filter(([k]) => k !== ret.status).map(([key, meta]) => (
                         <button key={key} onClick={() => updateStatus(ret.id, key)}

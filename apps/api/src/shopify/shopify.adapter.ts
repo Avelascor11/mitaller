@@ -296,6 +296,18 @@ export class ShopifyAdapter {
     };
   }
 
+  /** Create a refund on an existing Shopify order */
+  async createRefund(numericOrderId: string, refundInput: ShopifyRefundInput): Promise<{ refund: { id: number | string } }> {
+    this.assertConfigured();
+    return this.rest<{ refund: { id: number | string } }>(
+      `/orders/${numericOrderId}/refunds.json`,
+      {
+        method: 'POST',
+        body: JSON.stringify({ refund: refundInput })
+      }
+    );
+  }
+
   /** Get catalog: all active products with variants (for exchange picker) */
   async getProductCatalog(): Promise<ShopifyCatalogProduct[]> {
     this.assertConfigured();
@@ -769,6 +781,17 @@ interface ShopifyCatalogProductRaw {
       image?: { url?: string } | null;
     }>;
   };
+}
+
+export interface ShopifyRefundInput {
+  notify?: boolean;
+  note?: string;
+  shipping?: { full_refund: boolean };
+  refund_line_items: Array<{
+    line_item_id: number;
+    quantity: number;
+    restock_type?: string;
+  }>;
 }
 
 export interface ShopifyDraftOrderInput {

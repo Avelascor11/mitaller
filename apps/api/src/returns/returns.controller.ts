@@ -141,4 +141,18 @@ export class ReturnsController {
   ) {
     return this.returnsService.verifyReturn(id, body);
   }
+
+  /** Admin — upload photo evidence */
+  @Post(':id/photos')
+  @UseGuards(JwtAuthGuard)
+  uploadPhoto(@Param('id') id: string, @Body('data') data: string) {
+    return this.returnsService.uploadPhoto(id, data);
+  }
+
+  /** Admin — get photos for a return */
+  @Get(':id/photos')
+  @UseGuards(JwtAuthGuard)
+  getPhotos(@Param('id') id: string) {
+    return this.returnsService.getPhotos(id);
+  }
 }

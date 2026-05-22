@@ -441,7 +441,100 @@ export class ReturnsService {
       message: `Estado de ${record.shopifyOrderNumber} actualizado a ${status}`,
       metadataJson: { status }
     });
+
+    // Feature 1: Automatic Shopify refund when approved
+    if (status === 'APPROVED') {
+      this.issueShopifyRefund(id).catch((err) => {
+        console.error('[ReturnsService] Background Shopify refund error:', err);
+      });
+    }
+
     return record;
+  }
+
+  /** Attempts to issue a Shopify refund. Non-blocking — errors are logged, not thrown. */
+  private async issueShopifyRefund(id: string) {
+    try {
+      const ret = await this.prisma.return.findUnique({
+        where: { id },
+        include: {
+          order: true,
+          items: { include: { orderItem: true } }
+        }
+      });
+      if (!ret) return;
+
+      const shopifyOrderId = ret.order.shopifyOrderId;
+      if (!shopifyOrderId) {
+        console.log(`[ReturnsService] No shopifyOrderId for return ${id}, skipping refund`);
+        return;
+      }
+
+      // Build refund line items using shopifyLineItemId
+      const refundLineItems = ret.items
+        .filter((item) => item.orderItem.shopifyLineItemId)
+        .map((item) => {
+          // shopifyLineItemId may be a GID like gid://shopify/LineItem/12345 or just the numeric ID
+          const rawId = item.orderItem.shopifyLineItemId!;
+          const numericId = rawId.includes('/') ? rawId.split('/').pop() : rawId;
+          return {
+            line_item_id: Number(numericId),
+            quantity: item.quantity,
+            restock_type: 'return'
+          };
+        });
+
+      if (refundLineItems.length === 0) {
+        console.log(`[ReturnsService] No Shopify line item IDs for return ${id}, skipping refund`);
+        return;
+      }
+
+      // Calculate total refund amount
+      const total = ret.items.reduce((sum, item) => {
+        return sum + (item.orderItem.unitPrice ?? 0) * item.quantity;
+      }, 0);
+
+      // Extract numeric Shopify order ID
+      const numericOrderId = shopifyOrderId.includes('/')
+        ? shopifyOrderId.split('/').pop()
+        : shopifyOrderId;
+
+      const response = await this.shopify.createRefund(numericOrderId!, {
+        notify: true,
+        note: 'Devolución aprobada desde portal de devoluciones',
+        shipping: { full_refund: false },
+        refund_line_items: refundLineItems
+      });
+
+      await this.prisma.return.update({
+        where: { id },
+        data: {
+          refundedAt: new Date(),
+          refundId: String(response.refund.id),
+          shopifyRefundAmount: total
+        }
+      });
+
+      console.log(`[ReturnsService] Shopify refund ${response.refund.id} issued for return ${id}`);
+    } catch (err) {
+      console.error(`[ReturnsService] Failed to issue Shopify refund for return ${id}:`, err);
+    }
+  }
+
+  async uploadPhoto(id: string, data: string) {
+    if (!data.startsWith('data:image/')) {
+      throw new BadRequestException('El dato debe ser una imagen en formato data URL (data:image/...)');
+    }
+    const ret = await this.prisma.return.findUnique({ where: { id } });
+    if (!ret) throw new NotFoundException(`Devolución ${id} no encontrada`);
+    return this.prisma.returnPhoto.create({ data: { returnId: id, data } });
+  }
+
+  async getPhotos(id: string) {
+    return this.prisma.returnPhoto.findMany({
+      where: { returnId: id },
+      orderBy: { createdAt: 'asc' }
+    });
   }
 
   async verifyReturn(id: string, data: { verificationStatus: 'OK' | 'ISSUE'; verificationNotes?: string }) {

@@ -561,10 +561,22 @@ model Return {
   verifiedAt           DateTime?
   verificationNotes    String?
   verificationStatus   String?
+  refundedAt           DateTime?
+  refundId             String?
+  shopifyRefundAmount  Float?
   createdAt            DateTime      @default(now())
   updatedAt            DateTime      @updatedAt
   order                Order         @relation(fields: [orderId], references: [id], onDelete: Cascade)
   items                ReturnItem[]
+  photos               ReturnPhoto[]
+}
+
+model ReturnPhoto {
+  id        String   @id @default(cuid())
+  returnId  String
+  data      String   @db.Text
+  createdAt DateTime @default(now())
+  return    Return   @relation(fields: [returnId], references: [id], onDelete: Cascade)
 }
 
 model ReturnConfig {
