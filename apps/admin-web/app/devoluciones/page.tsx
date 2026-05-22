@@ -1066,18 +1066,19 @@ export default function DevolucionesPage() {
           )}
         </div>
 
-        <div style={{ marginTop: 24, fontSize: 13, color: 'rgba(255,255,255,0.65)', textAlign: 'center' }}>
-          ¿Problemas? Contáctanos en tu email de compra.
-          {portalConfig.policyUrl && (
-            <>
-              {' · '}
-              <a href={portalConfig.policyUrl} target="_blank" rel="noopener noreferrer"
-                style={{ color: 'rgba(255,255,255,0.85)', textDecoration: 'underline' }}>
-                Política de devoluciones
-              </a>
-            </>
-          )}
-        </div>
+        {portalConfig.policyUrl && (
+          <div style={{ marginTop: 16, textAlign: 'center' }}>
+            <a href={portalConfig.policyUrl} target="_blank" rel="noopener noreferrer"
+              style={{
+                color: 'rgba(255,255,255,0.7)',
+                fontSize: 12,
+                textDecoration: 'none',
+                letterSpacing: '0.04em',
+              }}>
+              Política de devoluciones
+            </a>
+          </div>
+        )}
 
         {/* ── Catalog Picker Modal ── */}
         {pickerForItem && (
