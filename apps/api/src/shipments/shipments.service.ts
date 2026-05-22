@@ -44,10 +44,29 @@ export class ShipmentsService {
         id: { notIn: printedIds }
       },
       include: { order: { include: { items: true } } },
-      orderBy: { createdAt: 'asc' },
-      take: 25
+      orderBy: { createdAt: 'desc' },
+      take: 100
     });
-    return shipments.map((shipment) => ({
+
+    // Deduplicate: one shipment per order (most recent), mark older dupes as printed
+    const seenOrders = new Map<string, typeof shipments[0]>();
+    const duplicates: string[] = [];
+    for (const shipment of shipments) {
+      if (seenOrders.has(shipment.orderId)) {
+        duplicates.push(shipment.id);
+      } else {
+        seenOrders.set(shipment.orderId, shipment);
+      }
+    }
+    // Auto-mark duplicates so they never re-appear
+    if (duplicates.length) {
+      await Promise.all(duplicates.map((id) =>
+        this.activity.log({ entityType: 'Shipment', entityId: id, action: 'LABEL_PRINTED', message: 'Auto-suprimido: duplicado', metadataJson: { duplicate: true } })
+      ));
+    }
+
+    const deduped = [...seenOrders.values()].sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime()).slice(0, 25);
+    return deduped.map((shipment) => ({
       id: shipment.id,
       orderNumber: shipment.order.orderNumber,
       labelUrl: shipment.labelUrl,
