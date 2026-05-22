@@ -12,11 +12,17 @@ export function middleware(request: NextRequest) {
 
   // ── Customer-facing domain ──
   if (host === CUSTOMER_DOMAIN) {
+    // Allow /devoluciones (public portal)
     if (pathname === '/devoluciones') return NextResponse.next();
-    if (pathname.startsWith('/admin')) return new NextResponse(null, { status: 404 });
-    const url = request.nextUrl.clone();
-    url.pathname = '/devoluciones';
-    return NextResponse.redirect(url);
+    // Allow /admin/* and /login (auth protection handled below)
+    if (pathname.startsWith('/admin') || pathname.startsWith('/login')) {
+      // fall through to auth check below
+    } else {
+      // Redirect everything else to /devoluciones
+      const url = request.nextUrl.clone();
+      url.pathname = '/devoluciones';
+      return NextResponse.redirect(url);
+    }
   }
 
   // ── Admin domain: protect all routes except public paths ──
