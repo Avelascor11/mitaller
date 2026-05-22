@@ -78,8 +78,13 @@ export class ShipmentsService {
   async createLabelForOrder(orderId: string) {
     const order = await this.prisma.order.findFirstOrThrow({
       where: { OR: [{ id: orderId }, { orderNumber: orderId }] },
-      include: { items: true }
+      include: { items: true, shipments: { orderBy: { createdAt: 'desc' } } }
     });
+
+    // Idempotency: return existing label if already created (prevent double print)
+    const existing = order.shipments.find((s) => s.status === 'LABEL_CREATED' && s.labelUrl);
+    if (existing) return { ...existing, printResult: { skipped: true, reason: 'label already exists' } };
+
     const label = await this.sendcloud.createShipment(order);
     const shipment = await this.prisma.shipment.create({
       data: {
@@ -103,6 +108,16 @@ export class ShipmentsService {
       message: `Etiqueta creada para ${order.orderNumber}`,
       metadataJson: { label, printResult }
     });
+    // If server printed directly, mark printed so print agent doesn't re-print
+    if (printResult && !(printResult as any).skipped) {
+      await this.activity.log({
+        entityType: 'Shipment',
+        entityId: shipment.id,
+        action: 'LABEL_PRINTED',
+        message: `Etiqueta impresa en servidor para ${order.orderNumber}`,
+        metadataJson: { printResult }
+      });
+    }
     return { ...shipment, printResult };
   }
 
