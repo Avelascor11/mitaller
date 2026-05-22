@@ -88,6 +88,26 @@ interface ItemSelection {
   replacement?: { variantId: string; productId: string; title: string; price: number; imageUrl?: string };
 }
 
+interface PortalConfig {
+  logoUrl?: string | null;
+  backgroundUrl?: string | null;
+  primaryColor?: string | null;
+  cardStyle?: string | null;
+  titleText?: string | null;
+  subtitleText?: string | null;
+  policyUrl?: string | null;
+}
+
+const DEFAULT_PORTAL_CONFIG: PortalConfig = {
+  logoUrl: null,
+  backgroundUrl: null,
+  primaryColor: '#007AFF',
+  cardStyle: 'light',
+  titleText: 'Cambios & Devoluciones',
+  subtitleText: 'Gestiona tu devolución de forma rápida',
+  policyUrl: null,
+};
+
 export default function DevolucionesPage() {
   const [step, setStep] = useState<1 | 2 | 3>(1);
   const [orderNumber, setOrderNumber] = useState('');
@@ -96,6 +116,7 @@ export default function DevolucionesPage() {
   const [error, setError] = useState<string | null>(null);
   const [lookup, setLookup] = useState<LookupResult | null>(null);
   const [selections, setSelections] = useState<Record<string, ItemSelection>>({});
+  const [portalConfig, setPortalConfig] = useState<PortalConfig>(DEFAULT_PORTAL_CONFIG);
   const [returnResult, setReturnResult] = useState<CreateReturnResponse | null>(null);
 
   // Exchange picker modal
@@ -130,6 +151,13 @@ export default function DevolucionesPage() {
       const interval = setInterval(poll, 5000);
       return () => clearInterval(interval);
     }
+  }, []);
+
+  useEffect(() => {
+    fetch(`${API_URL}/portal-config`)
+      .then((r) => r.json())
+      .then((data: PortalConfig) => setPortalConfig({ ...DEFAULT_PORTAL_CONFIG, ...data }))
+      .catch(() => {});
   }, []);
 
   async function loadCatalog() {
@@ -288,31 +316,41 @@ export default function DevolucionesPage() {
     !catalogQuery || p.title.toLowerCase().includes(catalogQuery.toLowerCase())
   );
 
+  const isDark = portalConfig.cardStyle === 'dark';
+  const primaryColor = portalConfig.primaryColor || '#007AFF';
+  const cardBg = isDark ? '#2C2C2C' : '#FFFFFF';
+  const cardText = isDark ? '#FFFFFF' : '#111111';
+  const cardSecondary = isDark ? 'rgba(255,255,255,0.55)' : 'rgba(0,0,0,0.45)';
+  const cardSeparator = isDark ? 'rgba(255,255,255,0.15)' : 'rgba(0,0,0,0.12)';
+  const cardFill = isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.06)';
+  const cardBlueSoft = isDark ? 'rgba(0,122,255,0.18)' : 'rgba(0,122,255,0.10)';
+  const cardGreenSoft = isDark ? 'rgba(52,199,89,0.15)' : 'rgba(52,199,89,0.10)';
+
   return (
     <>
       <style>{`
         :root {
-          --ios-blue: #007AFF;
+          --ios-blue: ${primaryColor};
           --ios-green: #34C759;
           --ios-orange: #FF9500;
           --ios-red: #FF3B30;
-          --ios-bg: #333333;
-          --ios-white: #3D3D3D;
-          --ios-text: #FFFFFF;
-          --ios-secondary: rgba(255,255,255,0.55);
-          --ios-separator: rgba(255,255,255,0.15);
-          --ios-label2: rgba(255,255,255,0.7);
-          --ios-fill: rgba(255,255,255,0.08);
-          --ios-blue-soft: rgba(0,122,255,0.18);
-          --ios-green-soft: rgba(52,199,89,0.15);
-          --ios-red-soft: rgba(255,59,48,0.15);
+          --ios-bg: transparent;
+          --ios-white: ${cardBg};
+          --ios-text: ${cardText};
+          --ios-secondary: ${cardSecondary};
+          --ios-separator: ${cardSeparator};
+          --ios-label2: ${isDark ? 'rgba(255,255,255,0.7)' : 'rgba(0,0,0,0.55)'};
+          --ios-fill: ${cardFill};
+          --ios-blue-soft: ${cardBlueSoft};
+          --ios-green-soft: ${cardGreenSoft};
+          --ios-red-soft: ${isDark ? 'rgba(255,59,48,0.15)' : 'rgba(255,59,48,0.08)'};
           --ios-orange-soft: rgba(255,149,0,0.15);
         }
         * { box-sizing: border-box; }
-        body { background: var(--ios-bg); }
+        body { background: transparent; margin: 0; }
         .ios-page {
           min-height: 100vh;
-          background: var(--ios-bg);
+          position: relative;
           display: flex;
           flex-direction: column;
           align-items: center;
@@ -402,13 +440,13 @@ export default function DevolucionesPage() {
           width: 8px;
           height: 8px;
           border-radius: 50%;
-          background: var(--ios-separator);
+          background: rgba(255,255,255,0.35);
           transition: all 0.2s;
         }
         .ios-step-dot.active {
           width: 24px;
           border-radius: 4px;
-          background: var(--ios-blue);
+          background: #fff;
         }
         .ios-step-dot.done { background: var(--ios-green); }
         .ios-item-card {
@@ -661,24 +699,23 @@ export default function DevolucionesPage() {
 
       <div className="ios-page">
 
-        {/* Logo + Header */}
-        <div style={{ textAlign: 'center', marginBottom: 32 }}>
-          <div style={{ margin: '0 auto 16px', width: 80, height: 80 }}>
-            <svg width="80" height="80" viewBox="0 0 80 80" fill="none" xmlns="http://www.w3.org/2000/svg">
-              {/* S */}
-              <text x="6" y="58" fontFamily="-apple-system, 'SF Pro Display', 'Helvetica Neue', sans-serif" fontSize="56" fontWeight="800" fill="white" letterSpacing="-4">SW</text>
-            </svg>
-          </div>
-          <div style={{ fontSize: 26, fontWeight: 700, color: 'var(--ios-text)', letterSpacing: -0.5, marginBottom: 6 }}>
-            Devoluciones & Cambios
-          </div>
-          <div style={{ color: 'var(--ios-secondary)', fontSize: 15 }}>
-            Gestiona tu devolución de forma rápida
-          </div>
-        </div>
+        {/* Background image */}
+        <div style={{
+          position: 'fixed', inset: 0,
+          background: portalConfig.backgroundUrl
+            ? `url(${portalConfig.backgroundUrl}) center/cover no-repeat`
+            : 'linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%)',
+          zIndex: -2
+        }} />
+        {/* Dark overlay */}
+        <div style={{
+          position: 'fixed', inset: 0,
+          background: 'rgba(0,0,0,0.5)',
+          zIndex: -1
+        }} />
 
         {/* Steps indicator */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 28 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 12 }}>
           {[1, 2, 3].map((s) => (
             <div
               key={s}
@@ -688,26 +725,55 @@ export default function DevolucionesPage() {
         </div>
 
         {/* Step labels */}
-        <div style={{ fontSize: 13, color: 'var(--ios-secondary)', marginBottom: 24, fontWeight: 500 }}>
+        <div style={{ fontSize: 13, color: 'rgba(255,255,255,0.75)', marginBottom: 24, fontWeight: 500 }}>
           {step === 1 && 'Paso 1 de 3 — Buscar pedido'}
           {step === 2 && 'Paso 2 de 3 — Seleccionar artículos'}
           {step === 3 && 'Paso 3 de 3 — Confirmación'}
         </div>
 
-        <div className={`ios-card${step === 2 ? ' ios-card-wide' : ''}`} style={{ padding: '28px 24px' }}>
+        <div
+          className={`ios-card${step === 2 ? ' ios-card-wide' : ''}`}
+          style={{
+            padding: '28px 24px',
+            background: cardBg,
+            boxShadow: '0 8px 40px rgba(0,0,0,0.45)',
+            borderRadius: 20
+          }}
+        >
+          {/* Logo */}
+          <div style={{ textAlign: 'center', marginBottom: 20 }}>
+            {portalConfig.logoUrl ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                src={portalConfig.logoUrl}
+                alt="Logo"
+                style={{
+                  maxHeight: 64,
+                  maxWidth: 200,
+                  objectFit: 'contain',
+                  filter: isDark ? 'brightness(0) invert(1)' : 'none'
+                }}
+              />
+            ) : (
+              <div style={{ fontSize: 32, fontWeight: 900, letterSpacing: -2, color: cardText }}>SW</div>
+            )}
+          </div>
+
+          {/* Title + subtitle shown only on step 1 */}
+          {step === 1 && (
+            <div style={{ textAlign: 'center', marginBottom: 24 }}>
+              <div style={{ fontSize: 22, fontWeight: 700, color: cardText, letterSpacing: -0.5, marginBottom: 6 }}>
+                {portalConfig.titleText || 'Cambios & Devoluciones'}
+              </div>
+              <div style={{ color: cardSecondary, fontSize: 15 }}>
+                {portalConfig.subtitleText || 'Gestiona tu devolución de forma rápida'}
+              </div>
+            </div>
+          )}
 
           {/* ── STEP 1 ── */}
           {step === 1 && (
             <form onSubmit={handleLookup}>
-              <div style={{ marginBottom: 28, textAlign: 'center' }}>
-                <h2 style={{ margin: '0 0 6px', fontSize: 22, fontWeight: 700, color: 'var(--ios-text)', letterSpacing: -0.3 }}>
-                  Encuentra tu pedido
-                </h2>
-                <p style={{ margin: 0, color: 'var(--ios-secondary)', fontSize: 15, lineHeight: 1.5 }}>
-                  Introduce el número de pedido y el email con el que realizaste la compra.
-                </p>
-              </div>
-
               <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
                 <div>
                   <div className="ios-section-label">Número de pedido</div>
@@ -1000,8 +1066,17 @@ export default function DevolucionesPage() {
           )}
         </div>
 
-        <div style={{ marginTop: 24, fontSize: 13, color: 'var(--ios-secondary)', textAlign: 'center' }}>
+        <div style={{ marginTop: 24, fontSize: 13, color: 'rgba(255,255,255,0.65)', textAlign: 'center' }}>
           ¿Problemas? Contáctanos en tu email de compra.
+          {portalConfig.policyUrl && (
+            <>
+              {' · '}
+              <a href={portalConfig.policyUrl} target="_blank" rel="noopener noreferrer"
+                style={{ color: 'rgba(255,255,255,0.85)', textDecoration: 'underline' }}>
+                Política de devoluciones
+              </a>
+            </>
+          )}
         </div>
 
         {/* ── Catalog Picker Modal ── */}

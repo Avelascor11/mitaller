@@ -8,6 +8,7 @@ import { BankModule } from './bank/bank.module';
 import { EconomicsModule } from './economics/economics.module';
 import { ManualPrintModule } from './manual-print/manual-print.module';
 import { OrdersModule } from './orders/orders.module';
+import { PortalConfigModule } from './portal-config/portal-config.module';
 import { PrismaModule } from './prisma/prisma.module';
 import { ProductionModule } from './production/production.module';
 import { PurchasingModule } from './purchasing/purchasing.module';
@@ -38,7 +39,8 @@ import { SupplierModule } from './supplier/supplier.module';
     ReturnsModule,
     SupplierModule,
     ManualPrintModule,
-    EconomicsModule
+    EconomicsModule,
+    PortalConfigModule
   ],
   controllers: [AppController]
 })

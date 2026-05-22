@@ -80,7 +80,7 @@ interface ReturnException {
   createdAt: string;
 }
 
-type Tab = 'list' | 'config' | 'exceptions';
+type Tab = 'list' | 'config' | 'exceptions' | 'portal';
 
 function VerifyPanel({ returnId, onVerify }: { returnId: string; onVerify: (id: string, status: 'OK' | 'ISSUE', notes?: string) => void }) {
   const [notes, setNotes] = useState('');
@@ -307,7 +307,8 @@ export default function AdminDevolucionesPage() {
         {[
           { id: 'list', label: 'Lista' },
           { id: 'config', label: 'Configuración' },
-          { id: 'exceptions', label: 'Excepciones' }
+          { id: 'exceptions', label: 'Excepciones' },
+          { id: 'portal', label: '⚙️ Portal' }
         ].map((t) => (
           <button key={t.id} onClick={() => setTab(t.id as Tab)}
             style={{
@@ -491,6 +492,9 @@ export default function AdminDevolucionesPage() {
         </div>
       )}
 
+      {/* ===== TAB: PORTAL CONFIG ===== */}
+      {tab === 'portal' && <PortalConfigTab token={token} apiUrl={API_URL} />}
+
       {/* ===== TAB: EXCEPTIONS ===== */}
       {!loading && tab === 'exceptions' && (
         <div>
@@ -621,6 +625,136 @@ export default function AdminDevolucionesPage() {
           )}
         </div>
       )}
+    </div>
+  );
+}
+
+function PortalConfigTab({ token, apiUrl }: { token: string; apiUrl: string }) {
+  const [config, setConfig] = useState({
+    logoUrl: '', backgroundUrl: '', primaryColor: '#007AFF',
+    cardStyle: 'light', titleText: 'Cambios & Devoluciones',
+    subtitleText: 'Gestiona tu devolución de forma rápida', policyUrl: ''
+  });
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
+
+  useEffect(() => {
+    fetch(`${apiUrl}/portal-config`)
+      .then(r => r.json()).then(data => setConfig(c => ({ ...c, ...data }))).catch(() => {});
+  }, [apiUrl]);
+
+  async function save() {
+    setSaving(true);
+    try {
+      await fetch(`${apiUrl}/portal-config`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify(config)
+      });
+      setSaved(true); setTimeout(() => setSaved(false), 2000);
+    } finally { setSaving(false); }
+  }
+
+  return (
+    <div style={{ maxWidth: 560, padding: '24px 0' }}>
+      <h3 style={{ margin: '0 0 20px', fontSize: 18, fontWeight: 700 }}>Configuración del Portal</h3>
+
+      {/* Logo URL */}
+      <label style={{ display: 'block', marginBottom: 16 }}>
+        <span style={{ fontSize: 13, fontWeight: 600, color: '#555', display: 'block', marginBottom: 6 }}>URL del Logo</span>
+        <input
+          style={{ width: '100%', padding: '10px 12px', border: '1.5px solid #ddd', borderRadius: 8, fontSize: 14 }}
+          placeholder="https://cdn.shopify.com/tu-logo.png"
+          value={config.logoUrl || ''}
+          onChange={e => setConfig(c => ({ ...c, logoUrl: e.target.value }))}
+        />
+        <span style={{ fontSize: 12, color: '#999', marginTop: 4, display: 'block' }}>
+          Sube el logo a Shopify (Archivos) y pega la URL aquí
+        </span>
+      </label>
+
+      {/* Background URL */}
+      <label style={{ display: 'block', marginBottom: 16 }}>
+        <span style={{ fontSize: 13, fontWeight: 600, color: '#555', display: 'block', marginBottom: 6 }}>Imagen de fondo</span>
+        <input
+          style={{ width: '100%', padding: '10px 12px', border: '1.5px solid #ddd', borderRadius: 8, fontSize: 14 }}
+          placeholder="https://cdn.shopify.com/tu-foto.jpg"
+          value={config.backgroundUrl || ''}
+          onChange={e => setConfig(c => ({ ...c, backgroundUrl: e.target.value }))}
+        />
+      </label>
+
+      {/* Primary color + card style row */}
+      <div style={{ display: 'flex', gap: 16, marginBottom: 16 }}>
+        <label style={{ flex: 1 }}>
+          <span style={{ fontSize: 13, fontWeight: 600, color: '#555', display: 'block', marginBottom: 6 }}>Color principal</span>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+            <input type="color" value={config.primaryColor || '#007AFF'}
+              onChange={e => setConfig(c => ({ ...c, primaryColor: e.target.value }))}
+              style={{ width: 44, height: 36, borderRadius: 6, border: '1.5px solid #ddd', cursor: 'pointer' }} />
+            <input
+              style={{ flex: 1, padding: '10px 12px', border: '1.5px solid #ddd', borderRadius: 8, fontSize: 14 }}
+              value={config.primaryColor || '#007AFF'}
+              onChange={e => setConfig(c => ({ ...c, primaryColor: e.target.value }))} />
+          </div>
+        </label>
+        <label style={{ flex: 1 }}>
+          <span style={{ fontSize: 13, fontWeight: 600, color: '#555', display: 'block', marginBottom: 6 }}>Estilo tarjeta</span>
+          <select
+            style={{ width: '100%', padding: '10px 12px', border: '1.5px solid #ddd', borderRadius: 8, fontSize: 14 }}
+            value={config.cardStyle || 'light'}
+            onChange={e => setConfig(c => ({ ...c, cardStyle: e.target.value }))}>
+            <option value="light">Blanca (light)</option>
+            <option value="dark">Oscura (dark)</option>
+          </select>
+        </label>
+      </div>
+
+      {/* Title + Subtitle */}
+      <label style={{ display: 'block', marginBottom: 16 }}>
+        <span style={{ fontSize: 13, fontWeight: 600, color: '#555', display: 'block', marginBottom: 6 }}>Título</span>
+        <input
+          style={{ width: '100%', padding: '10px 12px', border: '1.5px solid #ddd', borderRadius: 8, fontSize: 14 }}
+          value={config.titleText || ''}
+          onChange={e => setConfig(c => ({ ...c, titleText: e.target.value }))} />
+      </label>
+      <label style={{ display: 'block', marginBottom: 16 }}>
+        <span style={{ fontSize: 13, fontWeight: 600, color: '#555', display: 'block', marginBottom: 6 }}>Subtítulo</span>
+        <input
+          style={{ width: '100%', padding: '10px 12px', border: '1.5px solid #ddd', borderRadius: 8, fontSize: 14 }}
+          value={config.subtitleText || ''}
+          onChange={e => setConfig(c => ({ ...c, subtitleText: e.target.value }))} />
+      </label>
+
+      {/* Policy URL */}
+      <label style={{ display: 'block', marginBottom: 24 }}>
+        <span style={{ fontSize: 13, fontWeight: 600, color: '#555', display: 'block', marginBottom: 6 }}>URL política de devoluciones (opcional)</span>
+        <input
+          style={{ width: '100%', padding: '10px 12px', border: '1.5px solid #ddd', borderRadius: 8, fontSize: 14 }}
+          placeholder="https://speedwear.es/policies/refund-policy"
+          value={config.policyUrl || ''}
+          onChange={e => setConfig(c => ({ ...c, policyUrl: e.target.value }))} />
+      </label>
+
+      {/* Save + Preview */}
+      <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
+        <button
+          onClick={save}
+          disabled={saving}
+          style={{
+            padding: '12px 24px', background: '#6366f1', color: '#fff',
+            border: 'none', borderRadius: 8, fontWeight: 600, cursor: 'pointer',
+            opacity: saving ? 0.6 : 1
+          }}>
+          {saving ? 'Guardando...' : saved ? '✓ Guardado' : 'Guardar cambios'}
+        </button>
+        <a
+          href="/devoluciones"
+          target="_blank"
+          style={{ fontSize: 14, color: '#6366f1', textDecoration: 'none' }}>
+          Ver portal →
+        </a>
+      </div>
     </div>
   );
 }

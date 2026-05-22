@@ -610,3 +610,15 @@ model ReturnItem {
   return                Return       @relation(fields: [returnId], references: [id], onDelete: Cascade)
   orderItem             OrderItem    @relation(fields: [orderItemId], references: [id], onDelete: Cascade)
 }
+
+model PortalConfig {
+  id             String   @id @default("singleton")
+  logoUrl        String?
+  backgroundUrl  String?
+  primaryColor   String   @default("#007AFF")
+  cardStyle      String   @default("light")
+  titleText      String   @default("Cambios & Devoluciones")
+  subtitleText   String   @default("Gestiona tu devolución de forma rápida")
+  policyUrl      String?
+  updatedAt      DateTime @updatedAt
+}
