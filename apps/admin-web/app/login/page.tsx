@@ -158,16 +158,18 @@ export default function LoginPage() {
           <form onSubmit={handleSubmit}>
             {error && <div className="login-error">{error}</div>}
 
-            <label className="login-label" htmlFor="email">Email</label>
+            <label className="login-label" htmlFor="email">Usuario</label>
             <input
               id="email"
-              type="email"
+              type="text"
               className="login-input"
-              placeholder="admin@speedwear.es"
+              placeholder="usuario"
               value={email}
               onChange={e => setEmail(e.target.value)}
               required
               autoFocus
+              autoCapitalize="none"
+              autoCorrect="off"
             />
 
             <label className="login-label" htmlFor="password">Contraseña</label>
