@@ -1,5 +1,6 @@
 import { BadRequestException, ForbiddenException, Injectable, NotFoundException, ServiceUnavailableException } from '@nestjs/common';
 import { ActivityService } from '../activity/activity.service';
+import { KlaviyoService } from '../klaviyo/klaviyo.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { SendcloudAdapter } from '../sendcloud/sendcloud.adapter';
 import { ShopifyAdapter } from '../shopify/shopify.adapter';
@@ -28,7 +29,8 @@ export class ReturnsService {
     private readonly shopify: ShopifyAdapter,
     private readonly activity: ActivityService,
     private readonly configService: ReturnsConfigService,
-    private readonly exceptionsService: ReturnsExceptionsService
+    private readonly exceptionsService: ReturnsExceptionsService,
+    private readonly klaviyo: KlaviyoService
   ) {}
 
   async lookupOrder(dto: LookupOrderDto) {
@@ -148,6 +150,8 @@ export class ReturnsService {
 
     // Validate items
     const lookupMap = new Map(lookup.items.map((i) => [i.id, i]));
+    console.log('[createReturn] lookupMap keys:', [...lookupMap.keys()]);
+    console.log('[createReturn] dto.items orderItemIds:', dto.items.map((i) => i.orderItemId));
     for (const reqItem of dto.items) {
       const found = lookupMap.get(reqItem.orderItemId);
       if (!found) {
@@ -305,6 +309,18 @@ export class ReturnsService {
       metadataJson: { type, totalAmount: totalToPay, draftOrderId }
     });
 
+    // Klaviyo: send label email if label was generated immediately (free return)
+    if (returnRecord.status === 'LABEL_CREATED' && returnRecord.sendcloudReturnId) {
+      this.klaviyo.trackLabelCreated({
+        email: returnRecord.customerEmail,
+        customerName: returnRecord.customerName,
+        orderNumber: returnRecord.shopifyOrderNumber,
+        trackingNumber: returnRecord.trackingNumber,
+        carrier: returnRecord.carrier,
+        labelUrl: `${process.env.API_URL ?? ''}/returns/${returnRecord.id}/label`
+      }).catch((err) => console.error('[ReturnsService] Klaviyo label email error:', err));
+    }
+
     return {
       returnId: returnRecord.id,
       type,
@@ -328,12 +344,15 @@ export class ReturnsService {
   }
 
   /** Called when Shopify draft order is paid (webhook) */
-  async markPaidAndGenerateLabel(draftOrderId: string) {
-    const returnRecord = await this.prisma.return.findFirst({
-      where: { shopifyDraftOrderId: draftOrderId, paymentStatus: 'PENDING' }
-    });
+  async markPaidAndGenerateLabel(identifier: { type: 'draftOrderId'; value: string } | { type: 'orderNumber'; value: string }) {
+    const where =
+      identifier.type === 'draftOrderId'
+        ? { shopifyDraftOrderId: identifier.value, paymentStatus: 'PENDING' as const }
+        : { shopifyOrderNumber: { contains: identifier.value.replace(/^#/, '') }, paymentStatus: 'PENDING' as const };
+
+    const returnRecord = await this.prisma.return.findFirst({ where });
     if (!returnRecord) {
-      console.log(`[ReturnsService] No pending return found for draftOrder ${draftOrderId}`);
+      console.log(`[ReturnsService] No pending return found for`, identifier);
       return null;
     }
 
@@ -369,10 +388,70 @@ export class ReturnsService {
       entityId: returnRecord.id,
       action: 'PAYMENT_CONFIRMED',
       message: `Pago confirmado para ${returnRecord.shopifyOrderNumber} — etiqueta ${sendcloudResult.parcelId ? 'generada' : 'pendiente'}`,
-      metadataJson: { draftOrderId, parcelId: sendcloudResult.parcelId }
+      metadataJson: { identifier, parcelId: sendcloudResult.parcelId }
     });
 
+    // Klaviyo: label email after payment confirmed
+    if (sendcloudResult.parcelId) {
+      this.klaviyo.trackLabelCreated({
+        email: returnRecord.customerEmail,
+        customerName: returnRecord.customerName,
+        orderNumber: returnRecord.shopifyOrderNumber,
+        trackingNumber: sendcloudResult.trackingNumber,
+        carrier: sendcloudResult.carrier,
+        labelUrl: `${process.env.API_URL ?? ''}/returns/${returnRecord.id}/label`
+      }).catch((err) => console.error('[ReturnsService] Klaviyo label email error (paid):', err));
+    }
+
     return updated;
+  }
+
+  /** Admin: manually generate SendCloud label + send Klaviyo email */
+  async generateLabelForReturn(id: string) {
+    const returnRecord = await this.prisma.return.findUnique({
+      where: { id },
+      include: { order: true }
+    });
+    if (!returnRecord) throw new NotFoundException('Devolución no encontrada.');
+
+    const order = returnRecord.order;
+    let sendcloudResult: { returnId: string; parcelId?: string; trackingNumber?: string; carrier?: string } = { returnId: '' };
+    try {
+      sendcloudResult = await this.sendcloud.createReturn({
+        orderNumber: order.orderNumber,
+        customerName: order.customerName,
+        customerEmail: order.customerEmail ?? returnRecord.customerEmail,
+        customerAddressJson: order.shippingAddressJson,
+        returnType: returnRecord.type
+      });
+    } catch (error) {
+      console.error('[ReturnsService] generateLabelForReturn SendCloud error:', error);
+      throw new BadRequestException(`Error creando etiqueta en SendCloud: ${error instanceof Error ? error.message : 'desconocido'}`);
+    }
+
+    const updated = await this.prisma.return.update({
+      where: { id },
+      data: {
+        status: sendcloudResult.parcelId ? 'LABEL_CREATED' : returnRecord.status,
+        paymentStatus: returnRecord.paymentStatus === 'PENDING' ? 'PAID' : returnRecord.paymentStatus,
+        sendcloudReturnId: sendcloudResult.parcelId || sendcloudResult.returnId || null,
+        trackingNumber: sendcloudResult.trackingNumber ?? null,
+        carrier: sendcloudResult.carrier ?? null
+      }
+    });
+
+    if (sendcloudResult.parcelId) {
+      this.klaviyo.trackLabelCreated({
+        email: returnRecord.customerEmail,
+        customerName: returnRecord.customerName,
+        orderNumber: returnRecord.shopifyOrderNumber,
+        trackingNumber: sendcloudResult.trackingNumber,
+        carrier: sendcloudResult.carrier,
+        labelUrl: `${process.env.API_URL ?? ''}/returns/${id}/label`
+      }).catch((err) => console.error('[ReturnsService] Klaviyo generateLabel error:', err));
+    }
+
+    return { success: true, status: updated.status, trackingNumber: updated.trackingNumber, parcelId: sendcloudResult.parcelId };
   }
 
   async getReturnStatus(id: string) {
@@ -447,6 +526,20 @@ export class ReturnsService {
       this.issueShopifyRefund(id).catch((err) => {
         console.error('[ReturnsService] Background Shopify refund error:', err);
       });
+
+      // Klaviyo: fire immediately on approval (regardless of refund outcome)
+      const approvedAt = new Date().toLocaleDateString('es-ES', { day: 'numeric', month: 'long', year: 'numeric' });
+      const fullRecord = await this.prisma.return.findUnique({ where: { id }, include: { items: { include: { orderItem: true } } } });
+      if (fullRecord) {
+        const total = fullRecord.items.reduce((sum, i) => sum + (i.orderItem.unitPrice ?? 0) * i.quantity, 0);
+        this.klaviyo.trackRefundApproved({
+          email: fullRecord.customerEmail,
+          customerName: fullRecord.customerName,
+          orderNumber: fullRecord.shopifyOrderNumber,
+          refundAmount: total,
+          approvedAt
+        }).catch((err) => console.error('[ReturnsService] Klaviyo approved email error:', err));
+      }
     }
 
     return record;
@@ -506,10 +599,11 @@ export class ReturnsService {
         refund_line_items: refundLineItems
       });
 
+      const refundedAt = new Date();
       await this.prisma.return.update({
         where: { id },
         data: {
-          refundedAt: new Date(),
+          refundedAt,
           refundId: String(response.refund.id),
           shopifyRefundAmount: total
         }
@@ -568,10 +662,21 @@ export class ReturnsService {
   async markReceived(id: string) {
     const record = await this.prisma.return.findUnique({ where: { id } });
     if (!record) throw new NotFoundException(`Devolución ${id} no encontrada`);
-    return this.prisma.return.update({
+    const receivedAt = new Date();
+    const updated = await this.prisma.return.update({
       where: { id },
-      data: { receivedAt: new Date(), status: 'RECEIVED' as never }
+      data: { receivedAt, status: 'RECEIVED' as never }
     });
+
+    // Klaviyo: package received email
+    this.klaviyo.trackPackageReceived({
+      email: record.customerEmail,
+      customerName: record.customerName,
+      orderNumber: record.shopifyOrderNumber,
+      receivedAt: receivedAt.toLocaleDateString('es-ES', { day: 'numeric', month: 'long', year: 'numeric' })
+    }).catch((err) => console.error('[ReturnsService] Klaviyo received email error:', err));
+
+    return updated;
   }
 
   private shippingAddressFromOrder(shippingAddressJson: unknown, fallbackName: string) {
