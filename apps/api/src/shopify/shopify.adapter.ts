@@ -296,6 +296,16 @@ export class ShopifyAdapter {
     };
   }
 
+  /** Get transactions for an order (needed to build refund payload) */
+  async getOrderTransactions(numericOrderId: string): Promise<Array<{ id: number; kind: string; status: string; amount: string; gateway: string }>> {
+    this.assertConfigured();
+    const res = await this.rest<{ transactions: Array<{ id: number; kind: string; status: string; amount: string; gateway: string }> }>(
+      `/orders/${numericOrderId}/transactions.json`,
+      { method: 'GET' }
+    );
+    return res.transactions ?? [];
+  }
+
   /** Create a refund on an existing Shopify order */
   async createRefund(numericOrderId: string, refundInput: ShopifyRefundInput): Promise<{ refund: { id: number | string } }> {
     this.assertConfigured();
@@ -396,7 +406,8 @@ export class ShopifyAdapter {
         tags: input.tags ?? ['return-portal'],
         shippingAddress: input.shippingAddress,
         lineItems,
-        useCustomerDefaultAddress: false
+        useCustomerDefaultAddress: false,
+        ...(input.noteAttributes ? { customAttributes: input.noteAttributes } : {})
       }
     });
 
@@ -790,7 +801,13 @@ export interface ShopifyRefundInput {
   refund_line_items: Array<{
     line_item_id: number;
     quantity: number;
-    restock_type?: string;
+    restock_type?: 'no_restock' | 'return' | 'cancel';
+  }>;
+  transactions?: Array<{
+    parent_id: number;
+    amount: string;
+    kind: string;
+    gateway: string;
   }>;
 }
 
@@ -815,5 +832,6 @@ export interface ShopifyDraftOrderInput {
     price?: number;
     quantity: number;
   }>;
+  noteAttributes?: Array<{ key: string; value: string }>;
 }
 

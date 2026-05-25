@@ -567,13 +567,12 @@ export class ReturnsService {
       const refundLineItems = ret.items
         .filter((item) => item.orderItem.shopifyLineItemId)
         .map((item) => {
-          // shopifyLineItemId may be a GID like gid://shopify/LineItem/12345 or just the numeric ID
           const rawId = item.orderItem.shopifyLineItemId!;
           const numericId = rawId.includes('/') ? rawId.split('/').pop() : rawId;
           return {
             line_item_id: Number(numericId),
             quantity: item.quantity,
-            restock_type: 'return'
+            restock_type: 'no_restock' as const
           };
         });
 
@@ -592,11 +591,23 @@ export class ReturnsService {
         ? shopifyOrderId.split('/').pop()
         : shopifyOrderId;
 
+      // Fetch parent transaction to build the transactions array (required for manual/gateway refunds)
+      let transactions: Array<{ parent_id: number; amount: string; kind: string; gateway: string }> = [];
+      try {
+        const txns = await this.shopify.getOrderTransactions(numericOrderId!);
+        const saleTxn = txns.find((t) => t.kind === 'sale' && t.status === 'success');
+        if (saleTxn) {
+          transactions = [{ parent_id: saleTxn.id, amount: total.toFixed(2), kind: 'refund', gateway: saleTxn.gateway }];
+        }
+      } catch (txnErr) {
+        console.warn(`[ReturnsService] Could not fetch transactions for order ${numericOrderId}:`, txnErr);
+      }
+
       const response = await this.shopify.createRefund(numericOrderId!, {
         notify: true,
         note: 'Devolución aprobada desde portal de devoluciones',
-        shipping: { full_refund: false },
-        refund_line_items: refundLineItems
+        refund_line_items: refundLineItems,
+        ...(transactions.length > 0 && { transactions })
       });
 
       const refundedAt = new Date();
