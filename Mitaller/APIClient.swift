@@ -833,13 +833,22 @@ struct TrackingEvent: Decodable, Identifiable {
 
 struct ReturnOrderItem: Decodable, Identifiable {
     let id: String
-    let title: String
-    let variantTitle: String?
-    let sku: String?
-    let imageUrl: String?
     let quantity: Int
     let reason: String
     let replacementTitle: String?
+    let orderItem: ReturnOrderItemDetails?
+
+    struct ReturnOrderItemDetails: Decodable {
+        let title: String?
+        let variantTitle: String?
+        let sku: String?
+        let imageUrl: String?
+    }
+
+    var title: String { orderItem?.title ?? "Artículo" }
+    var variantTitle: String? { orderItem?.variantTitle }
+    var sku: String? { orderItem?.sku }
+    var imageUrl: String? { orderItem?.imageUrl }
 }
 
 struct ReturnRecord: Decodable, Identifiable {
