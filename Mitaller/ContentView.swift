@@ -6127,10 +6127,6 @@ struct DevolucionesView: View {
     @State private var scannerActive = false
     @State private var scannedReturn: ReturnRecord?
 
-    private var filtered: [ReturnRecord] {
-        returns.filter { !["REJECTED", "CANCELLED", "APPROVED"].contains($0.status) }
-    }
-
     var body: some View {
         NavigationStack {
             ScrollView {
@@ -6148,29 +6144,33 @@ struct DevolucionesView: View {
                     }
                     .glassPanel(padding: 12)
 
-                    let pending = filtered.filter { $0.status == "LABEL_CREATED" }
-                    let received = filtered.filter { $0.status == "RECEIVED" }
+                    let pending  = returns.filter { $0.status == "LABEL_CREATED" }
+                    let received = returns.filter { $0.status == "RECEIVED" }
+                    let done     = returns.filter { ["APPROVED", "REJECTED"].contains($0.status) }
 
                     if !pending.isEmpty {
-                        SectionHeader(title: "En camino", subtitle: "\(pending.count) devoluciones en tránsito")
+                        SectionHeader(title: "En camino", subtitle: "\(pending.count) en tránsito")
                         ForEach(pending) { ret in
-                            NavigationLink(value: ret) {
-                                DevolucionRow(ret: ret)
-                            }.buttonStyle(.plain)
+                            NavigationLink(value: ret) { DevolucionRow(ret: ret) }.buttonStyle(.plain)
                         }
                     }
 
                     if !received.isEmpty {
                         SectionHeader(title: "Recibidas — pendiente verificar", subtitle: "\(received.count) esperando revisión")
                         ForEach(received) { ret in
-                            NavigationLink(value: ret) {
-                                DevolucionRow(ret: ret)
-                            }.buttonStyle(.plain)
+                            NavigationLink(value: ret) { DevolucionRow(ret: ret) }.buttonStyle(.plain)
                         }
                     }
 
-                    if filtered.isEmpty && !loading {
-                        ContentUnavailableView("Sin devoluciones activas", systemImage: "arrow.uturn.left.circle", description: Text("No hay devoluciones en camino ni por verificar."))
+                    if !done.isEmpty {
+                        SectionHeader(title: "Completadas", subtitle: "\(done.count) procesadas")
+                        ForEach(done) { ret in
+                            NavigationLink(value: ret) { DevolucionRow(ret: ret) }.buttonStyle(.plain)
+                        }
+                    }
+
+                    if returns.isEmpty && !loading {
+                        ContentUnavailableView("Sin devoluciones", systemImage: "arrow.uturn.left.circle", description: Text("No hay devoluciones registradas."))
                             .glassPanel()
                     }
 
@@ -6316,18 +6316,63 @@ struct DevolucionDetailView: View {
                 }
                 .glassPanel(padding: 16)
 
+                // Resumen financiero
+                HStack(spacing: 0) {
+                    VStack(spacing: 2) {
+                        Text("Reembolso").font(.caption2).foregroundStyle(AppTheme.muted)
+                        Text(ret.refundAmount, format: .currency(code: "EUR"))
+                            .font(.title2.weight(.black)).foregroundStyle(AppTheme.green)
+                    }
+                    .frame(maxWidth: .infinity)
+                    if ret.totalAmount > 0 {
+                        Divider().frame(height: 36)
+                        VStack(spacing: 2) {
+                            Text("Etiqueta").font(.caption2).foregroundStyle(AppTheme.muted)
+                            Text(ret.totalAmount, format: .currency(code: "EUR"))
+                                .font(.title2.weight(.black)).foregroundStyle(AppTheme.amber)
+                        }
+                        .frame(maxWidth: .infinity)
+                    }
+                }
+                .glassPanel(padding: 12)
+
+                // Etiqueta de devolución
+                if let labelUrlStr = ret.labelUrl, let labelURL = URL(string: labelUrlStr) {
+                    Link(destination: labelURL) {
+                        Label("Ver etiqueta de devolución", systemImage: "doc.richtext.fill")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(AppTheme.blue)
+                    .controlSize(.large)
+                }
+
                 // Items
                 SectionHeader(title: "Artículos a devolver", subtitle: "\(ret.items.reduce(0) { $0 + $1.quantity }) unidades")
                 VStack(spacing: 8) {
                     ForEach(ret.items) { item in
                         HStack(spacing: 10) {
-                            RoundedRectangle(cornerRadius: 8).fill(AppTheme.surfaceSoft)
-                                .frame(width: 44, height: 44)
-                                .overlay(Image(systemName: "tshirt.fill").foregroundStyle(AppTheme.mutedSoft))
+                            if let imgStr = item.imageUrl, let imgURL = URL(string: imgStr) {
+                                AsyncImage(url: imgURL) { phase in
+                                    switch phase {
+                                    case .success(let img):
+                                        img.resizable().scaledToFill()
+                                            .frame(width: 56, height: 56).clipped().clipShape(RoundedRectangle(cornerRadius: 8))
+                                    default:
+                                        RoundedRectangle(cornerRadius: 8).fill(AppTheme.surfaceSoft)
+                                            .frame(width: 56, height: 56)
+                                            .overlay(Image(systemName: "tshirt.fill").foregroundStyle(AppTheme.mutedSoft))
+                                    }
+                                }
+                            } else {
+                                RoundedRectangle(cornerRadius: 8).fill(AppTheme.surfaceSoft)
+                                    .frame(width: 56, height: 56)
+                                    .overlay(Image(systemName: "tshirt.fill").foregroundStyle(AppTheme.mutedSoft))
+                            }
                             VStack(alignment: .leading, spacing: 2) {
-                                Text(item.title).font(.subheadline.weight(.semibold)).foregroundStyle(AppTheme.ink).lineLimit(1)
+                                Text(item.title).font(.subheadline.weight(.semibold)).foregroundStyle(AppTheme.ink).lineLimit(2)
                                 if let variant = item.variantTitle { Text(variant).font(.caption).foregroundStyle(AppTheme.muted) }
-                                Text(item.reason).font(.caption2).foregroundStyle(AppTheme.amber)
+                                Text(reasonLabel(item.reason)).font(.caption2).foregroundStyle(AppTheme.amber)
                             }
                             Spacer()
                             Text("×\(item.quantity)").font(.title3.weight(.black)).foregroundStyle(AppTheme.ink)
@@ -6431,6 +6476,17 @@ struct DevolucionDetailView: View {
         error = nil
         do { let updated = try await client.verifyReturn(ret.id, status: status, notes: notes); onUpdate(updated) }
         catch let err { error = err.localizedDescription }
+    }
+
+    private func reasonLabel(_ reason: String) -> String {
+        switch reason {
+        case "NOT_AS_DESCRIBED": return "No es como se describe"
+        case "WRONG_SIZE": return "Talla incorrecta"
+        case "DEFECTIVE": return "Defectuoso"
+        case "CHANGED_MIND": return "Cambio de opinión"
+        case "EXCHANGE": return "Cambio de producto"
+        default: return reason.replacingOccurrences(of: "_", with: " ")
+        }
     }
 }
 

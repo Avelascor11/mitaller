@@ -861,6 +861,8 @@ struct ReturnRecord: Decodable, Identifiable {
     let paymentStatus: String
     let trackingNumber: String?
     let carrier: String?
+    let labelUrl: String?
+    let checkoutUrl: String?
     let createdAt: Date
     let receivedAt: Date?
     let verificationStatus: String?
