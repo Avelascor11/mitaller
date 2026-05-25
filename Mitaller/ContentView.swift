@@ -1183,6 +1183,8 @@ struct MainTabView: View {
                 .tabItem { Label("Economía", systemImage: "eurosign.circle.fill") }
             CashflowView()
                 .tabItem { Label("Caja", systemImage: "banknote.fill") }
+            DevolucionesView()
+                .tabItem { Label("Devoluciones", systemImage: "arrow.uturn.left.circle.fill") }
             BankView()
                 .tabItem { Label("Banco", systemImage: "building.columns.fill") }
             AdminView()
@@ -6113,6 +6115,347 @@ struct BankView: View {
             // silent — allocation is optional context
         }
     }
+}
+
+// MARK: - Devoluciones
+
+struct DevolucionesView: View {
+    @Environment(WorkshopStore.self) private var store
+    @State private var returns: [ReturnRecord] = []
+    @State private var loading = false
+    @State private var error: String?
+    @State private var scannerActive = false
+    @State private var scannedReturn: ReturnRecord?
+
+    private var filtered: [ReturnRecord] {
+        returns.filter { !["REJECTED", "CANCELLED", "APPROVED"].contains($0.status) }
+    }
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 16) {
+                    HStack(spacing: 10) {
+                        Button {
+                            scannerActive = true
+                        } label: {
+                            Label("Escanear etiqueta", systemImage: "barcode.viewfinder")
+                                .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .tint(AppTheme.teal)
+                        .controlSize(.large)
+                    }
+                    .glassPanel(padding: 12)
+
+                    let pending = filtered.filter { $0.status == "LABEL_CREATED" }
+                    let received = filtered.filter { $0.status == "RECEIVED" }
+
+                    if !pending.isEmpty {
+                        SectionHeader(title: "En camino", subtitle: "\(pending.count) devoluciones en tránsito")
+                        ForEach(pending) { ret in
+                            NavigationLink(value: ret) {
+                                DevolucionRow(ret: ret)
+                            }.buttonStyle(.plain)
+                        }
+                    }
+
+                    if !received.isEmpty {
+                        SectionHeader(title: "Recibidas — pendiente verificar", subtitle: "\(received.count) esperando revisión")
+                        ForEach(received) { ret in
+                            NavigationLink(value: ret) {
+                                DevolucionRow(ret: ret)
+                            }.buttonStyle(.plain)
+                        }
+                    }
+
+                    if filtered.isEmpty && !loading {
+                        ContentUnavailableView("Sin devoluciones activas", systemImage: "arrow.uturn.left.circle", description: Text("No hay devoluciones en camino ni por verificar."))
+                            .glassPanel()
+                    }
+
+                    if let error {
+                        Label(error, systemImage: "exclamationmark.triangle.fill")
+                            .font(.caption).foregroundStyle(AppTheme.red)
+                            .padding(10).glassPanel(padding: 10, accent: AppTheme.red)
+                    }
+                }
+                .padding()
+            }
+            .screenBackground()
+            .navigationTitle("Devoluciones")
+            .toolbar {
+                Button { Task { await load() } } label: { Image(systemName: "arrow.clockwise") }.disabled(loading)
+            }
+            .task { await load() }
+            .refreshable { await load() }
+            .navigationDestination(for: ReturnRecord.self) { ret in
+                DevolucionDetailView(ret: ret, onUpdate: { updated in
+                    if let idx = returns.firstIndex(where: { $0.id == updated.id }) {
+                        returns[idx] = updated
+                    }
+                })
+            }
+            .fullScreenCover(isPresented: $scannerActive) {
+                ReturnScannerView { tracking in
+                    scannerActive = false
+                    Task { await lookupTracking(tracking) }
+                }
+            }
+            .sheet(item: $scannedReturn) { ret in
+                NavigationStack {
+                    DevolucionDetailView(ret: ret, onUpdate: { updated in
+                        scannedReturn = updated
+                        if let idx = returns.firstIndex(where: { $0.id == updated.id }) {
+                            returns[idx] = updated
+                        }
+                    })
+                }
+            }
+        }
+    }
+
+    private func load() async {
+        guard let client = store.apiClient else { return }
+        loading = true; defer { loading = false }
+        error = nil
+        do { returns = try await client.listReturns() }
+        catch let err { error = err.localizedDescription }
+    }
+
+    private func lookupTracking(_ tracking: String) async {
+        guard let client = store.apiClient else { return }
+        do {
+            let ret = try await client.returnByTracking(tracking)
+            scannedReturn = ret
+            if let idx = returns.firstIndex(where: { $0.id == ret.id }) {
+                returns[idx] = ret
+            } else {
+                returns.insert(ret, at: 0)
+            }
+        } catch {
+            self.error = "No encontrada: \(tracking)"
+        }
+    }
+}
+
+struct DevolucionRow: View {
+    let ret: ReturnRecord
+    var body: some View {
+        HStack(spacing: 12) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(ret.shopifyOrderNumber)
+                    .font(.headline.weight(.heavy)).foregroundStyle(AppTheme.ink)
+                Text(ret.customerName)
+                    .font(.caption).foregroundStyle(AppTheme.muted).lineLimit(1)
+                if let tracking = ret.trackingNumber {
+                    Label(tracking, systemImage: "barcode")
+                        .font(.caption2.weight(.bold)).foregroundStyle(AppTheme.teal).lineLimit(1)
+                }
+            }
+            Spacer()
+            VStack(alignment: .trailing, spacing: 4) {
+                ReturnStatusBadge(status: ret.status)
+                Text("\(ret.items.count) art.")
+                    .font(.caption2).foregroundStyle(AppTheme.muted)
+            }
+        }
+        .glassPanel(padding: 12)
+    }
+}
+
+struct ReturnStatusBadge: View {
+    let status: String
+    var body: some View {
+        let (label, color): (String, Color) = {
+            switch status {
+            case "LABEL_CREATED": return ("EN CAMINO", AppTheme.blue)
+            case "RECEIVED": return ("RECIBIDA", AppTheme.amber)
+            case "APPROVED": return ("APROBADA", AppTheme.green)
+            case "REJECTED": return ("RECHAZADA", AppTheme.red)
+            case "REQUESTED": return ("SOLICITADA", AppTheme.muted)
+            default: return (status.replacingOccurrences(of: "_", with: " "), AppTheme.muted)
+            }
+        }()
+        return Text(label)
+            .font(.caption2.weight(.black))
+            .padding(.horizontal, 8).padding(.vertical, 3)
+            .background(color.opacity(0.18))
+            .foregroundStyle(color)
+            .overlay(RoundedRectangle(cornerRadius: 6).stroke(color.opacity(0.3)))
+            .clipShape(RoundedRectangle(cornerRadius: 6))
+    }
+}
+
+struct DevolucionDetailView: View {
+    @Environment(WorkshopStore.self) private var store
+    let ret: ReturnRecord
+    let onUpdate: (ReturnRecord) -> Void
+    @State private var loading = false
+    @State private var error: String?
+    @State private var showingDenySheet = false
+    @State private var denyNotes = ""
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 16) {
+                // Header
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack {
+                        Text(ret.shopifyOrderNumber)
+                            .font(.system(size: 28, weight: .black)).foregroundStyle(AppTheme.ink)
+                        Spacer()
+                        ReturnStatusBadge(status: ret.status)
+                    }
+                    Text(ret.customerName)
+                        .font(.subheadline.weight(.medium)).foregroundStyle(AppTheme.muted)
+                    if let tracking = ret.trackingNumber {
+                        Label(tracking, systemImage: "barcode.viewfinder")
+                            .font(.caption.weight(.bold)).foregroundStyle(AppTheme.teal)
+                    }
+                }
+                .glassPanel(padding: 16)
+
+                // Items
+                SectionHeader(title: "Artículos a devolver", subtitle: "\(ret.items.reduce(0) { $0 + $1.quantity }) unidades")
+                VStack(spacing: 8) {
+                    ForEach(ret.items) { item in
+                        HStack(spacing: 10) {
+                            RoundedRectangle(cornerRadius: 8).fill(AppTheme.surfaceSoft)
+                                .frame(width: 44, height: 44)
+                                .overlay(Image(systemName: "tshirt.fill").foregroundStyle(AppTheme.mutedSoft))
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(item.title).font(.subheadline.weight(.semibold)).foregroundStyle(AppTheme.ink).lineLimit(1)
+                                if let variant = item.variantTitle { Text(variant).font(.caption).foregroundStyle(AppTheme.muted) }
+                                Text(item.reason).font(.caption2).foregroundStyle(AppTheme.amber)
+                            }
+                            Spacer()
+                            Text("×\(item.quantity)").font(.title3.weight(.black)).foregroundStyle(AppTheme.ink)
+                        }
+                        .padding(10).glassPanel(padding: 0)
+                    }
+                }
+
+                // Actions
+                if ret.status == "LABEL_CREATED" {
+                    Button {
+                        Task { await markReceived() }
+                    } label: {
+                        if loading { ProgressView().frame(maxWidth: .infinity) }
+                        else { Label("Marcar como recibida", systemImage: "checkmark.circle.fill").frame(maxWidth: .infinity) }
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(AppTheme.teal)
+                    .controlSize(.large)
+                    .disabled(loading)
+                }
+
+                if ret.status == "RECEIVED" {
+                    HStack(spacing: 12) {
+                        Button {
+                            Task { await verify(status: "OK", notes: nil) }
+                        } label: {
+                            if loading { ProgressView().frame(maxWidth: .infinity) }
+                            else { Label("Aprobar", systemImage: "checkmark.seal.fill").frame(maxWidth: .infinity) }
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .tint(AppTheme.green)
+                        .controlSize(.large)
+                        .disabled(loading)
+
+                        Button {
+                            showingDenySheet = true
+                        } label: {
+                            Label("Problema", systemImage: "xmark.circle.fill").frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .tint(AppTheme.red)
+                        .controlSize(.large)
+                        .disabled(loading)
+                    }
+                    .glassPanel(padding: 12)
+                }
+
+                if let error {
+                    Label(error, systemImage: "exclamationmark.triangle.fill")
+                        .font(.caption).foregroundStyle(AppTheme.red)
+                        .padding(10).glassPanel(padding: 10, accent: AppTheme.red)
+                }
+            }
+            .padding()
+        }
+        .screenBackground()
+        .navigationTitle(ret.shopifyOrderNumber)
+        .navigationBarTitleDisplayMode(.inline)
+        .sheet(isPresented: $showingDenySheet) {
+            NavigationStack {
+                VStack(alignment: .leading, spacing: 16) {
+                    Text("¿Cuál es el problema?").font(.headline).foregroundStyle(AppTheme.ink)
+                    TextEditor(text: $denyNotes)
+                        .frame(minHeight: 100)
+                        .padding(8)
+                        .glassPanel(padding: 0)
+                    Button {
+                        showingDenySheet = false
+                        Task { await verify(status: "ISSUE", notes: denyNotes.isEmpty ? nil : denyNotes) }
+                    } label: {
+                        Label("Confirmar problema", systemImage: "xmark.circle.fill").frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(AppTheme.red)
+                    .controlSize(.large)
+                    Spacer()
+                }
+                .padding()
+                .screenBackground()
+                .navigationTitle("Rechazar devolución")
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    Button("Cancelar") { showingDenySheet = false }
+                }
+            }
+        }
+    }
+
+    private func markReceived() async {
+        guard let client = store.apiClient else { return }
+        loading = true; defer { loading = false }
+        error = nil
+        do { let updated = try await client.markReturnReceived(ret.id); onUpdate(updated) }
+        catch let err { error = err.localizedDescription }
+    }
+
+    private func verify(status: String, notes: String?) async {
+        guard let client = store.apiClient else { return }
+        loading = true; defer { loading = false }
+        error = nil
+        do { let updated = try await client.verifyReturn(ret.id, status: status, notes: notes); onUpdate(updated) }
+        catch let err { error = err.localizedDescription }
+    }
+}
+
+struct ReturnScannerView: View {
+    let onScan: (String) -> Void
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            BarcodeScannerView(capturesPhoto: false, continuous: false) { code, _ in
+                onScan(code)
+            }
+            .ignoresSafeArea()
+            .navigationTitle("Escanear etiqueta devolución")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                Button("Cancelar") { dismiss() }
+            }
+        }
+    }
+}
+
+extension ReturnRecord: Hashable {
+    static func == (lhs: ReturnRecord, rhs: ReturnRecord) -> Bool { lhs.id == rhs.id }
+    func hash(into hasher: inout Hasher) { hasher.combine(id) }
 }
 
 struct CashflowView: View {

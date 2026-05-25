@@ -90,17 +90,31 @@ export class ReturnsController {
 
   /** Shopify webhook — order paid (draft order completed) */
   @Post('webhooks/order-paid')
-  async orderPaid(@Body() payload: { id?: string | number; admin_graphql_api_id?: string; tags?: string; source_name?: string; source_identifier?: string | number }) {
-    // Detect draft order id from either source_identifier or by looking at tags
+  async orderPaid(@Body() payload: { id?: string | number; tags?: string; source_name?: string; source_identifier?: string | number; note?: string }) {
     const tags = (payload.tags ?? '').toString().toLowerCase();
-    if (!tags.includes('return-portal')) {
+    const isReturnPortal = tags.includes('return-portal') || (payload.source_name === 'shopify_draft_order' && (payload.note ?? '').toLowerCase().includes('devolución pedido'));
+
+    if (!isReturnPortal) {
       return { received: true, ignored: true, reason: 'not a return-portal order' };
     }
-    const draftOrderId = payload.source_identifier ? `gid://shopify/DraftOrder/${payload.source_identifier}` : null;
-    if (!draftOrderId) {
-      return { received: true, ignored: true, reason: 'no source_identifier' };
+
+    // Prefer source_identifier → GID; fallback → extract order number from note
+    let identifier: { type: 'draftOrderId'; value: string } | { type: 'orderNumber'; value: string } | null = null;
+
+    if (payload.source_identifier) {
+      identifier = { type: 'draftOrderId', value: `gid://shopify/DraftOrder/${payload.source_identifier}` };
+    } else if (payload.note) {
+      const match = (payload.note as string).match(/pedido\s+(#?\d+)/i);
+      if (match) identifier = { type: 'orderNumber', value: match[1] };
     }
-    const updated = await this.returnsService.markPaidAndGenerateLabel(draftOrderId);
+
+    if (!identifier) {
+      console.log('[Webhook order-paid] cannot identify return — note:', payload.note);
+      return { received: true, ignored: true, reason: 'cannot identify return' };
+    }
+
+    console.log('[Webhook order-paid] processing', identifier);
+    const updated = await this.returnsService.markPaidAndGenerateLabel(identifier);
     return { received: true, processed: !!updated, returnId: updated?.id };
   }
 
@@ -109,6 +123,37 @@ export class ReturnsController {
   @UseGuards(JwtAuthGuard)
   findAll() {
     return this.returnsService.findAll();
+  }
+
+  /** iOS app alias */
+  @Get('admin/list')
+  @UseGuards(JwtAuthGuard)
+  findAllAlias() {
+    return this.returnsService.findAll();
+  }
+
+  /** iOS app — find return by tracking number */
+  @Get('admin/by-tracking/:tracking')
+  @UseGuards(JwtAuthGuard)
+  findByTracking(@Param('tracking') tracking: string) {
+    return this.returnsService.findByTracking(tracking);
+  }
+
+  /** iOS app — mark received (POST alias) */
+  @Post(':id/received')
+  @UseGuards(JwtAuthGuard)
+  markReceivedPost(@Param('id') id: string) {
+    return this.returnsService.markReceived(id);
+  }
+
+  /** iOS app — verify (POST alias) */
+  @Post(':id/verify')
+  @UseGuards(JwtAuthGuard)
+  verifyReturnPost(
+    @Param('id') id: string,
+    @Body() body: { verificationStatus: 'OK' | 'ISSUE'; verificationNotes?: string }
+  ) {
+    return this.returnsService.verifyReturn(id, body);
   }
 
   /** Admin — get return detail */
@@ -123,6 +168,13 @@ export class ReturnsController {
   @UseGuards(JwtAuthGuard)
   updateStatus(@Param('id') id: string, @Body('status') status: string) {
     return this.returnsService.updateStatus(id, status);
+  }
+
+  /** Admin — manually generate label + send email */
+  @Post(':id/generate-label')
+  @UseGuards(JwtAuthGuard)
+  generateLabel(@Param('id') id: string) {
+    return this.returnsService.generateLabelForReturn(id);
   }
 
   /** Admin — mark package as received */

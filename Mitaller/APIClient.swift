@@ -249,6 +249,22 @@ struct APIClient {
         let _: EmptyResponse = try await perform(request)
     }
 
+    func listReturns() async throws -> [ReturnRecord] { try await get("/returns/admin/list") }
+
+    func returnByTracking(_ tracking: String) async throws -> ReturnRecord {
+        try await get("/returns/admin/by-tracking/\(Self.pathSegment(tracking))")
+    }
+
+    func markReturnReceived(_ id: String) async throws -> ReturnRecord {
+        let request = try jsonRequest(path: "/returns/\(Self.pathSegment(id))/received", method: "POST", body: EmptyBody())
+        return try await perform(request)
+    }
+
+    func verifyReturn(_ id: String, status: String, notes: String?) async throws -> ReturnRecord {
+        let request = try jsonRequest(path: "/returns/\(Self.pathSegment(id))/verify", method: "POST", body: VerifyReturnRequest(verificationStatus: status, verificationNotes: notes))
+        return try await perform(request)
+    }
+
     func bankDaily(from: Date, to: Date) async throws -> BankDailySummary {
         let formatter = DateFormatter.apiDay
         return try await get("/bank/daily?from=\(formatter.string(from: from))&to=\(formatter.string(from: to))")
@@ -813,6 +829,43 @@ struct TrackingEvent: Decodable, Identifiable {
     let message: String?
     let at: String?
 }
+// MARK: - Returns
+
+struct ReturnOrderItem: Decodable, Identifiable {
+    let id: String
+    let title: String
+    let variantTitle: String?
+    let sku: String?
+    let imageUrl: String?
+    let quantity: Int
+    let reason: String
+    let replacementTitle: String?
+}
+
+struct ReturnRecord: Decodable, Identifiable {
+    let id: String
+    let shopifyOrderNumber: String
+    let customerName: String
+    let customerEmail: String
+    let type: String
+    let status: String
+    let paymentStatus: String
+    let trackingNumber: String?
+    let carrier: String?
+    let createdAt: Date
+    let receivedAt: Date?
+    let verificationStatus: String?
+    let verificationNotes: String?
+    let totalAmount: Double
+    let refundAmount: Double
+    let items: [ReturnOrderItem]
+}
+
+struct VerifyReturnRequest: Encodable {
+    let verificationStatus: String
+    let verificationNotes: String?
+}
+
 private struct APIErrorResponse: Decodable {
     let message: String?
     let messageArray: [String]?

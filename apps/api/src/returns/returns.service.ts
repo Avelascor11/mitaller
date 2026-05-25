@@ -509,6 +509,16 @@ export class ReturnsService {
     return record;
   }
 
+  async findByTracking(tracking: string) {
+    const clean = tracking.trim();
+    const record = await this.prisma.return.findFirst({
+      where: { trackingNumber: { equals: clean, mode: 'insensitive' } },
+      include: { order: true, items: { include: { orderItem: true } } }
+    });
+    if (!record) throw new NotFoundException(`No se encontró devolución con tracking ${clean}`);
+    return record;
+  }
+
   async updateStatus(id: string, status: string) {
     const validStatuses = ['REQUESTED', 'LABEL_CREATED', 'RECEIVED', 'APPROVED', 'REJECTED', 'CANCELLED'];
     if (!validStatuses.includes(status)) throw new BadRequestException(`Estado inválido: ${status}`);
