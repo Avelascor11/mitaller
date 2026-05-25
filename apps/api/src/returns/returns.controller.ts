@@ -125,30 +125,26 @@ export class ReturnsController {
     return this.returnsService.findAll();
   }
 
-  /** iOS app alias */
+  /** iOS app — list returns (no JWT, internal use) */
   @Get('admin/list')
-  @UseGuards(JwtAuthGuard)
   findAllAlias() {
     return this.returnsService.findAll();
   }
 
   /** iOS app — find return by tracking number */
   @Get('admin/by-tracking/:tracking')
-  @UseGuards(JwtAuthGuard)
   findByTracking(@Param('tracking') tracking: string) {
     return this.returnsService.findByTracking(tracking);
   }
 
-  /** iOS app — mark received (POST alias) */
+  /** iOS app — mark received */
   @Post(':id/received')
-  @UseGuards(JwtAuthGuard)
   markReceivedPost(@Param('id') id: string) {
     return this.returnsService.markReceived(id);
   }
 
-  /** iOS app — verify (POST alias) */
+  /** iOS app — verify */
   @Post(':id/verify')
-  @UseGuards(JwtAuthGuard)
   verifyReturnPost(
     @Param('id') id: string,
     @Body() body: { verificationStatus: 'OK' | 'ISSUE'; verificationNotes?: string }
