@@ -7,12 +7,13 @@ import { SendcloudModule } from '../sendcloud/sendcloud.module';
 import { ShopifyModule } from '../shopify/shopify.module';
 import { ReturnsConfigService } from './returns-config.service';
 import { ReturnsExceptionsService } from './returns-exceptions.service';
+import { MobileReturnsController } from './mobile-returns.controller';
 import { ReturnsController } from './returns.controller';
 import { ReturnsService } from './returns.service';
 
 @Module({
   imports: [PrismaModule, SendcloudModule, ShopifyModule, ActivityModule, AuthModule, KlaviyoModule],
-  controllers: [ReturnsController],
+  controllers: [ReturnsController, MobileReturnsController],
   providers: [ReturnsService, ReturnsConfigService, ReturnsExceptionsService],
   exports: [ReturnsService, ReturnsConfigService, ReturnsExceptionsService]
 })

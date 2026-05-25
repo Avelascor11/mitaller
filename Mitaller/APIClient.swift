@@ -249,19 +249,19 @@ struct APIClient {
         let _: EmptyResponse = try await perform(request)
     }
 
-    func listReturns() async throws -> [ReturnRecord] { try await get("/returns/admin/list") }
+    func listReturns() async throws -> [ReturnRecord] { try await get("/mobile-returns") }
 
     func returnByTracking(_ tracking: String) async throws -> ReturnRecord {
-        try await get("/returns/admin/by-tracking/\(Self.pathSegment(tracking))")
+        try await get("/mobile-returns/by-tracking/\(Self.pathSegment(tracking))")
     }
 
     func markReturnReceived(_ id: String) async throws -> ReturnRecord {
-        let request = try jsonRequest(path: "/returns/\(Self.pathSegment(id))/received", method: "POST", body: EmptyBody())
+        let request = try jsonRequest(path: "/mobile-returns/\(Self.pathSegment(id))/received", method: "POST", body: EmptyBody())
         return try await perform(request)
     }
 
     func verifyReturn(_ id: String, status: String, notes: String?) async throws -> ReturnRecord {
-        let request = try jsonRequest(path: "/returns/\(Self.pathSegment(id))/verify", method: "POST", body: VerifyReturnRequest(verificationStatus: status, verificationNotes: notes))
+        let request = try jsonRequest(path: "/mobile-returns/\(Self.pathSegment(id))/verify", method: "POST", body: VerifyReturnRequest(verificationStatus: status, verificationNotes: notes))
         return try await perform(request)
     }
 
