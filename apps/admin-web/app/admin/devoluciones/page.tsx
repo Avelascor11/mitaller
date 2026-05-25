@@ -1,32 +1,32 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001';
 
-const STATUS_META: Record<string, { label: string; color: string; bg: string }> = {
-  REQUESTED:     { label: 'Solicitada',       color: '#b45309', bg: '#fef3c7' },
-  LABEL_CREATED: { label: 'Etiqueta creada',  color: '#1d4ed8', bg: '#dbeafe' },
-  RECEIVED:      { label: 'Recibida',         color: '#6d28d9', bg: '#ede9fe' },
-  APPROVED:      { label: 'Aprobada',         color: '#047857', bg: '#d1fae5' },
-  REJECTED:      { label: 'Rechazada',        color: '#b91c1c', bg: '#fee2e2' },
-  CANCELLED:     { label: 'Cancelada',        color: '#64748b', bg: '#f1f5f9' }
+const STATUS_META: Record<string, { label: string; color: string; bg: string; dot: string }> = {
+  REQUESTED:     { label: 'Solicitada',      color: '#92400e', bg: '#fef3c7', dot: '#f59e0b' },
+  LABEL_CREATED: { label: 'Etiqueta creada', color: '#1e40af', bg: '#dbeafe', dot: '#3b82f6' },
+  RECEIVED:      { label: 'Recibida',        color: '#5b21b6', bg: '#ede9fe', dot: '#7c3aed' },
+  APPROVED:      { label: 'Aprobada',        color: '#065f46', bg: '#d1fae5', dot: '#10b981' },
+  REJECTED:      { label: 'Rechazada',       color: '#991b1b', bg: '#fee2e2', dot: '#ef4444' },
+  CANCELLED:     { label: 'Cancelada',       color: '#475569', bg: '#f1f5f9', dot: '#94a3b8' },
 };
 
 const REASON_LABELS: Record<string, string> = {
   WRONG_SIZE: 'Talla incorrecta',
   DEFECTIVE: 'Defectuoso',
   NOT_AS_DESCRIBED: 'No coincide',
-  CHANGED_MIND: 'Cambio opinión',
+  CHANGED_MIND: 'Cambio de opinión',
   WRONG_ITEM: 'Artículo incorrecto',
-  OTHER: 'Otro'
+  OTHER: 'Otro',
 };
 
 const EXCEPTION_LABELS: Record<string, { label: string; color: string }> = {
-  EXTEND_WINDOW: { label: 'Ampliar plazo', color: '#1d4ed8' },
-  FREE_LABEL: { label: 'Etiqueta gratis', color: '#047857' },
-  ACCEPT_EXPIRED: { label: 'Aceptar expirado', color: '#b45309' },
-  BLOCK: { label: 'Bloqueado', color: '#b91c1c' }
+  EXTEND_WINDOW:  { label: 'Ampliar plazo',        color: '#1d4ed8' },
+  FREE_LABEL:     { label: 'Etiqueta gratis',       color: '#047857' },
+  ACCEPT_EXPIRED: { label: 'Aceptar expirado',      color: '#b45309' },
+  BLOCK:          { label: 'Bloqueado',             color: '#b91c1c' },
 };
 
 interface ReturnRecord {
@@ -42,13 +42,13 @@ interface ReturnRecord {
   carrier?: string | null;
   notes?: string | null;
   totalAmount?: number | null;
+  refundAmount?: number | null;
   createdAt: string;
   receivedAt?: string | null;
   verifiedAt?: string | null;
   verificationStatus?: string | null;
   verificationNotes?: string | null;
   refundedAt?: string | null;
-  refundId?: string | null;
   shopifyRefundAmount?: number | null;
   order: { orderNumber: string; customerName: string; customerEmail?: string | null };
   items: Array<{
@@ -83,28 +83,58 @@ interface ReturnException {
   createdAt: string;
 }
 
-type Tab = 'list' | 'config' | 'exceptions' | 'portal';
+interface Toast { id: number; msg: string; type: 'ok' | 'err' }
 
-function VerifyPanel({ returnId, onVerify }: { returnId: string; onVerify: (id: string, status: 'OK' | 'ISSUE', notes?: string) => void }) {
+type Tab = 'list' | 'config' | 'exceptions';
+
+// ── Toast hook ────────────────────────────────────────────────────────────────
+function useToast() {
+  const [toasts, setToasts] = useState<Toast[]>([]);
+  const ctr = useRef(0);
+  function push(msg: string, type: 'ok' | 'err' = 'ok') {
+    const id = ++ctr.current;
+    setToasts(t => [...t, { id, msg, type }]);
+    setTimeout(() => setToasts(t => t.filter(x => x.id !== id)), 3500);
+  }
+  return { toasts, ok: (m: string) => push(m, 'ok'), err: (m: string) => push(m, 'err') };
+}
+
+// ── Sub-components ────────────────────────────────────────────────────────────
+function StatusBadge({ status }: { status: string }) {
+  const m = STATUS_META[status] ?? { label: status, color: '#475569', bg: '#f1f5f9', dot: '#94a3b8' };
+  return (
+    <span style={{ display:'inline-flex', alignItems:'center', gap:5, fontSize:12, fontWeight:600,
+      padding:'3px 10px', borderRadius:20, color:m.color, background:m.bg, whiteSpace:'nowrap' }}>
+      <span style={{ width:6, height:6, borderRadius:'50%', background:m.dot, flexShrink:0 }} />
+      {m.label}
+    </span>
+  );
+}
+
+function KpiCard({ label, value, sub, color }: { label: string; value: string | number; sub?: string; color?: string }) {
+  return (
+    <div style={{ background:'#fff', border:'1px solid #e5e7eb', borderRadius:12, padding:'18px 20px', flex:1, minWidth:140 }}>
+      <div style={{ fontSize:12, fontWeight:600, color:'#9ca3af', textTransform:'uppercase', letterSpacing:'0.05em', marginBottom:6 }}>{label}</div>
+      <div style={{ fontSize:26, fontWeight:700, color: color ?? '#111827', lineHeight:1 }}>{value}</div>
+      {sub && <div style={{ fontSize:12, color:'#9ca3af', marginTop:5 }}>{sub}</div>}
+    </div>
+  );
+}
+
+function VerifyPanel({ returnId, onVerify }: { returnId: string; onVerify: (id: string, s: 'OK'|'ISSUE', n?: string) => void }) {
   const [notes, setNotes] = useState('');
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-      <input
-        type="text"
-        placeholder="Notas de verificación (opcional)"
-        value={notes}
-        onChange={(e) => setNotes(e.target.value)}
-        style={{ padding: '7px 10px', borderRadius: 8, border: '1px solid var(--line)', fontSize: 13, width: '100%' }}
-      />
-      <div style={{ display: 'flex', gap: 8 }}>
+    <div style={{ display:'flex', flexDirection:'column', gap:8 }}>
+      <input type="text" placeholder="Notas de verificación (opcional)" value={notes}
+        onChange={e => setNotes(e.target.value)}
+        style={{ padding:'8px 12px', borderRadius:8, border:'1px solid #e5e7eb', fontSize:13, width:'100%' }} />
+      <div style={{ display:'flex', gap:8 }}>
         <button onClick={() => onVerify(returnId, 'OK', notes || undefined)}
-          style={{ flex: 1, padding: '7px 0', fontSize: 13, fontWeight: 700, background: '#d1fae5', color: '#047857', border: '1px solid #047857', borderRadius: 8, cursor: 'pointer' }}>
-          ✅ Todo correcto
-        </button>
+          style={{ flex:1, padding:'8px 0', fontSize:13, fontWeight:600, background:'#d1fae5', color:'#065f46',
+            border:'1px solid #a7f3d0', borderRadius:8, cursor:'pointer' }}>✅ Todo correcto</button>
         <button onClick={() => onVerify(returnId, 'ISSUE', notes || 'Incidencia detectada')}
-          style={{ flex: 1, padding: '7px 0', fontSize: 13, fontWeight: 700, background: '#fee2e2', color: '#b91c1c', border: '1px solid #b91c1c', borderRadius: 8, cursor: 'pointer' }}>
-          ⚠️ Hay incidencia
-        </button>
+          style={{ flex:1, padding:'8px 0', fontSize:13, fontWeight:600, background:'#fee2e2', color:'#991b1b',
+            border:'1px solid #fca5a5', borderRadius:8, cursor:'pointer' }}>⚠️ Hay incidencia</button>
       </div>
     </div>
   );
@@ -113,106 +143,82 @@ function VerifyPanel({ returnId, onVerify }: { returnId: string; onVerify: (id: 
 function PhotoSection({ returnId, token }: { returnId: string; token: string }) {
   const [photos, setPhotos] = useState<string[]>([]);
   const [uploading, setUploading] = useState(false);
-
   useEffect(() => {
-    fetch(`${API_URL}/returns/${returnId}/photos`, {
-      headers: { Authorization: `Bearer ${token}` }
-    }).then(r => r.json()).then(data => setPhotos(data.map((p: { data: string }) => p.data))).catch(() => {});
+    fetch(`${API_URL}/returns/${returnId}/photos`, { headers: { Authorization:`Bearer ${token}` } })
+      .then(r => r.json()).then(d => setPhotos(d.map((p:{data:string}) => p.data))).catch(() => {});
   }, [returnId, token]);
-
   async function handleFile(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
-    if (!file) return;
+    const file = e.target.files?.[0]; if (!file) return;
     setUploading(true);
     const reader = new FileReader();
     reader.onload = async () => {
       const data = reader.result as string;
       await fetch(`${API_URL}/returns/${returnId}/photos`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        method:'POST', headers:{'Content-Type':'application/json', Authorization:`Bearer ${token}`},
         body: JSON.stringify({ data })
       });
-      setPhotos(prev => [...prev, data]);
-      setUploading(false);
+      setPhotos(p => [...p, data]); setUploading(false);
     };
     reader.readAsDataURL(file);
   }
-
   return (
-    <div style={{ marginTop: 16 }}>
-      <div style={{ fontSize: 13, fontWeight: 600, color: '#555', marginBottom: 8 }}>
-        📸 Prueba fotográfica
-      </div>
-      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 8 }}>
+    <div style={{ marginTop:16 }}>
+      <div style={{ fontSize:12, fontWeight:600, color:'#6b7280', marginBottom:8, textTransform:'uppercase', letterSpacing:'0.05em' }}>📸 Evidencia fotográfica</div>
+      <div style={{ display:'flex', gap:8, flexWrap:'wrap', marginBottom:8 }}>
         {photos.map((src, i) => (
           // eslint-disable-next-line @next/next/no-img-element
-          <img key={i} src={src} alt={`foto ${i + 1}`}
-            style={{ width: 80, height: 80, objectFit: 'cover', borderRadius: 8, border: '1px solid #ddd', cursor: 'pointer' }}
-            onClick={() => window.open(src, '_blank')} />
+          <img key={i} src={src} alt={`foto ${i+1}`} onClick={() => window.open(src,'_blank')}
+            style={{ width:72, height:72, objectFit:'cover', borderRadius:8, border:'1px solid #e5e7eb', cursor:'pointer' }} />
         ))}
       </div>
-      <label style={{
-        display: 'inline-flex', alignItems: 'center', gap: 6,
-        padding: '8px 14px', background: '#f0f0f0', borderRadius: 8,
-        cursor: 'pointer', fontSize: 13, fontWeight: 500
-      }}>
-        <input type="file" accept="image/*" capture="environment" style={{ display: 'none' }} onChange={handleFile} disabled={uploading} />
+      <label style={{ display:'inline-flex', alignItems:'center', gap:6, padding:'7px 14px',
+        background:'#f9fafb', border:'1px solid #e5e7eb', borderRadius:8, cursor:'pointer', fontSize:13, fontWeight:500 }}>
+        <input type="file" accept="image/*" capture="environment" style={{ display:'none' }} onChange={handleFile} disabled={uploading} />
         {uploading ? '⏳ Subiendo...' : '📷 Añadir foto'}
       </label>
     </div>
   );
 }
 
-function StatusBadge({ status }: { status: string }) {
-  const meta = STATUS_META[status] ?? { label: status, color: '#64748b', bg: '#f1f5f9' };
-  return (
-    <span style={{
-      fontSize: 12, fontWeight: 600, padding: '2px 10px', borderRadius: 20,
-      color: meta.color, background: meta.bg, whiteSpace: 'nowrap'
-    }}>
-      {meta.label}
-    </span>
-  );
-}
-
+// ── Main component ────────────────────────────────────────────────────────────
 export default function AdminDevolucionesPage() {
   const [tab, setTab] = useState<Tab>('list');
-  const [token, setToken] = useState<string>('');
+  const [token, setToken] = useState('');
   const [tokenInput, setTokenInput] = useState('');
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const { toasts, ok, err } = useToast();
 
-  // List state
-  const [returns, setReturns] = useState<ReturnRecord[]>([]);
-  const [expanded, setExpanded] = useState<string | null>(null);
+  const [returns, setReturns]       = useState<ReturnRecord[]>([]);
+  const [expanded, setExpanded]     = useState<string | null>(null);
+  const [filterStatus, setFilter]   = useState('ALL');
+  const [search, setSearch]         = useState('');
 
-  // Config state
-  const [config, setConfig] = useState<ReturnConfig | null>(null);
-  const [configDraft, setConfigDraft] = useState<ReturnConfig | null>(null);
-  const [savingConfig, setSavingConfig] = useState(false);
+  const [config, setConfig]         = useState<ReturnConfig | null>(null);
+  const [configDraft, setDraft]     = useState<ReturnConfig | null>(null);
+  const [savingConfig, setSaving]   = useState(false);
 
-  // Exceptions state
-  const [exceptions, setExceptions] = useState<ReturnException[]>([]);
-  const [showNewException, setShowNewException] = useState(false);
-  const [newException, setNewException] = useState({
-    orderNumber: '', customerEmail: '', type: 'EXTEND_WINDOW', extraDays: 7, notes: '', expiresAt: ''
-  });
+  const [exceptions, setExceptions]         = useState<ReturnException[]>([]);
+  const [showNewEx, setShowNewEx]           = useState(false);
+  const [newEx, setNewEx] = useState({ orderNumber:'', customerEmail:'', type:'EXTEND_WINDOW', extraDays:7, notes:'', expiresAt:'' });
 
   useEffect(() => {
-    // Support both old key and new login key
     const stored = localStorage.getItem('token') || localStorage.getItem('mitaller_token');
     if (stored) { setToken(stored); loadAll(stored); }
     else { window.location.href = '/login'; }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  useEffect(() => {
-    if (token) loadAll(token);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tab]);
+  useEffect(() => { if (token) loadAll(token); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [tab]);
+
+  function auth(t: string) { return { Authorization: `Bearer ${t}` }; }
+  function logout() {
+    ['token','mitaller_token'].forEach(k => localStorage.removeItem(k));
+    document.cookie = 'admin-token=; path=/; max-age=0';
+    window.location.href = '/login';
+  }
 
   async function loadAll(jwt: string) {
-    setLoading(true); setError(null);
+    setLoading(true);
     try {
       if (tab === 'list') {
         const r = await fetch(`${API_URL}/returns`, { headers: auth(jwt) });
@@ -221,655 +227,594 @@ export default function AdminDevolucionesPage() {
       } else if (tab === 'config') {
         const r = await fetch(`${API_URL}/returns/admin/config`, { headers: auth(jwt) });
         if (r.status === 401) { logout(); return; }
-        const c = await r.json();
-        setConfig(c); setConfigDraft(c);
+        const c = await r.json(); setConfig(c); setDraft(c);
       } else if (tab === 'exceptions') {
         const r = await fetch(`${API_URL}/returns/admin/exceptions`, { headers: auth(jwt) });
         if (r.status === 401) { logout(); return; }
         setExceptions(await r.json());
       }
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Error');
-    } finally { setLoading(false); }
-  }
-
-  function auth(t: string) { return { Authorization: `Bearer ${t}` }; }
-
-  function logout() {
-    localStorage.removeItem('token');
-    localStorage.removeItem('mitaller_token');
-    document.cookie = 'admin-token=; path=/; max-age=0';
-    window.location.href = '/login';
-  }
-
-  function handleLogin(e: React.FormEvent) {
-    e.preventDefault();
-    if (!tokenInput.trim()) return;
-    localStorage.setItem('token', tokenInput.trim());
-    localStorage.setItem('mitaller_token', tokenInput.trim());
-    setToken(tokenInput.trim());
-    loadAll(tokenInput.trim());
+    } catch (e) { err(e instanceof Error ? e.message : 'Error cargando'); }
+    finally { setLoading(false); }
   }
 
   async function updateStatus(returnId: string, status: string) {
     try {
-      await fetch(`${API_URL}/returns/${returnId}/status`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json', ...auth(token) },
-        body: JSON.stringify({ status })
-      });
+      if (status === 'LABEL_CREATED') {
+        const res = await fetch(`${API_URL}/returns/${returnId}/generate-label`,
+          { method:'POST', headers:{'Content-Type':'application/json', ...auth(token)} });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.message ?? 'Error generando etiqueta');
+        ok('Etiqueta generada y enviada ✓');
+      } else if (status === 'RECEIVED') {
+        const res = await fetch(`${API_URL}/returns/${returnId}/received`,
+          { method:'PATCH', headers:{'Content-Type':'application/json', ...auth(token)} });
+        if (!res.ok) throw new Error((await res.json()).message ?? 'Error');
+        ok('Marcada como recibida ✓');
+      } else {
+        const res = await fetch(`${API_URL}/returns/${returnId}/status`,
+          { method:'PATCH', headers:{'Content-Type':'application/json', ...auth(token)},
+            body: JSON.stringify({ status }) });
+        if (!res.ok) throw new Error((await res.json()).message ?? 'Error');
+        ok(`Estado cambiado a ${STATUS_META[status]?.label ?? status} ✓`);
+      }
       loadAll(token);
-    } catch (err) { alert(err instanceof Error ? err.message : 'Error'); }
+    } catch (e) { err(e instanceof Error ? e.message : 'Error'); }
+  }
+
+  async function verifyReturn(returnId: string, verificationStatus: 'OK'|'ISSUE', verificationNotes?: string) {
+    try {
+      const res = await fetch(`${API_URL}/returns/${returnId}/verify`,
+        { method:'PATCH', headers:{'Content-Type':'application/json', ...auth(token)},
+          body: JSON.stringify({ verificationStatus, verificationNotes }) });
+      if (!res.ok) throw new Error('Error verificando');
+      ok(verificationStatus === 'OK' ? 'Verificación correcta ✓' : 'Incidencia registrada');
+      loadAll(token);
+    } catch (e) { err(e instanceof Error ? e.message : 'Error'); }
   }
 
   async function saveConfig() {
     if (!configDraft) return;
-    setSavingConfig(true);
+    setSaving(true);
     try {
-      const res = await fetch(`${API_URL}/returns/admin/config`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json', ...auth(token) },
-        body: JSON.stringify(configDraft)
-      });
+      const res = await fetch(`${API_URL}/returns/admin/config`,
+        { method:'PUT', headers:{'Content-Type':'application/json', ...auth(token)},
+          body: JSON.stringify(configDraft) });
       if (!res.ok) throw new Error(`Error ${res.status}`);
-      const updated = await res.json();
-      setConfig(updated); setConfigDraft(updated);
-    } catch (err) {
-      alert(err instanceof Error ? err.message : 'Error guardando');
-    } finally { setSavingConfig(false); }
+      const updated = await res.json(); setConfig(updated); setDraft(updated);
+      ok('Configuración guardada ✓');
+    } catch (e) { err(e instanceof Error ? e.message : 'Error guardando'); }
+    finally { setSaving(false); }
   }
 
   async function createException() {
-    if (!newException.orderNumber && !newException.customerEmail) {
-      alert('Indica número de pedido o email');
-      return;
-    }
+    if (!newEx.orderNumber && !newEx.customerEmail) { err('Indica número de pedido o email'); return; }
     try {
-      const body: Record<string, unknown> = {
-        type: newException.type,
-        notes: newException.notes || undefined,
-        expiresAt: newException.expiresAt || undefined
-      };
-      if (newException.orderNumber) body.orderNumber = newException.orderNumber;
-      if (newException.customerEmail) body.customerEmail = newException.customerEmail;
-      if (newException.type === 'EXTEND_WINDOW') body.extraDays = newException.extraDays;
-      const res = await fetch(`${API_URL}/returns/admin/exceptions`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', ...auth(token) },
-        body: JSON.stringify(body)
-      });
+      const body: Record<string, unknown> = { type: newEx.type, notes: newEx.notes||undefined, expiresAt: newEx.expiresAt||undefined };
+      if (newEx.orderNumber) body.orderNumber = newEx.orderNumber;
+      if (newEx.customerEmail) body.customerEmail = newEx.customerEmail;
+      if (newEx.type === 'EXTEND_WINDOW') body.extraDays = newEx.extraDays;
+      const res = await fetch(`${API_URL}/returns/admin/exceptions`,
+        { method:'POST', headers:{'Content-Type':'application/json', ...auth(token)}, body: JSON.stringify(body) });
       if (!res.ok) throw new Error((await res.json()).message ?? `Error ${res.status}`);
-      setShowNewException(false);
-      setNewException({ orderNumber: '', customerEmail: '', type: 'EXTEND_WINDOW', extraDays: 7, notes: '', expiresAt: '' });
+      ok('Excepción creada ✓');
+      setShowNewEx(false);
+      setNewEx({ orderNumber:'', customerEmail:'', type:'EXTEND_WINDOW', extraDays:7, notes:'', expiresAt:'' });
       loadAll(token);
-    } catch (err) { alert(err instanceof Error ? err.message : 'Error'); }
-  }
-
-  async function markReceived(returnId: string) {
-    try {
-      await fetch(`${API_URL}/returns/${returnId}/received`, {
-        method: 'PATCH', headers: auth(token)
-      });
-      loadAll(token);
-    } catch (err) { alert(err instanceof Error ? err.message : 'Error'); }
-  }
-
-  async function verifyReturn(returnId: string, verificationStatus: 'OK' | 'ISSUE', verificationNotes?: string) {
-    try {
-      await fetch(`${API_URL}/returns/${returnId}/verify`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json', ...auth(token) },
-        body: JSON.stringify({ verificationStatus, verificationNotes })
-      });
-      loadAll(token);
-    } catch (err) { alert(err instanceof Error ? err.message : 'Error'); }
+    } catch (e) { err(e instanceof Error ? e.message : 'Error'); }
   }
 
   async function toggleException(id: string, active: boolean) {
-    await fetch(`${API_URL}/returns/admin/exceptions/${id}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json', ...auth(token) },
-      body: JSON.stringify({ active })
-    });
+    await fetch(`${API_URL}/returns/admin/exceptions/${id}`,
+      { method:'PATCH', headers:{'Content-Type':'application/json', ...auth(token)}, body: JSON.stringify({ active }) });
     loadAll(token);
   }
 
   async function deleteException(id: string) {
     if (!confirm('¿Borrar esta excepción?')) return;
-    await fetch(`${API_URL}/returns/admin/exceptions/${id}`, { method: 'DELETE', headers: auth(token) });
+    await fetch(`${API_URL}/returns/admin/exceptions/${id}`, { method:'DELETE', headers: auth(token) });
+    ok('Excepción eliminada');
     loadAll(token);
   }
 
-  // ===== Login screen =====
-  if (!token) {
-    return (
-      <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }}>
-        <div style={{ background: 'var(--surface)', border: '1px solid var(--line)', borderRadius: 'var(--radius)', padding: '32px 28px', width: '100%', maxWidth: 360, boxShadow: 'var(--shadow-md)' }}>
-          <h2 style={{ margin: '0 0 20px', fontSize: 18, fontWeight: 700 }}>Acceso admin</h2>
-          <form onSubmit={handleLogin}>
-            <label style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 14, fontWeight: 500, marginBottom: 16 }}>
-              Token JWT
-              <input type="password" style={inputStyle} value={tokenInput} onChange={(e) => setTokenInput(e.target.value)} placeholder="eyJ..." required />
-            </label>
-            <button type="submit" style={btnPrimaryStyle}>Entrar</button>
-          </form>
+  // ── KPIs ──
+  const kpis = {
+    total:    returns.length,
+    pending:  returns.filter(r => ['REQUESTED','LABEL_CREATED'].includes(r.status)).length,
+    received: returns.filter(r => r.status === 'RECEIVED').length,
+    approved: returns.filter(r => r.status === 'APPROVED').length,
+    refunded: returns.filter(r => r.refundedAt).reduce((s, r) => s + (r.shopifyRefundAmount ?? r.refundAmount ?? 0), 0),
+  };
+
+  // ── Filtered list ──
+  const filtered = returns.filter(r => {
+    const matchStatus = filterStatus === 'ALL' || r.status === filterStatus;
+    const q = search.toLowerCase();
+    const matchSearch = !q || r.shopifyOrderNumber.toLowerCase().includes(q)
+      || r.customerName.toLowerCase().includes(q) || r.customerEmail.toLowerCase().includes(q);
+    return matchStatus && matchSearch;
+  });
+
+  // ── Login ──
+  if (!token) return (
+    <div style={{ minHeight:'100vh', display:'flex', alignItems:'center', justifyContent:'center', background:'#f9fafb' }}>
+      <div style={{ background:'#fff', border:'1px solid #e5e7eb', borderRadius:16, padding:'36px 32px', width:'100%', maxWidth:380, boxShadow:'0 4px 24px rgba(0,0,0,0.08)' }}>
+        <div style={{ marginBottom:24 }}>
+          <div style={{ fontSize:22, fontWeight:700, color:'#111827' }}>Panel de devoluciones</div>
+          <div style={{ fontSize:14, color:'#6b7280', marginTop:4 }}>Speedwear Admin</div>
         </div>
+        <form onSubmit={e => { e.preventDefault(); if (!tokenInput.trim()) return; localStorage.setItem('token', tokenInput.trim()); localStorage.setItem('mitaller_token', tokenInput.trim()); setToken(tokenInput.trim()); loadAll(tokenInput.trim()); }}>
+          <label style={{ display:'flex', flexDirection:'column', gap:6, fontSize:14, fontWeight:500, color:'#374151', marginBottom:16 }}>
+            Token JWT
+            <input type="password" style={inp} value={tokenInput} onChange={e => setTokenInput(e.target.value)} placeholder="eyJ..." required />
+          </label>
+          <button type="submit" style={btnPrimary}>Entrar →</button>
+        </form>
       </div>
-    );
-  }
+    </div>
+  );
 
   return (
-    <div style={{ padding: '32px 24px', maxWidth: 1100, margin: '0 auto' }}>
-      {/* Header */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
-        <h1 style={{ margin: 0, fontSize: 22, fontWeight: 700 }}>Devoluciones</h1>
-        <button onClick={logout}
-          style={{ ...btnSecondaryStyle, padding: '6px 12px' }}>Salir</button>
-      </div>
-
-      {/* Tabs */}
-      <div style={{ display: 'flex', gap: 4, borderBottom: '1px solid var(--line)', marginBottom: 20 }}>
-        {[
-          { id: 'list', label: 'Lista' },
-          { id: 'config', label: 'Configuración' },
-          { id: 'exceptions', label: 'Excepciones' },
-          { id: 'portal', label: '⚙️ Portal' }
-        ].map((t) => (
-          <button key={t.id} onClick={() => setTab(t.id as Tab)}
-            style={{
-              padding: '10px 18px', background: 'transparent', border: 'none', cursor: 'pointer',
-              fontSize: 14, fontWeight: tab === t.id ? 600 : 500,
-              color: tab === t.id ? 'var(--accent)' : 'var(--muted)',
-              borderBottom: `2px solid ${tab === t.id ? 'var(--accent)' : 'transparent'}`,
-              marginBottom: -1
-            }}>
-            {t.label}
-          </button>
+    <div style={{ minHeight:'100vh', background:'#f9fafb' }}>
+      {/* ── Toast container ── */}
+      <div style={{ position:'fixed', bottom:24, right:24, display:'flex', flexDirection:'column', gap:8, zIndex:999 }}>
+        {toasts.map(t => (
+          <div key={t.id} style={{
+            padding:'12px 18px', borderRadius:10, fontSize:14, fontWeight:500,
+            background: t.type === 'ok' ? '#111827' : '#991b1b', color:'#fff',
+            boxShadow:'0 4px 16px rgba(0,0,0,0.18)', animation:'fadeIn 0.2s ease'
+          }}>{t.msg}</div>
         ))}
       </div>
 
-      {error && <div style={{ padding: '12px 16px', background: '#fee2e2', color: '#b91c1c', borderRadius: 8, marginBottom: 16, fontSize: 14 }}>{error}</div>}
-
-      {loading && <div style={{ textAlign: 'center', color: 'var(--muted)', padding: 40 }}>Cargando…</div>}
-
-      {/* ===== TAB: LIST ===== */}
-      {!loading && tab === 'list' && (
-        returns.length === 0 ? (
-          <div style={{ textAlign: 'center', color: 'var(--muted)', padding: 60 }}>No hay devoluciones aún</div>
-        ) : (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-            {returns.map((ret) => (
-              <div key={ret.id} style={cardStyle}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '14px 16px', cursor: 'pointer' }}
-                  onClick={() => setExpanded(expanded === ret.id ? null : ret.id)}>
-                  <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--accent)', minWidth: 70 }}>{ret.shopifyOrderNumber}</span>
-                  <span style={pillType(ret.type)}>{ret.type === 'EXCHANGE' ? '🔄 Cambio' : '↩️ Devolución'}</span>
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontWeight: 500, fontSize: 14 }}>{ret.customerName}</div>
-                    <div style={{ fontSize: 12, color: 'var(--muted)' }}>{ret.customerEmail}</div>
-                  </div>
-                  <div style={{ fontSize: 12, color: 'var(--muted)', textAlign: 'right' }}>
-                    <div>{new Date(ret.createdAt).toLocaleDateString('es-ES', { day: '2-digit', month: 'short' })}</div>
-                    <div>{ret.totalAmount != null ? `${ret.totalAmount.toFixed(2)}€` : ''}</div>
-                  </div>
-                  <StatusBadge status={ret.status} />
-                  <span style={{ color: 'var(--muted)' }}>{expanded === ret.id ? '▾' : '▸'}</span>
-                </div>
-                {expanded === ret.id && (
-                  <div style={{ borderTop: '1px solid var(--line-soft)', padding: 16, background: 'var(--surface-2)' }}>
-                    {ret.trackingNumber && (
-                      <div style={infoBoxStyle}>
-                        <div style={infoLabelStyle}>Tracking</div>
-                        <div style={infoValueStyle}>{ret.trackingNumber} {ret.carrier ? `· ${ret.carrier}` : ''}</div>
-                      </div>
-                    )}
-                    {ret.labelUrl && (
-                      <a href={`${API_URL}${ret.labelUrl}`} target="_blank" rel="noopener noreferrer"
-                        style={{ ...btnSecondaryStyle, display: 'inline-block', marginBottom: 12 }}>📥 Etiqueta PDF</a>
-                    )}
-                    <div style={{ marginBottom: 16 }}>
-                      <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--muted)', marginBottom: 8, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Artículos</div>
-                      {ret.items.map((item) => (
-                        <div key={item.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 0', borderBottom: '1px solid var(--line-soft)', fontSize: 14 }}>
-                          {item.orderItem.imageUrl && (
-                            // eslint-disable-next-line @next/next/no-img-element
-                            <img src={item.orderItem.imageUrl} alt="" style={{ width: 36, height: 36, objectFit: 'cover', borderRadius: 4 }} />
-                          )}
-                          <div style={{ flex: 1 }}>
-                            <span style={{ fontWeight: 500 }}>{item.orderItem.title}</span>
-                            {item.orderItem.variantTitle && <span style={{ color: 'var(--muted)' }}> — {item.orderItem.variantTitle}</span>}
-                            <div style={{ fontSize: 12, color: 'var(--muted)' }}>
-                              {REASON_LABELS[item.reason] ?? item.reason}
-                              {item.replacementTitle && ` → ${item.replacementTitle} (${item.replacementPrice?.toFixed(2)}€)`}
-                            </div>
-                          </div>
-                          <span style={{ color: 'var(--muted)', fontSize: 13 }}>x{item.quantity}</span>
-                        </div>
-                      ))}
-                    </div>
-                    {/* Verification panel */}
-                    <div style={{ margin: '12px 0 16px', padding: 14, background: 'var(--surface)', border: '1px solid var(--line)', borderRadius: 10 }}>
-                      <div style={{ fontSize: 12, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--muted)', marginBottom: 10 }}>
-                        📦 Verificación al recibir
-                      </div>
-                      {ret.verificationStatus ? (
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                          <span style={{
-                            fontSize: 13, fontWeight: 700, padding: '4px 12px', borderRadius: 20,
-                            background: ret.verificationStatus === 'OK' ? '#d1fae5' : '#fee2e2',
-                            color: ret.verificationStatus === 'OK' ? '#047857' : '#b91c1c'
-                          }}>
-                            {ret.verificationStatus === 'OK' ? '✅ Correcto' : '⚠️ Incidencia'}
-                          </span>
-                          {ret.verificationNotes && <span style={{ fontSize: 13, color: 'var(--muted)' }}>{ret.verificationNotes}</span>}
-                          {ret.verifiedAt && <span style={{ fontSize: 11, color: 'var(--muted)', marginLeft: 'auto' }}>{new Date(ret.verifiedAt).toLocaleDateString('es-ES', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })}</span>}
-                        </div>
-                      ) : ret.status === 'RECEIVED' ? (
-                        <VerifyPanel returnId={ret.id} onVerify={verifyReturn} />
-                      ) : (
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                          <span style={{ fontSize: 13, color: 'var(--muted)' }}>
-                            {ret.receivedAt ? `Recibido ${new Date(ret.receivedAt).toLocaleDateString('es-ES')}` : 'Pendiente de recibir'}
-                          </span>
-                          {!ret.receivedAt && ['LABEL_CREATED', 'REQUESTED'].includes(ret.status) && (
-                            <button onClick={() => markReceived(ret.id)}
-                              style={{ padding: '5px 14px', fontSize: 12, fontWeight: 600, background: '#ede9fe', color: '#6d28d9', border: '1px solid #6d28d933', borderRadius: 20, cursor: 'pointer' }}>
-                              📬 Marcar como recibido
-                            </button>
-                          )}
-                        </div>
-                      )}
-                    </div>
-
-                    {/* Refund info */}
-                    {ret.status === 'APPROVED' && ret.refundedAt && (
-                      <div style={{ margin: '0 0 12px', padding: '8px 14px', background: '#d1fae5', borderRadius: 8, display: 'inline-flex', gap: 8, alignItems: 'center' }}>
-                        <span style={{ fontSize: 12, color: '#047857', fontWeight: 600 }}>
-                          ✓ Reembolso enviado {new Date(ret.refundedAt).toLocaleDateString('es-ES')}
-                          {ret.shopifyRefundAmount != null && ` · €${ret.shopifyRefundAmount.toFixed(2)}`}
-                        </span>
-                      </div>
-                    )}
-
-                    {/* Photo evidence */}
-                    <PhotoSection returnId={ret.id} token={token} />
-
-                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center', marginTop: 16 }}>
-                      <span style={{ fontSize: 13, color: 'var(--muted)', fontWeight: 500 }}>Cambiar estado:</span>
-                      {Object.entries(STATUS_META).filter(([k]) => k !== ret.status).map(([key, meta]) => (
-                        <button key={key} onClick={() => updateStatus(ret.id, key)}
-                          style={{ padding: '4px 12px', fontSize: 12, fontWeight: 600, color: meta.color, background: meta.bg, border: `1px solid ${meta.color}33`, borderRadius: 20, cursor: 'pointer' }}>
-                          {meta.label}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                )}
-              </div>
+      {/* ── Top bar ── */}
+      <div style={{ background:'#fff', borderBottom:'1px solid #e5e7eb', padding:'0 32px', display:'flex', alignItems:'center', justifyContent:'space-between', height:60 }}>
+        <div style={{ display:'flex', alignItems:'center', gap:24 }}>
+          <span style={{ fontSize:16, fontWeight:700, color:'#111827' }}>Devoluciones</span>
+          <div style={{ display:'flex', gap:2 }}>
+            {([['list','Lista'],['config','Configuración'],['exceptions','Excepciones']] as [Tab,string][]).map(([id,label]) => (
+              <button key={id} onClick={() => setTab(id)}
+                style={{ padding:'8px 16px', background:'transparent', border:'none', cursor:'pointer',
+                  fontSize:14, fontWeight: tab===id ? 600 : 400,
+                  color: tab===id ? '#111827' : '#6b7280',
+                  borderBottom: `2px solid ${tab===id ? '#111827' : 'transparent'}`,
+                  marginBottom:-1 }}>
+                {label}
+              </button>
             ))}
           </div>
-        )
-      )}
-
-      {/* ===== TAB: CONFIG ===== */}
-      {!loading && tab === 'config' && configDraft && (
-        <div style={{ ...cardStyle, padding: 24 }}>
-          <label style={configLabel}>
-            <input type="checkbox" checked={configDraft.enabled}
-              onChange={(e) => setConfigDraft({ ...configDraft, enabled: e.target.checked })}
-              style={{ width: 18, height: 18, marginRight: 8, accentColor: 'var(--accent)' }} />
-            <span style={{ fontWeight: 600 }}>Sistema de devoluciones activo</span>
-            <span style={{ marginLeft: 'auto', fontSize: 12, color: 'var(--muted)' }}>Desactiva para pausar todo el portal</span>
-          </label>
-
-          <div style={{ height: 1, background: 'var(--line)', margin: '20px 0' }} />
-
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
-            <label style={configLabel}>
-              <span>Plazo (días)</span>
-              <input type="number" min={1} max={365} style={inputStyle} value={configDraft.windowDays}
-                onChange={(e) => setConfigDraft({ ...configDraft, windowDays: Number(e.target.value) })} />
-            </label>
-            <label style={configLabel}>
-              <span>Precio etiqueta (€)</span>
-              <input type="number" step="0.01" min={0} style={inputStyle} value={configDraft.labelPrice}
-                onChange={(e) => setConfigDraft({ ...configDraft, labelPrice: Number(e.target.value) })} />
-            </label>
-            <label style={configLabel}>
-              <span>Política de cambios</span>
-              <select style={inputStyle} value={configDraft.exchangePolicy}
-                onChange={(e) => setConfigDraft({ ...configDraft, exchangePolicy: e.target.value as 'ANY' | 'SAME_TYPE' | 'VARIANT_ONLY' })}>
-                <option value="ANY">Cualquier producto de la web</option>
-                <option value="SAME_TYPE">Mismo tipo de producto</option>
-                <option value="VARIANT_ONLY">Solo otra talla/variante</option>
-              </select>
-            </label>
-            <label style={configLabel}>
-              <span>Código SendCloud retorno</span>
-              <input type="text" style={inputStyle} value={configDraft.shippingProductCode ?? ''}
-                placeholder="correos:paqretorno"
-                onChange={(e) => setConfigDraft({ ...configDraft, shippingProductCode: e.target.value || null })} />
-            </label>
-          </div>
-
-          <label style={{ ...configLabel, marginTop: 16 }}>
-            <span>Texto términos legales (opcional)</span>
-            <textarea style={{ ...inputStyle, minHeight: 100, resize: 'vertical', fontFamily: 'inherit' }}
-              value={configDraft.termsText ?? ''}
-              onChange={(e) => setConfigDraft({ ...configDraft, termsText: e.target.value || null })}
-              placeholder="Texto que se mostrará al cliente en el portal..." />
-          </label>
-
-          <div style={{ display: 'flex', gap: 10, marginTop: 24 }}>
-            <button onClick={() => setConfigDraft(config)} style={btnSecondaryStyle}>Descartar</button>
-            <button onClick={saveConfig} disabled={savingConfig || JSON.stringify(config) === JSON.stringify(configDraft)}
-              style={{ ...btnPrimaryStyle, flex: 1 }}>
-              {savingConfig ? 'Guardando…' : 'Guardar cambios'}
-            </button>
-          </div>
         </div>
-      )}
+        <div style={{ display:'flex', gap:10, alignItems:'center' }}>
+          <a href="/devoluciones" target="_blank"
+            style={{ fontSize:13, color:'#6b7280', textDecoration:'none', padding:'6px 12px',
+              border:'1px solid #e5e7eb', borderRadius:8 }}>
+            Ver portal ↗
+          </a>
+          <button onClick={logout}
+            style={{ fontSize:13, color:'#6b7280', background:'transparent', border:'1px solid #e5e7eb',
+              borderRadius:8, padding:'6px 12px', cursor:'pointer' }}>
+            Salir
+          </button>
+        </div>
+      </div>
 
-      {/* ===== TAB: PORTAL CONFIG ===== */}
-      {tab === 'portal' && <PortalConfigTab token={token} apiUrl={API_URL} />}
+      <div style={{ maxWidth:1100, margin:'0 auto', padding:'28px 24px' }}>
 
-      {/* ===== TAB: EXCEPTIONS ===== */}
-      {!loading && tab === 'exceptions' && (
-        <div>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-            <span style={{ color: 'var(--muted)', fontSize: 14 }}>{exceptions.length} excepciones</span>
-            <button onClick={() => setShowNewException(true)} style={{ ...btnPrimaryStyle, padding: '8px 16px', marginTop: 0, width: 'auto' }}>
-              + Nueva excepción
-            </button>
-          </div>
-
-          {exceptions.length === 0 ? (
-            <div style={{ textAlign: 'center', color: 'var(--muted)', padding: 60 }}>
-              Sin excepciones. Crea una para extender plazos, regalar etiquetas o bloquear devoluciones.
+        {/* ── TAB: LIST ── */}
+        {tab === 'list' && (
+          <>
+            {/* KPIs */}
+            <div style={{ display:'flex', gap:12, marginBottom:24, flexWrap:'wrap' }}>
+              <KpiCard label="Total" value={kpis.total} />
+              <KpiCard label="Pendientes" value={kpis.pending} color="#92400e" />
+              <KpiCard label="Recibidas" value={kpis.received} color="#5b21b6" />
+              <KpiCard label="Aprobadas" value={kpis.approved} color="#065f46" />
+              <KpiCard label="Reembolsado" value={`${kpis.refunded.toFixed(2)}€`} color="#1e40af"
+                sub={`${returns.filter(r=>r.refundedAt).length} procesados`} />
             </div>
-          ) : (
-            <div style={{ background: 'var(--surface)', border: '1px solid var(--line)', borderRadius: 'var(--radius-sm)', overflow: 'hidden' }}>
-              <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-                <thead>
-                  <tr style={{ background: 'var(--surface-2)', fontSize: 12, textTransform: 'uppercase', color: 'var(--muted)', letterSpacing: '0.05em' }}>
-                    <th style={th}>Match</th>
-                    <th style={th}>Tipo</th>
-                    <th style={th}>Detalle</th>
-                    <th style={th}>Expira</th>
-                    <th style={th}>Estado</th>
-                    <th style={th}></th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {exceptions.map((ex) => {
-                    const meta = EXCEPTION_LABELS[ex.type];
-                    return (
-                      <tr key={ex.id} style={{ borderTop: '1px solid var(--line-soft)', fontSize: 14 }}>
-                        <td style={td}>
-                          {ex.orderNumber && <div style={{ fontWeight: 500 }}>{ex.orderNumber}</div>}
-                          {ex.customerEmail && <div style={{ fontSize: 12, color: 'var(--muted)' }}>{ex.customerEmail}</div>}
-                        </td>
-                        <td style={td}>
-                          <span style={{ fontSize: 12, fontWeight: 600, color: meta.color }}>{meta.label}</span>
-                        </td>
-                        <td style={td}>
-                          {ex.type === 'EXTEND_WINDOW' && <span>+{ex.extraDays} días</span>}
-                          {ex.notes && <div style={{ fontSize: 12, color: 'var(--muted)' }}>{ex.notes}</div>}
-                        </td>
-                        <td style={{ ...td, fontSize: 12, color: 'var(--muted)' }}>
-                          {ex.expiresAt ? new Date(ex.expiresAt).toLocaleDateString('es-ES') : '—'}
-                        </td>
-                        <td style={td}>
-                          <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}>
-                            <input type="checkbox" checked={ex.active}
-                              onChange={(e) => toggleException(ex.id, e.target.checked)}
-                              style={{ accentColor: 'var(--accent)' }} />
-                            <span style={{ fontSize: 12 }}>{ex.active ? 'Activa' : 'Inactiva'}</span>
-                          </label>
-                        </td>
-                        <td style={{ ...td, textAlign: 'right' }}>
-                          <button onClick={() => deleteException(ex.id)}
-                            style={{ ...btnSecondaryStyle, padding: '4px 10px', fontSize: 12, color: 'var(--danger)' }}>Borrar</button>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-          )}
 
-          {/* New Exception Modal */}
-          {showNewException && (
-            <div style={{
-              position: 'fixed', inset: 0, background: 'rgba(15,23,42,0.6)',
-              display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16, zIndex: 100
-            }} onClick={() => setShowNewException(false)}>
-              <div onClick={(e) => e.stopPropagation()} style={{
-                background: 'var(--surface)', borderRadius: 'var(--radius)', width: '100%',
-                maxWidth: 480, padding: 24
-              }}>
-                <h3 style={{ margin: '0 0 16px', fontSize: 16, fontWeight: 700 }}>Nueva excepción</h3>
-
-                <label style={configLabel}>
-                  <span>Tipo</span>
-                  <select style={inputStyle} value={newException.type}
-                    onChange={(e) => setNewException({ ...newException, type: e.target.value })}>
-                    <option value="EXTEND_WINDOW">Ampliar plazo</option>
-                    <option value="FREE_LABEL">Etiqueta gratis</option>
-                    <option value="ACCEPT_EXPIRED">Aceptar fuera de plazo</option>
-                    <option value="BLOCK">Bloquear devolución</option>
-                  </select>
-                </label>
-
-                <label style={{ ...configLabel, marginTop: 12 }}>
-                  <span>Número de pedido (opcional)</span>
-                  <input type="text" style={inputStyle} placeholder="#12345" value={newException.orderNumber}
-                    onChange={(e) => setNewException({ ...newException, orderNumber: e.target.value })} />
-                </label>
-
-                <label style={{ ...configLabel, marginTop: 12 }}>
-                  <span>Email cliente (opcional)</span>
-                  <input type="email" style={inputStyle} placeholder="cliente@email.com" value={newException.customerEmail}
-                    onChange={(e) => setNewException({ ...newException, customerEmail: e.target.value })} />
-                </label>
-
-                {newException.type === 'EXTEND_WINDOW' && (
-                  <label style={{ ...configLabel, marginTop: 12 }}>
-                    <span>Días extra</span>
-                    <input type="number" min={1} max={365} style={inputStyle} value={newException.extraDays}
-                      onChange={(e) => setNewException({ ...newException, extraDays: Number(e.target.value) })} />
-                  </label>
-                )}
-
-                <label style={{ ...configLabel, marginTop: 12 }}>
-                  <span>Motivo / notas internas</span>
-                  <input type="text" style={inputStyle} placeholder="Ej: cliente VIP, error nuestro, etc." value={newException.notes}
-                    onChange={(e) => setNewException({ ...newException, notes: e.target.value })} />
-                </label>
-
-                <label style={{ ...configLabel, marginTop: 12 }}>
-                  <span>Expira (opcional)</span>
-                  <input type="date" style={inputStyle} value={newException.expiresAt}
-                    onChange={(e) => setNewException({ ...newException, expiresAt: e.target.value })} />
-                </label>
-
-                <div style={{ display: 'flex', gap: 10, marginTop: 20 }}>
-                  <button onClick={() => setShowNewException(false)} style={btnSecondaryStyle}>Cancelar</button>
-                  <button onClick={createException} style={{ ...btnPrimaryStyle, flex: 1, marginTop: 0 }}>Crear excepción</button>
-                </div>
+            {/* Filters */}
+            <div style={{ display:'flex', gap:10, marginBottom:16, flexWrap:'wrap', alignItems:'center' }}>
+              <input type="search" placeholder="Buscar pedido, cliente, email..." value={search}
+                onChange={e => setSearch(e.target.value)}
+                style={{ ...inp, maxWidth:280, margin:0 }} />
+              <div style={{ display:'flex', gap:4, flexWrap:'wrap' }}>
+                {[['ALL','Todas'], ...Object.entries(STATUS_META).map(([k,v]) => [k, v.label])].map(([key,label]) => (
+                  <button key={key} onClick={() => setFilter(key)}
+                    style={{ padding:'6px 14px', fontSize:12, fontWeight:600, borderRadius:20, cursor:'pointer',
+                      background: filterStatus===key ? '#111827' : '#fff',
+                      color: filterStatus===key ? '#fff' : '#374151',
+                      border: `1px solid ${filterStatus===key ? '#111827' : '#e5e7eb'}` }}>
+                    {label}
+                  </button>
+                ))}
               </div>
             </div>
-          )}
-        </div>
-      )}
-    </div>
-  );
-}
 
-function PortalConfigTab({ token, apiUrl }: { token: string; apiUrl: string }) {
-  const [config, setConfig] = useState({
-    logoUrl: '', backgroundUrl: '', primaryColor: '#007AFF',
-    cardStyle: 'light', titleText: 'Cambios & Devoluciones',
-    subtitleText: 'Gestiona tu devolución de forma rápida', policyUrl: ''
-  });
-  const [saving, setSaving] = useState(false);
-  const [saved, setSaved] = useState(false);
+            {loading && <div style={{ textAlign:'center', color:'#9ca3af', padding:60 }}>Cargando…</div>}
 
-  useEffect(() => {
-    fetch(`${apiUrl}/portal-config`)
-      .then(r => r.json()).then(data => setConfig(c => ({ ...c, ...data }))).catch(() => {});
-  }, [apiUrl]);
+            {!loading && filtered.length === 0 && (
+              <div style={{ textAlign:'center', color:'#9ca3af', padding:80 }}>
+                {returns.length === 0 ? 'No hay devoluciones aún' : 'Sin resultados para este filtro'}
+              </div>
+            )}
 
-  async function save() {
-    setSaving(true);
-    try {
-      await fetch(`${apiUrl}/portal-config`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        body: JSON.stringify(config)
-      });
-      setSaved(true); setTimeout(() => setSaved(false), 2000);
-    } finally { setSaving(false); }
-  }
+            {!loading && filtered.length > 0 && (
+              <div style={{ background:'#fff', border:'1px solid #e5e7eb', borderRadius:12, overflow:'hidden' }}>
+                {/* Table header */}
+                <div style={{ display:'grid', gridTemplateColumns:'110px 90px 1fr 110px 130px 40px',
+                  gap:0, padding:'10px 20px', background:'#f9fafb', borderBottom:'1px solid #e5e7eb',
+                  fontSize:11, fontWeight:600, color:'#9ca3af', textTransform:'uppercase', letterSpacing:'0.06em' }}>
+                  <span>Pedido</span><span>Tipo</span><span>Cliente</span><span>Fecha</span><span>Estado</span><span />
+                </div>
 
-  return (
-    <div style={{ maxWidth: 560, padding: '24px 0' }}>
-      <h3 style={{ margin: '0 0 20px', fontSize: 18, fontWeight: 700 }}>Configuración del Portal</h3>
+                {filtered.map((ret, i) => (
+                  <div key={ret.id} style={{ borderTop: i===0 ? 'none' : '1px solid #f3f4f6' }}>
+                    {/* Row */}
+                    <div onClick={() => setExpanded(expanded===ret.id ? null : ret.id)}
+                      style={{ display:'grid', gridTemplateColumns:'110px 90px 1fr 110px 130px 40px',
+                        gap:0, padding:'14px 20px', cursor:'pointer', alignItems:'center',
+                        background: expanded===ret.id ? '#fafafa' : '#fff',
+                        transition:'background 0.1s' }}>
+                      <span style={{ fontSize:14, fontWeight:700, color:'#111827' }}>{ret.shopifyOrderNumber}</span>
+                      <span style={{ fontSize:11, fontWeight:600, padding:'2px 8px', borderRadius:10, display:'inline-block',
+                        background: ret.type==='EXCHANGE' ? '#ede9fe' : '#dbeafe',
+                        color: ret.type==='EXCHANGE' ? '#5b21b6' : '#1e40af' }}>
+                        {ret.type==='EXCHANGE' ? '🔄 Cambio' : '↩ Dev.'}
+                      </span>
+                      <div>
+                        <div style={{ fontSize:14, fontWeight:500, color:'#111827' }}>{ret.customerName}</div>
+                        <div style={{ fontSize:12, color:'#9ca3af' }}>{ret.customerEmail}</div>
+                      </div>
+                      <div style={{ fontSize:12, color:'#9ca3af' }}>
+                        <div>{new Date(ret.createdAt).toLocaleDateString('es-ES',{day:'2-digit',month:'short'})}</div>
+                        {ret.totalAmount != null && ret.totalAmount > 0 &&
+                          <div style={{ fontWeight:600, color:'#374151' }}>{ret.totalAmount.toFixed(2)}€</div>}
+                      </div>
+                      <StatusBadge status={ret.status} />
+                      <span style={{ color:'#9ca3af', textAlign:'center', fontSize:16 }}>{expanded===ret.id ? '▾' : '▸'}</span>
+                    </div>
 
-      {/* Logo URL */}
-      <label style={{ display: 'block', marginBottom: 16 }}>
-        <span style={{ fontSize: 13, fontWeight: 600, color: '#555', display: 'block', marginBottom: 6 }}>URL del Logo</span>
-        <input
-          style={{ width: '100%', padding: '10px 12px', border: '1.5px solid #ddd', borderRadius: 8, fontSize: 14 }}
-          placeholder="https://cdn.shopify.com/tu-logo.png"
-          value={config.logoUrl || ''}
-          onChange={e => setConfig(c => ({ ...c, logoUrl: e.target.value }))}
-        />
-        <span style={{ fontSize: 12, color: '#999', marginTop: 4, display: 'block' }}>
-          Sube el logo a Shopify (Archivos) y pega la URL aquí
-        </span>
-      </label>
+                    {/* Expanded detail */}
+                    {expanded === ret.id && (
+                      <div style={{ padding:'20px 24px', background:'#fafafa', borderTop:'1px solid #e5e7eb' }}>
+                        <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:20 }}>
 
-      {/* Background URL */}
-      <label style={{ display: 'block', marginBottom: 16 }}>
-        <span style={{ fontSize: 13, fontWeight: 600, color: '#555', display: 'block', marginBottom: 6 }}>Imagen de fondo</span>
-        <input
-          style={{ width: '100%', padding: '10px 12px', border: '1.5px solid #ddd', borderRadius: 8, fontSize: 14 }}
-          placeholder="https://cdn.shopify.com/tu-foto.jpg"
-          value={config.backgroundUrl || ''}
-          onChange={e => setConfig(c => ({ ...c, backgroundUrl: e.target.value }))}
-        />
-      </label>
+                          {/* Left: items + tracking */}
+                          <div>
+                            {ret.trackingNumber && (
+                              <div style={{ background:'#fff', border:'1px solid #e5e7eb', borderRadius:10,
+                                padding:'12px 16px', marginBottom:14 }}>
+                                <div style={{ fontSize:11, fontWeight:600, color:'#9ca3af', textTransform:'uppercase',
+                                  letterSpacing:'0.05em', marginBottom:4 }}>Tracking</div>
+                                <div style={{ fontSize:14, fontWeight:600, color:'#111827' }}>
+                                  {ret.trackingNumber}{ret.carrier ? ` · ${ret.carrier}` : ''}
+                                </div>
+                              </div>
+                            )}
 
-      {/* Primary color + card style row */}
-      <div style={{ display: 'flex', gap: 16, marginBottom: 16 }}>
-        <label style={{ flex: 1 }}>
-          <span style={{ fontSize: 13, fontWeight: 600, color: '#555', display: 'block', marginBottom: 6 }}>Color principal</span>
-          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-            <input type="color" value={config.primaryColor || '#007AFF'}
-              onChange={e => setConfig(c => ({ ...c, primaryColor: e.target.value }))}
-              style={{ width: 44, height: 36, borderRadius: 6, border: '1.5px solid #ddd', cursor: 'pointer' }} />
-            <input
-              style={{ flex: 1, padding: '10px 12px', border: '1.5px solid #ddd', borderRadius: 8, fontSize: 14 }}
-              value={config.primaryColor || '#007AFF'}
-              onChange={e => setConfig(c => ({ ...c, primaryColor: e.target.value }))} />
+                            {ret.labelUrl && (
+                              <a href={`${API_URL}${ret.labelUrl}`} target="_blank" rel="noopener noreferrer"
+                                style={{ display:'inline-flex', alignItems:'center', gap:6, marginBottom:14,
+                                  padding:'8px 14px', background:'#fff', border:'1px solid #e5e7eb',
+                                  borderRadius:8, fontSize:13, fontWeight:500, color:'#111827', textDecoration:'none' }}>
+                                📥 Etiqueta PDF
+                              </a>
+                            )}
+
+                            <div style={{ fontSize:11, fontWeight:600, color:'#9ca3af', textTransform:'uppercase',
+                              letterSpacing:'0.05em', marginBottom:10 }}>Artículos</div>
+                            {ret.items.map(item => (
+                              <div key={item.id} style={{ display:'flex', alignItems:'center', gap:10,
+                                padding:'10px 0', borderBottom:'1px solid #f3f4f6', fontSize:14 }}>
+                                {item.orderItem.imageUrl &&
+                                  // eslint-disable-next-line @next/next/no-img-element
+                                  <img src={item.orderItem.imageUrl} alt="" style={{ width:40, height:40, objectFit:'cover', borderRadius:6 }} />}
+                                <div style={{ flex:1 }}>
+                                  <div style={{ fontWeight:500, color:'#111827' }}>{item.orderItem.title}
+                                    {item.orderItem.variantTitle && <span style={{ color:'#9ca3af' }}> — {item.orderItem.variantTitle}</span>}
+                                  </div>
+                                  <div style={{ fontSize:12, color:'#6b7280' }}>
+                                    {REASON_LABELS[item.reason] ?? item.reason}
+                                    {item.replacementTitle && ` → ${item.replacementTitle} (${item.replacementPrice?.toFixed(2)}€)`}
+                                  </div>
+                                </div>
+                                <span style={{ fontSize:13, color:'#9ca3af', fontWeight:600 }}>×{item.quantity}</span>
+                              </div>
+                            ))}
+
+                            <PhotoSection returnId={ret.id} token={token} />
+                          </div>
+
+                          {/* Right: actions + verify + refund */}
+                          <div style={{ display:'flex', flexDirection:'column', gap:14 }}>
+
+                            {/* Verification */}
+                            <div style={{ background:'#fff', border:'1px solid #e5e7eb', borderRadius:10, padding:'16px' }}>
+                              <div style={{ fontSize:11, fontWeight:600, color:'#9ca3af', textTransform:'uppercase',
+                                letterSpacing:'0.05em', marginBottom:12 }}>📦 Verificación</div>
+                              {ret.verificationStatus ? (
+                                <div style={{ display:'flex', alignItems:'center', gap:10, flexWrap:'wrap' }}>
+                                  <span style={{ fontSize:13, fontWeight:700, padding:'4px 12px', borderRadius:20,
+                                    background: ret.verificationStatus==='OK' ? '#d1fae5' : '#fee2e2',
+                                    color: ret.verificationStatus==='OK' ? '#065f46' : '#991b1b' }}>
+                                    {ret.verificationStatus==='OK' ? '✅ Correcto' : '⚠️ Incidencia'}
+                                  </span>
+                                  {ret.verificationNotes && <span style={{ fontSize:13, color:'#6b7280' }}>{ret.verificationNotes}</span>}
+                                  {ret.verifiedAt && <span style={{ fontSize:11, color:'#9ca3af', marginLeft:'auto' }}>
+                                    {new Date(ret.verifiedAt).toLocaleDateString('es-ES',{day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit'})}
+                                  </span>}
+                                </div>
+                              ) : ret.status === 'RECEIVED' ? (
+                                <VerifyPanel returnId={ret.id} onVerify={verifyReturn} />
+                              ) : (
+                                <div style={{ fontSize:13, color:'#9ca3af' }}>
+                                  {ret.receivedAt
+                                    ? `Recibido ${new Date(ret.receivedAt).toLocaleDateString('es-ES')}`
+                                    : 'Pendiente de recibir'}
+                                </div>
+                              )}
+                            </div>
+
+                            {/* Refund status */}
+                            {ret.status === 'APPROVED' && (
+                              <div style={{ padding:'12px 14px', borderRadius:10,
+                                background: ret.refundedAt ? '#d1fae5' : '#fef3c7',
+                                border: `1px solid ${ret.refundedAt ? '#a7f3d0' : '#fde68a'}` }}>
+                                {ret.refundedAt ? (
+                                  <span style={{ fontSize:13, fontWeight:600, color:'#065f46' }}>
+                                    ✓ Reembolso enviado {new Date(ret.refundedAt).toLocaleDateString('es-ES')}
+                                    {ret.shopifyRefundAmount != null && ` · ${ret.shopifyRefundAmount.toFixed(2)}€`}
+                                  </span>
+                                ) : (
+                                  <span style={{ fontSize:13, fontWeight:600, color:'#92400e' }}>
+                                    ⏳ Reembolso pendiente en Shopify
+                                  </span>
+                                )}
+                              </div>
+                            )}
+
+                            {/* Status actions */}
+                            <div style={{ background:'#fff', border:'1px solid #e5e7eb', borderRadius:10, padding:'16px' }}>
+                              <div style={{ fontSize:11, fontWeight:600, color:'#9ca3af', textTransform:'uppercase',
+                                letterSpacing:'0.05em', marginBottom:12 }}>Cambiar estado</div>
+                              <div style={{ display:'flex', flexWrap:'wrap', gap:6 }}>
+                                {Object.entries(STATUS_META).filter(([k]) => k !== ret.status).map(([key, meta]) => (
+                                  <button key={key} onClick={() => updateStatus(ret.id, key)}
+                                    style={{ padding:'6px 14px', fontSize:12, fontWeight:600, cursor:'pointer',
+                                      color: meta.color, background: meta.bg,
+                                      border: `1px solid ${meta.dot}44`, borderRadius:20 }}>
+                                    {meta.label}
+                                  </button>
+                                ))}
+                              </div>
+                            </div>
+
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+          </>
+        )}
+
+        {/* ── TAB: CONFIG ── */}
+        {tab === 'config' && configDraft && !loading && (
+          <div style={{ background:'#fff', border:'1px solid #e5e7eb', borderRadius:12, padding:28, maxWidth:700 }}>
+            <h2 style={{ margin:'0 0 20px', fontSize:18, fontWeight:700, color:'#111827' }}>Configuración del sistema</h2>
+
+            <label style={{ display:'flex', alignItems:'center', gap:10, padding:'14px 16px',
+              background:'#f9fafb', border:'1px solid #e5e7eb', borderRadius:10, marginBottom:20, cursor:'pointer' }}>
+              <input type="checkbox" checked={configDraft.enabled}
+                onChange={e => setDraft({...configDraft, enabled:e.target.checked})}
+                style={{ width:18, height:18, accentColor:'#111827' }} />
+              <div>
+                <div style={{ fontWeight:600, fontSize:14, color:'#111827' }}>Sistema de devoluciones activo</div>
+                <div style={{ fontSize:12, color:'#6b7280' }}>Desactiva para pausar el portal completamente</div>
+              </div>
+              <span style={{ marginLeft:'auto', fontSize:12, fontWeight:600, padding:'3px 10px', borderRadius:20,
+                background: configDraft.enabled ? '#d1fae5' : '#fee2e2',
+                color: configDraft.enabled ? '#065f46' : '#991b1b' }}>
+                {configDraft.enabled ? 'Activo' : 'Pausado'}
+              </span>
+            </label>
+
+            <div style={{ height:1, background:'#f3f4f6', margin:'0 0 20px' }} />
+
+            <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:16, marginBottom:16 }}>
+              <label style={cfgLabel}>
+                <span>Plazo de devolución (días)</span>
+                <input type="number" min={1} max={365} style={inp}
+                  value={configDraft.windowDays}
+                  onChange={e => setDraft({...configDraft, windowDays:Number(e.target.value)})} />
+              </label>
+              <label style={cfgLabel}>
+                <span>Precio etiqueta (€)</span>
+                <input type="number" step="0.01" min={0} style={inp}
+                  value={configDraft.labelPrice}
+                  onChange={e => setDraft({...configDraft, labelPrice:Number(e.target.value)})} />
+              </label>
+              <label style={cfgLabel}>
+                <span>Política de cambios</span>
+                <select style={inp} value={configDraft.exchangePolicy}
+                  onChange={e => setDraft({...configDraft, exchangePolicy:e.target.value as 'ANY'|'SAME_TYPE'|'VARIANT_ONLY'})}>
+                  <option value="ANY">Cualquier producto</option>
+                  <option value="SAME_TYPE">Mismo tipo</option>
+                  <option value="VARIANT_ONLY">Solo otra variante</option>
+                </select>
+              </label>
+              <label style={cfgLabel}>
+                <span>Código SendCloud retorno</span>
+                <input type="text" style={inp} value={configDraft.shippingProductCode ?? ''}
+                  placeholder="correos:paqretorno"
+                  onChange={e => setDraft({...configDraft, shippingProductCode:e.target.value||null})} />
+              </label>
+            </div>
+
+            <label style={{ ...cfgLabel, marginBottom:24 }}>
+              <span>Texto términos legales (opcional)</span>
+              <textarea style={{ ...inp, minHeight:90, resize:'vertical', fontFamily:'inherit' }}
+                value={configDraft.termsText ?? ''}
+                onChange={e => setDraft({...configDraft, termsText:e.target.value||null})}
+                placeholder="Se mostrará al cliente en el portal..." />
+            </label>
+
+            <div style={{ display:'flex', gap:10 }}>
+              <button onClick={() => setDraft(config)} style={btnSecondary}>Descartar</button>
+              <button onClick={saveConfig} disabled={savingConfig || JSON.stringify(config)===JSON.stringify(configDraft)}
+                style={{ ...btnPrimary, flex:1, marginTop:0,
+                  opacity: (savingConfig || JSON.stringify(config)===JSON.stringify(configDraft)) ? 0.5 : 1 }}>
+                {savingConfig ? 'Guardando…' : 'Guardar cambios'}
+              </button>
+            </div>
           </div>
-        </label>
-        <label style={{ flex: 1 }}>
-          <span style={{ fontSize: 13, fontWeight: 600, color: '#555', display: 'block', marginBottom: 6 }}>Estilo tarjeta</span>
-          <select
-            style={{ width: '100%', padding: '10px 12px', border: '1.5px solid #ddd', borderRadius: 8, fontSize: 14 }}
-            value={config.cardStyle || 'light'}
-            onChange={e => setConfig(c => ({ ...c, cardStyle: e.target.value }))}>
-            <option value="light">Blanca (light)</option>
-            <option value="dark">Oscura (dark)</option>
-          </select>
-        </label>
-      </div>
+        )}
 
-      {/* Title + Subtitle */}
-      <label style={{ display: 'block', marginBottom: 16 }}>
-        <span style={{ fontSize: 13, fontWeight: 600, color: '#555', display: 'block', marginBottom: 6 }}>Título</span>
-        <input
-          style={{ width: '100%', padding: '10px 12px', border: '1.5px solid #ddd', borderRadius: 8, fontSize: 14 }}
-          value={config.titleText || ''}
-          onChange={e => setConfig(c => ({ ...c, titleText: e.target.value }))} />
-      </label>
-      <label style={{ display: 'block', marginBottom: 16 }}>
-        <span style={{ fontSize: 13, fontWeight: 600, color: '#555', display: 'block', marginBottom: 6 }}>Subtítulo</span>
-        <input
-          style={{ width: '100%', padding: '10px 12px', border: '1.5px solid #ddd', borderRadius: 8, fontSize: 14 }}
-          value={config.subtitleText || ''}
-          onChange={e => setConfig(c => ({ ...c, subtitleText: e.target.value }))} />
-      </label>
+        {/* ── TAB: EXCEPTIONS ── */}
+        {tab === 'exceptions' && !loading && (
+          <div>
+            <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:16 }}>
+              <div style={{ fontSize:14, color:'#6b7280' }}>{exceptions.length} excepcion{exceptions.length!==1?'es':''}</div>
+              <button onClick={() => setShowNewEx(true)} style={{ ...btnPrimary, marginTop:0, width:'auto', padding:'9px 18px' }}>
+                + Nueva excepción
+              </button>
+            </div>
 
-      {/* Policy URL */}
-      <label style={{ display: 'block', marginBottom: 24 }}>
-        <span style={{ fontSize: 13, fontWeight: 600, color: '#555', display: 'block', marginBottom: 6 }}>URL política de devoluciones (opcional)</span>
-        <input
-          style={{ width: '100%', padding: '10px 12px', border: '1.5px solid #ddd', borderRadius: 8, fontSize: 14 }}
-          placeholder="https://speedwear.es/policies/refund-policy"
-          value={config.policyUrl || ''}
-          onChange={e => setConfig(c => ({ ...c, policyUrl: e.target.value }))} />
-      </label>
+            {exceptions.length === 0 ? (
+              <div style={{ textAlign:'center', color:'#9ca3af', padding:80, background:'#fff',
+                border:'1px solid #e5e7eb', borderRadius:12 }}>
+                Sin excepciones. Crea una para extender plazos, regalar etiquetas o bloquear devoluciones.
+              </div>
+            ) : (
+              <div style={{ background:'#fff', border:'1px solid #e5e7eb', borderRadius:12, overflow:'hidden' }}>
+                <table style={{ width:'100%', borderCollapse:'collapse' }}>
+                  <thead>
+                    <tr style={{ background:'#f9fafb', fontSize:11, textTransform:'uppercase', color:'#9ca3af', letterSpacing:'0.06em' }}>
+                      {['Match','Tipo','Detalle','Expira','Estado',''].map((h,i) => (
+                        <th key={i} style={{ padding:'10px 16px', textAlign:'left', fontWeight:600 }}>{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {exceptions.map((ex, i) => {
+                      const meta = EXCEPTION_LABELS[ex.type];
+                      return (
+                        <tr key={ex.id} style={{ borderTop: i===0?'none':'1px solid #f3f4f6', fontSize:14 }}>
+                          <td style={{ padding:'12px 16px' }}>
+                            {ex.orderNumber && <div style={{ fontWeight:600, color:'#111827' }}>{ex.orderNumber}</div>}
+                            {ex.customerEmail && <div style={{ fontSize:12, color:'#6b7280' }}>{ex.customerEmail}</div>}
+                          </td>
+                          <td style={{ padding:'12px 16px' }}>
+                            <span style={{ fontSize:12, fontWeight:600, color:meta.color }}>{meta.label}</span>
+                          </td>
+                          <td style={{ padding:'12px 16px' }}>
+                            {ex.type==='EXTEND_WINDOW' && <span>+{ex.extraDays} días</span>}
+                            {ex.notes && <div style={{ fontSize:12, color:'#6b7280' }}>{ex.notes}</div>}
+                          </td>
+                          <td style={{ padding:'12px 16px', fontSize:12, color:'#9ca3af' }}>
+                            {ex.expiresAt ? new Date(ex.expiresAt).toLocaleDateString('es-ES') : '—'}
+                          </td>
+                          <td style={{ padding:'12px 16px' }}>
+                            <label style={{ display:'flex', alignItems:'center', gap:6, cursor:'pointer' }}>
+                              <input type="checkbox" checked={ex.active}
+                                onChange={e => toggleException(ex.id, e.target.checked)}
+                                style={{ accentColor:'#111827' }} />
+                              <span style={{ fontSize:12, color: ex.active ? '#065f46' : '#9ca3af' }}>
+                                {ex.active ? 'Activa' : 'Inactiva'}
+                              </span>
+                            </label>
+                          </td>
+                          <td style={{ padding:'12px 16px', textAlign:'right' }}>
+                            <button onClick={() => deleteException(ex.id)}
+                              style={{ padding:'5px 12px', fontSize:12, fontWeight:500, background:'transparent',
+                                border:'1px solid #fca5a5', color:'#ef4444', borderRadius:8, cursor:'pointer' }}>
+                              Borrar
+                            </button>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
 
-      {/* Save + Preview */}
-      <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
-        <button
-          onClick={save}
-          disabled={saving}
-          style={{
-            padding: '12px 24px', background: '#6366f1', color: '#fff',
-            border: 'none', borderRadius: 8, fontWeight: 600, cursor: 'pointer',
-            opacity: saving ? 0.6 : 1
-          }}>
-          {saving ? 'Guardando...' : saved ? '✓ Guardado' : 'Guardar cambios'}
-        </button>
-        <a
-          href="/devoluciones"
-          target="_blank"
-          style={{ fontSize: 14, color: '#6366f1', textDecoration: 'none' }}>
-          Ver portal →
-        </a>
+            {/* New exception modal */}
+            {showNewEx && (
+              <div onClick={() => setShowNewEx(false)} style={{ position:'fixed', inset:0,
+                background:'rgba(0,0,0,0.4)', display:'flex', alignItems:'center',
+                justifyContent:'center', padding:16, zIndex:100 }}>
+                <div onClick={e => e.stopPropagation()} style={{ background:'#fff', borderRadius:14,
+                  width:'100%', maxWidth:480, padding:28, boxShadow:'0 8px 40px rgba(0,0,0,0.16)' }}>
+                  <h3 style={{ margin:'0 0 20px', fontSize:17, fontWeight:700, color:'#111827' }}>Nueva excepción</h3>
+
+                  {[
+                    { label:'Tipo', content: (
+                      <select style={inp} value={newEx.type} onChange={e => setNewEx({...newEx, type:e.target.value})}>
+                        <option value="EXTEND_WINDOW">Ampliar plazo</option>
+                        <option value="FREE_LABEL">Etiqueta gratis</option>
+                        <option value="ACCEPT_EXPIRED">Aceptar fuera de plazo</option>
+                        <option value="BLOCK">Bloquear devolución</option>
+                      </select>
+                    )},
+                    { label:'Número de pedido (opcional)', content: (
+                      <input type="text" style={inp} placeholder="#12345" value={newEx.orderNumber}
+                        onChange={e => setNewEx({...newEx, orderNumber:e.target.value})} />
+                    )},
+                    { label:'Email cliente (opcional)', content: (
+                      <input type="email" style={inp} placeholder="cliente@email.com" value={newEx.customerEmail}
+                        onChange={e => setNewEx({...newEx, customerEmail:e.target.value})} />
+                    )},
+                    ...(newEx.type === 'EXTEND_WINDOW' ? [{ label:'Días extra', content: (
+                      <input type="number" min={1} max={365} style={inp} value={newEx.extraDays}
+                        onChange={e => setNewEx({...newEx, extraDays:Number(e.target.value)})} />
+                    )}] : []),
+                    { label:'Notas internas', content: (
+                      <input type="text" style={inp} placeholder="Ej: cliente VIP, error nuestro..." value={newEx.notes}
+                        onChange={e => setNewEx({...newEx, notes:e.target.value})} />
+                    )},
+                    { label:'Expira (opcional)', content: (
+                      <input type="date" style={inp} value={newEx.expiresAt}
+                        onChange={e => setNewEx({...newEx, expiresAt:e.target.value})} />
+                    )},
+                  ].map((row, i) => (
+                    <label key={i} style={{ ...cfgLabel, marginBottom:14 }}>
+                      <span>{row.label}</span>
+                      {row.content}
+                    </label>
+                  ))}
+
+                  <div style={{ display:'flex', gap:10, marginTop:8 }}>
+                    <button onClick={() => setShowNewEx(false)} style={btnSecondary}>Cancelar</button>
+                    <button onClick={createException} style={{ ...btnPrimary, flex:1, marginTop:0 }}>Crear excepción</button>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );
 }
 
-// Styles
-const inputStyle: React.CSSProperties = {
-  padding: '9px 12px', borderRadius: 8, border: '1px solid var(--line)',
-  fontSize: 14, color: 'var(--ink)', background: 'var(--surface)', outline: 'none', width: '100%'
+// ── Shared styles ─────────────────────────────────────────────────────────────
+const inp: React.CSSProperties = {
+  padding:'9px 12px', borderRadius:8, border:'1px solid #e5e7eb',
+  fontSize:14, color:'#111827', background:'#fff', outline:'none', width:'100%',
 };
-const btnPrimaryStyle: React.CSSProperties = {
-  marginTop: 20, width: '100%', padding: '10px 20px',
-  background: 'var(--accent)', color: '#fff', border: 'none',
-  borderRadius: 8, fontSize: 14, fontWeight: 600, cursor: 'pointer'
+const btnPrimary: React.CSSProperties = {
+  marginTop:16, width:'100%', padding:'10px 20px',
+  background:'#111827', color:'#fff', border:'none',
+  borderRadius:8, fontSize:14, fontWeight:600, cursor:'pointer',
 };
-const btnSecondaryStyle: React.CSSProperties = {
-  padding: '8px 14px', background: 'var(--surface)', color: 'var(--ink)',
-  border: '1px solid var(--line)', borderRadius: 8, fontSize: 13, fontWeight: 500, cursor: 'pointer', textDecoration: 'none', textAlign: 'center'
+const btnSecondary: React.CSSProperties = {
+  padding:'9px 16px', background:'#fff', color:'#374151',
+  border:'1px solid #e5e7eb', borderRadius:8, fontSize:14, fontWeight:500, cursor:'pointer',
 };
-const cardStyle: React.CSSProperties = {
-  background: 'var(--surface)', border: '1px solid var(--line)',
-  borderRadius: 'var(--radius-sm)', overflow: 'hidden', boxShadow: 'var(--shadow-sm)'
+const cfgLabel: React.CSSProperties = {
+  display:'flex', flexDirection:'column', gap:6,
+  fontSize:13, fontWeight:500, color:'#374151',
 };
-const configLabel: React.CSSProperties = {
-  display: 'flex', flexDirection: 'column', gap: 6,
-  fontSize: 14, fontWeight: 500, color: 'var(--ink-soft)'
-};
-const infoBoxStyle: React.CSSProperties = {
-  background: 'var(--surface)', border: '1px solid var(--line)',
-  borderRadius: 8, padding: '8px 12px', marginBottom: 12, display: 'inline-block'
-};
-const infoLabelStyle: React.CSSProperties = { fontSize: 11, color: 'var(--muted)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 2 };
-const infoValueStyle: React.CSSProperties = { fontSize: 13, fontWeight: 500 };
-const th: React.CSSProperties = { padding: '10px 14px', textAlign: 'left', fontWeight: 600 };
-const td: React.CSSProperties = { padding: '12px 14px' };
-const pillType = (type: string): React.CSSProperties => ({
-  fontSize: 11, fontWeight: 600, padding: '2px 8px', borderRadius: 12,
-  background: type === 'EXCHANGE' ? '#ede9fe' : '#dbeafe',
-  color: type === 'EXCHANGE' ? '#6d28d9' : '#1d4ed8',
-  whiteSpace: 'nowrap'
-});
