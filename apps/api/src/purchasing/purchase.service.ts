@@ -837,8 +837,14 @@ export class PurchaseService {
 
   private inferGarmentKind(value: string) {
     const normalized = this.normalizeText(value);
-    if (/\b(sudadera|hoodie|sweatshirt|hooded|hd|wg)\b/.test(normalized)) return 'SUDADERA';
-    if (/\b(camiseta|tshirt|t-shirt|tee|shirt|ts|tg)\b/.test(normalized)) return 'CAMISETA';
+    // Word keywords
+    if (/\b(sudadera|hoodie|sweatshirt|hooded)\b/.test(normalized)) return 'SUDADERA';
+    if (/\b(camiseta|tshirt|t-shirt|tee|shirt)\b/.test(normalized)) return 'CAMISETA';
+    // SKU prefixes: WG* = sudadera, TG* = camiseta, HD* = sudadera, TS* = camiseta
+    if (/(?:^|\s|[-/])wg\d/i.test(value)) return 'SUDADERA';
+    if (/(?:^|\s|[-/])hd\d/i.test(value)) return 'SUDADERA';
+    if (/(?:^|\s|[-/])tg\d/i.test(value)) return 'CAMISETA';
+    if (/(?:^|\s|[-/])ts\d/i.test(value)) return 'CAMISETA';
     return null;
   }
 
