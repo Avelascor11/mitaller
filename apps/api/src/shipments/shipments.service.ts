@@ -349,7 +349,7 @@ export class ShipmentsService {
         order: {
           select: {
             id: true, orderNumber: true, customerName: true, shippingMethod: true,
-            packagePhoto: true, packagePhotoAt: true,
+            packagePhoto: true, packagePhotoAt: true, preparedAt: true,
             items: { select: { id: true, sku: true, title: true, variantTitle: true, quantity: true, color: true, size: true, unitPrice: true, imageUrl: true } }
           }
         }
@@ -371,6 +371,7 @@ export class ShipmentsService {
       hasPhoto: Boolean(shipment.packagePhoto),
       hasOrderPhoto: Boolean(shipment.order.packagePhoto),
       packagePhotoAt: shipment.packagePhotoAt ?? shipment.order.packagePhotoAt ?? null,
+      preparedAt: shipment.order.preparedAt ?? null,
       cost: shipment.cost,
       createdAt: shipment.createdAt,
       updatedAt: shipment.updatedAt,

@@ -7869,6 +7869,11 @@ struct FinalizedRow: View {
                     statusBadge
                 }
                 Text(shipment.customer).font(.caption).foregroundStyle(AppTheme.muted).lineLimit(1)
+                if let preparedAt = shipment.preparedAt {
+                    Label(preparedAt.formatted(.dateTime.day().month(.abbreviated).hour().minute()), systemImage: "clock.fill")
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(AppTheme.amber)
+                }
                 if let track = shipment.trackingNumber {
                     Label(track, systemImage: "barcode.viewfinder")
                         .font(.caption2.weight(.bold))

@@ -806,6 +806,7 @@ struct FinalizedShipment: Decodable, Identifiable {
     let hasPhoto: Bool
     let hasOrderPhoto: Bool?
     let packagePhotoAt: Date?
+    let preparedAt: Date?
     let cost: Double?
     let createdAt: Date
     let updatedAt: Date
