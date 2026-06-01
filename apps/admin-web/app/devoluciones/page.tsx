@@ -668,12 +668,8 @@ export default function DevolucionesPage() {
   const [catalogQuery, setCatalogQuery] = useState('');
   const [expandedProduct, setExpandedProduct] = useState<string | null>(null);
 
-  // Language — always start 'es' on server+client to avoid hydration mismatch
+  // Language — fixed 'es', user can change via selector
   const [lang, setLang] = useState<Lang>('es');
-  useEffect(() => {
-    const bl = navigator.language?.slice(0, 2).toLowerCase();
-    if (bl && TRANSLATIONS[bl]) setLang(bl);
-  }, []);
   const t: LangStrings = TRANSLATIONS[lang] ?? TRANSLATIONS['es'];
 
   // Policy checkbox
@@ -733,7 +729,7 @@ export default function DevolucionesPage() {
         setEmail(em ?? '');
         setLookup(lk);
         setSelections(sl);
-        if (lg) setLang(lg);
+        // lang not restored — always default 'es'
         setStep(2);
         setSessionBanner('restored');
       } else {
