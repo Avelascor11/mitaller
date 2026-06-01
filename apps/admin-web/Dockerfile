@@ -24,6 +24,6 @@ COPY --from=build /app/package.json ./package.json
 COPY --from=build /app/apps/admin-web/package.json ./apps/admin-web/package.json
 COPY --from=build /app/apps/admin-web/.next ./apps/admin-web/.next
 COPY --from=build /app/packages ./packages
+WORKDIR /app/apps/admin-web
 EXPOSE 3000
-CMD ["sh", "-c", "npm run start --workspace @mitaller/admin-web -- -p ${PORT:-3000}"]
-# cache bust Mon Jun  1 15:25:56 CEST 2026
+CMD ["sh", "-c", "node ../../node_modules/.bin/next start -p ${PORT:-3000}"]
