@@ -10,16 +10,6 @@ export function middleware(request: NextRequest) {
   const host = request.headers.get('host') ?? '';
   const { pathname } = request.nextUrl;
 
-  // Force HTTPS — Railway passes x-forwarded-proto or x-forwarded-ssl
-  const proto = request.headers.get('x-forwarded-proto')
-    ?? request.headers.get('x-forwarded-ssl');
-  const isHttps = proto === 'https' || proto === 'on' || request.nextUrl.protocol === 'https:';
-  if (!isHttps && proto !== null) {
-    const url = request.nextUrl.clone();
-    url.protocol = 'https:';
-    return NextResponse.redirect(url, 301);
-  }
-
   // ── Customer-facing domain ──
   if (host === CUSTOMER_DOMAIN) {
     // Allow /devoluciones (public portal)
