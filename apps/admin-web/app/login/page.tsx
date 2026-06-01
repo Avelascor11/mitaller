@@ -161,6 +161,7 @@ export default function LoginPage() {
             <label className="login-label" htmlFor="email">Usuario</label>
             <input
               id="email"
+              name="username"
               type="text"
               className="login-input"
               placeholder="usuario"
@@ -170,17 +171,20 @@ export default function LoginPage() {
               autoFocus
               autoCapitalize="none"
               autoCorrect="off"
+              autoComplete="username"
             />
 
             <label className="login-label" htmlFor="password">Contraseña</label>
             <input
               id="password"
+              name="password"
               type="password"
               className="login-input"
               placeholder="••••••••"
               value={password}
               onChange={e => setPassword(e.target.value)}
               required
+              autoComplete="current-password"
             />
 
             <button type="submit" className="login-btn" disabled={loading}>
