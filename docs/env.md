@@ -74,6 +74,10 @@ Para imprimir etiquetas automaticamente en el taller, instala la Honeywell PC42d
 - `GOCARDLESS_SECRET_KEY`: secret key de GoCardless Bank Account Data. No subir a GitHub.
 - `PUBLIC_API_URL`: URL publica de la API en Railway.
 - `BANK_REDIRECT_URL`: callback publico que usara el banco tras autorizar, normalmente `${PUBLIC_API_URL}/bank/callback`.
+
+## Klaviyo
+
+- `KLAVIYO_API_KEY`: clave privada de Klaviyo para enviar eventos de devoluciones. No subir a GitHub. Si no está configurada, la API ignora esos eventos y no bloquea el flujo.
 - `ECONOMICS_PAYOUT_LIMIT`: numero maximo de pagos Shopify recientes que se muestran en Economia. Por defecto `8`.
 
 Estos importes salen de la factura Sendcloud `1-26-ES0024751` del 06-05-2026, sumando tarifa base y recargo de combustible aproximado. Si Sendcloud devuelve coste real al crear la etiqueta, la app usa el coste real; si no, usa esta tabla para que un pedido con envio gratis para el cliente siga teniendo coste de transporte en el margen.
