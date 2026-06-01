@@ -91,6 +91,7 @@ interface ItemSelection {
 
 interface PortalConfig {
   logoUrl?: string | null;
+  faviconUrl?: string | null;
   backgroundUrl?: string | null;
   primaryColor?: string | null;
   cardStyle?: string | null;
@@ -101,6 +102,7 @@ interface PortalConfig {
 
 const DEFAULT_PORTAL_CONFIG: PortalConfig = {
   logoUrl: null,
+  faviconUrl: null,
   backgroundUrl: null,
   primaryColor: '#007AFF',
   cardStyle: 'light',
@@ -765,6 +767,13 @@ export default function DevolucionesPage() {
       .then((data: PortalConfig) => {
         const merged = { ...DEFAULT_PORTAL_CONFIG, ...data };
         setPortalConfig(merged);
+        // Apply custom favicon if set
+        if (merged.faviconUrl) {
+          const link: HTMLLinkElement = document.querySelector("link[rel='icon']") || document.createElement('link');
+          link.rel = 'icon';
+          link.href = merged.faviconUrl;
+          document.head.appendChild(link);
+        }
         if (merged.backgroundUrl) {
           const img = new Image();
           img.onload = () => setConfigLoaded(true);

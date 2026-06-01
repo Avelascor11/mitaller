@@ -626,6 +626,7 @@ model ReturnItem {
 model PortalConfig {
   id             String   @id @default("singleton")
   logoUrl        String?
+  faviconUrl     String?
   backgroundUrl  String?
   primaryColor   String   @default("#007AFF")
   cardStyle      String   @default("light")

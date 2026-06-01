@@ -17,6 +17,7 @@ export class PortalConfigController {
     @Body()
     body: {
       logoUrl?: string;
+      faviconUrl?: string;
       backgroundUrl?: string;
       primaryColor?: string;
       cardStyle?: string;

@@ -17,6 +17,7 @@ export class PortalConfigService {
 
   async updateConfig(data: {
     logoUrl?: string;
+    faviconUrl?: string;
     backgroundUrl?: string;
     primaryColor?: string;
     cardStyle?: string;

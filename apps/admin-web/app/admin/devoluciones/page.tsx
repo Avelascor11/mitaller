@@ -74,8 +74,19 @@ interface ReturnException {
   createdAt: string;
 }
 
+interface PortalConfig {
+  logoUrl: string | null;
+  faviconUrl: string | null;
+  backgroundUrl: string | null;
+  primaryColor: string;
+  cardStyle: string;
+  titleText: string;
+  subtitleText: string;
+  policyUrl: string | null;
+}
+
 interface Toast { id: number; msg: string; type: 'ok' | 'err' }
-type Tab = 'list' | 'config' | 'exceptions';
+type Tab = 'list' | 'config' | 'exceptions' | 'branding';
 
 function useToast() {
   const [toasts, setToasts] = useState<Toast[]>([]);
@@ -130,6 +141,10 @@ export default function AdminDevolucionesPage() {
   const [configDraft, setDraft]   = useState<ReturnConfig | null>(null);
   const [savingConfig, setSaving] = useState(false);
 
+  const [portalCfg, setPortalCfg]         = useState<PortalConfig | null>(null);
+  const [portalDraft, setPortalDraft]     = useState<PortalConfig | null>(null);
+  const [savingPortal, setSavingPortal]   = useState(false);
+
   const [exceptions, setExceptions]   = useState<ReturnException[]>([]);
   const [showNewEx, setShowNewEx]     = useState(false);
   const [newEx, setNewEx] = useState({ orderNumber: '', customerEmail: '', type: 'EXTEND_WINDOW', extraDays: 7, notes: '', expiresAt: '' });
@@ -168,6 +183,10 @@ export default function AdminDevolucionesPage() {
         const r = await fetch(`${API_URL}/returns/admin/exceptions`, { headers: auth(jwt) });
         if (r.status === 401) { logout(); return; }
         setExceptions(await r.json());
+      } else if (tab === 'branding') {
+        const r = await fetch(`${API_URL}/portal-config`, { headers: auth(jwt) });
+        if (r.status === 401) { logout(); return; }
+        const c = await r.json(); setPortalCfg(c); setPortalDraft(c);
       }
     } catch (e) { err(e instanceof Error ? e.message : 'Error cargando'); }
     finally { setLoading(false); }
@@ -184,6 +203,19 @@ export default function AdminDevolucionesPage() {
       ok('Configuración guardada ✓');
     } catch (e) { err(e instanceof Error ? e.message : 'Error guardando'); }
     finally { setSaving(false); }
+  }
+
+  async function saveBranding() {
+    if (!portalDraft) return;
+    setSavingPortal(true);
+    try {
+      const res = await fetch(`${API_URL}/portal-config`,
+        { method: 'PUT', headers: { 'Content-Type': 'application/json', ...auth(token) }, body: JSON.stringify(portalDraft) });
+      if (!res.ok) throw new Error(`Error ${res.status}`);
+      const updated = await res.json(); setPortalCfg(updated); setPortalDraft(updated);
+      ok('Personalización guardada ✓');
+    } catch (e) { err(e instanceof Error ? e.message : 'Error guardando'); }
+    finally { setSavingPortal(false); }
   }
 
   async function createException() {
@@ -296,7 +328,7 @@ export default function AdminDevolucionesPage() {
           <img src="https://d3k81ch9hvuctc.cloudfront.net/company/Yiztrx/images/2542dbd7-26d2-4c03-89ff-ac50f08da007.png" alt="Logo" style={{ height: 28, objectFit: 'contain' }} />
           <div style={{ width: 1, height: 20, background: '#e5e7eb' }} />
           <div style={{ display: 'flex', gap: 0 }}>
-            {([['list', 'Devoluciones'], ['config', 'Configuración'], ['exceptions', 'Excepciones']] as [Tab, string][]).map(([id, label]) => (
+            {([['list', 'Devoluciones'], ['config', 'Configuración'], ['branding', 'Personalización'], ['exceptions', 'Excepciones']] as [Tab, string][]).map(([id, label]) => (
               <button key={id} onClick={() => setTab(id)} style={{
                 padding: '6px 14px', background: 'transparent', border: 'none', cursor: 'pointer',
                 fontSize: 13, fontWeight: tab === id ? 600 : 400,
@@ -559,6 +591,84 @@ export default function AdminDevolucionesPage() {
               <button onClick={saveConfig} disabled={savingConfig || JSON.stringify(config) === JSON.stringify(configDraft)}
                 style={{ ...btnPrimary, flex: 1, marginTop: 0, opacity: (savingConfig || JSON.stringify(config) === JSON.stringify(configDraft)) ? 0.5 : 1 }}>
                 {savingConfig ? 'Guardando…' : 'Guardar cambios'}
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* ── TAB: BRANDING ── */}
+        {tab === 'branding' && portalDraft && !loading && (
+          <div style={{ background: '#fff', border: '1px solid #e5e7eb', borderRadius: 12, padding: 28, maxWidth: 700 }}>
+            <h2 style={{ margin: '0 0 6px', fontSize: 18, fontWeight: 700, color: '#111827' }}>Personalización del portal</h2>
+            <p style={{ margin: '0 0 24px', fontSize: 13, color: '#6b7280' }}>Estos ajustes se aplican al portal público de devoluciones.</p>
+
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 16 }}>
+              <label style={cfgLabel}>
+                <span>Título del portal</span>
+                <input type="text" style={inp} value={portalDraft.titleText}
+                  onChange={e => setPortalDraft({ ...portalDraft, titleText: e.target.value })} />
+              </label>
+              <label style={cfgLabel}>
+                <span>Subtítulo</span>
+                <input type="text" style={inp} value={portalDraft.subtitleText}
+                  onChange={e => setPortalDraft({ ...portalDraft, subtitleText: e.target.value })} />
+              </label>
+              <label style={cfgLabel}>
+                <span>Color principal (hex)</span>
+                <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                  <input type="color" value={portalDraft.primaryColor}
+                    onChange={e => setPortalDraft({ ...portalDraft, primaryColor: e.target.value })}
+                    style={{ width: 40, height: 36, border: '1px solid #d1d5db', borderRadius: 6, cursor: 'pointer', padding: 2 }} />
+                  <input type="text" style={{ ...inp, flex: 1 }} value={portalDraft.primaryColor}
+                    onChange={e => setPortalDraft({ ...portalDraft, primaryColor: e.target.value })} />
+                </div>
+              </label>
+              <label style={cfgLabel}>
+                <span>Estilo tarjeta</span>
+                <select style={inp} value={portalDraft.cardStyle}
+                  onChange={e => setPortalDraft({ ...portalDraft, cardStyle: e.target.value })}>
+                  <option value="light">Claro</option>
+                  <option value="dark">Oscuro</option>
+                </select>
+              </label>
+            </div>
+
+            <div style={{ height: 1, background: '#f3f4f6', margin: '4px 0 20px' }} />
+            <p style={{ margin: '0 0 12px', fontSize: 13, fontWeight: 600, color: '#374151' }}>Imágenes y favicon</p>
+
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 16 }}>
+              <label style={cfgLabel}>
+                <span>URL del logo</span>
+                <input type="url" style={inp} value={portalDraft.logoUrl ?? ''} placeholder="https://..."
+                  onChange={e => setPortalDraft({ ...portalDraft, logoUrl: e.target.value || null })} />
+              </label>
+              <label style={cfgLabel}>
+                <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                  URL del favicon
+                  {portalDraft.faviconUrl && (
+                    <img src={portalDraft.faviconUrl} alt="" style={{ width: 16, height: 16, borderRadius: 2 }} />
+                  )}
+                </span>
+                <input type="url" style={inp} value={portalDraft.faviconUrl ?? ''} placeholder="https://.../favicon.png"
+                  onChange={e => setPortalDraft({ ...portalDraft, faviconUrl: e.target.value || null })} />
+              </label>
+              <label style={cfgLabel}>
+                <span>URL imagen de fondo</span>
+                <input type="url" style={inp} value={portalDraft.backgroundUrl ?? ''} placeholder="https://..."
+                  onChange={e => setPortalDraft({ ...portalDraft, backgroundUrl: e.target.value || null })} />
+              </label>
+              <label style={cfgLabel}>
+                <span>URL política / términos</span>
+                <input type="url" style={inp} value={portalDraft.policyUrl ?? ''} placeholder="https://..."
+                  onChange={e => setPortalDraft({ ...portalDraft, policyUrl: e.target.value || null })} />
+              </label>
+            </div>
+
+            <div style={{ display: 'flex', gap: 10, marginTop: 8 }}>
+              <button onClick={() => setPortalDraft(portalCfg)} style={btnSecondary}>Descartar</button>
+              <button onClick={saveBranding} disabled={savingPortal || JSON.stringify(portalCfg) === JSON.stringify(portalDraft)}
+                style={{ ...btnPrimary, flex: 1, marginTop: 0, opacity: (savingPortal || JSON.stringify(portalCfg) === JSON.stringify(portalDraft)) ? 0.5 : 1 }}>
+                {savingPortal ? 'Guardando…' : 'Guardar personalización'}
               </button>
             </div>
           </div>
