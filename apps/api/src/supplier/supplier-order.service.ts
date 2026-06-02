@@ -175,6 +175,9 @@ export class SupplierOrderService {
     if (!order) throw new BadRequestException('Pedido a proveedor no encontrado');
     if (!order.lines.length) throw new BadRequestException('El pedido a proveedor no tiene lineas');
     if (order.status === 'SUBMITTED') return { status: 'already_submitted', order, lines: order.lines };
+    if (this.hasUnresolvedFalkRossSkus(order.lines)) {
+      throw new BadRequestException('Falta importar el catalogo real de Falk & Ross antes de enviar el pedido al proveedor');
+    }
 
     const payload = (order.rawRequestJson as unknown as SupplierPurchaseOrderPayload | null) ?? {
       supplier: order.supplier,
@@ -248,6 +251,13 @@ export class SupplierOrderService {
     if (this.config.get<string>('FALKROSS_ALLOW_BACKORDER') === 'true') return requestedQuantity;
     if (supplierAvailableQuantity == null) return requestedQuantity;
     return Math.min(requestedQuantity, Math.max(0, supplierAvailableQuantity));
+  }
+
+  private hasUnresolvedFalkRossSkus(lines: Array<{ supplierSku: string; rawDataJson: Prisma.JsonValue | null }>) {
+    return lines.some((line) => {
+      const rawData = line.rawDataJson as { resolvedStyleCode?: string | null } | null;
+      return line.supplierSku.startsWith('FR-') && !rawData?.resolvedStyleCode;
+    });
   }
 
   private resolveFalkRossArticle(
