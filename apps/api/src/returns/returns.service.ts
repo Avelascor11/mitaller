@@ -491,6 +491,57 @@ export class ReturnsService {
     return { success: true, status: updated.status, trackingNumber: updated.trackingNumber, parcelId: sendcloudResult.parcelId };
   }
 
+  /** Admin: manually create a real Shopify order for the replacement products of an EXCHANGE. */
+  async createExchangeOrder(id: string) {
+    const returnRecord = await this.prisma.return.findUnique({
+      where: { id },
+      include: { order: true, items: true }
+    });
+    if (!returnRecord) throw new NotFoundException('Devolución no encontrada.');
+    if (returnRecord.type !== 'EXCHANGE') {
+      throw new BadRequestException('Solo los cambios pueden generar pedido de reemplazo.');
+    }
+    if (returnRecord.shopifyDraftOrderId) {
+      throw new BadRequestException('Este cambio ya tiene un pedido de reemplazo creado en Shopify.');
+    }
+
+    const lineItems = returnRecord.items
+      .filter((it) => it.replacementVariantId)
+      .map((it) => ({ variantId: it.replacementVariantId!, quantity: it.quantity }));
+
+    if (lineItems.length === 0) {
+      throw new BadRequestException('Este cambio no tiene variantes de reemplazo asignadas.');
+    }
+
+    let draftId: string;
+    let orderName: string | null = null;
+    try {
+      const draft = await this.shopify.createDraftOrder({
+        customerEmail: returnRecord.customerEmail,
+        note: `CAMBIO (manual admin) pedido ${returnRecord.shopifyOrderNumber} — ${lineItems.length} artículo(s)`,
+        tags: ['return-portal', 'exchange', 'exchange-manual'],
+        shippingAddress: this.shippingAddressFromOrder(returnRecord.order.shippingAddressJson, returnRecord.customerName),
+        lineItems
+      });
+      draftId = draft.id;
+      const completed = await this.shopify.completeDraftOrder(draft.id);
+      orderName = completed.orderName;
+    } catch (error) {
+      throw new BadRequestException(`Error creando pedido en Shopify: ${error instanceof Error ? error.message : 'desconocido'}`);
+    }
+
+    await this.prisma.return.update({ where: { id }, data: { shopifyDraftOrderId: draftId } });
+    await this.activity.log({
+      entityType: 'Return',
+      entityId: id,
+      action: 'EXCHANGE_ORDER_CREATED',
+      message: `Pedido de reemplazo ${orderName ?? ''} creado en Shopify para ${returnRecord.shopifyOrderNumber}`.trim(),
+      metadataJson: { draftOrderId: draftId, orderName }
+    });
+
+    return { success: true, orderName, draftOrderId: draftId };
+  }
+
   async getReturnStatus(id: string) {
     const record = await this.prisma.return.findUnique({
       where: { id },

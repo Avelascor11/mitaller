@@ -173,6 +173,13 @@ export class ReturnsController {
     return this.returnsService.generateLabelForReturn(id);
   }
 
+  /** Admin — manually create the Shopify replacement order for an exchange */
+  @Post(':id/exchange-order')
+  @UseGuards(JwtAuthGuard)
+  createExchangeOrder(@Param('id') id: string) {
+    return this.returnsService.createExchangeOrder(id);
+  }
+
   /** Admin — mark package as received */
   @Patch(':id/received')
   @UseGuards(JwtAuthGuard)

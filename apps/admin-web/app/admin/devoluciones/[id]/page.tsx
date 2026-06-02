@@ -49,7 +49,7 @@ function th(d:boolean) {
 interface Ret {
   id:string; shopifyOrderNumber:string; customerName:string; customerEmail:string;
   status:string; type:string; paymentStatus:string;
-  checkoutUrl?:string|null; labelUrl?:string|null;
+  checkoutUrl?:string|null; labelUrl?:string|null; shopifyDraftOrderId?:string|null;
   trackingNumber?:string|null; carrier?:string|null; notes?:string|null;
   totalAmount?:number|null; refundAmount?:number|null;
   createdAt:string; updatedAt?:string; receivedAt?:string|null;
@@ -189,6 +189,17 @@ export default function Page({params}:{params:Promise<{id:string}>}) {
       const r=await fetch(`${API}/returns/${data.id}/verify`,{method:'PATCH',headers:{'Content-Type':'application/json',...H(tok)},body:JSON.stringify({verificationStatus:vs,verificationNotes:vnotes||undefined})});
       if(!r.ok) throw new Error('Error');
       ok(vs==='OK'?'Verificación correcta ✓':'Incidencia registrada'); load(tok);
+    }catch(e){err(e instanceof Error?e.message:'Error');}
+    finally{setAct(false);}
+  }
+
+  async function createExchangeOrder(){
+    if(!data) return; setAct(true);
+    try{
+      const r=await fetch(`${API}/returns/${data.id}/exchange-order`,{method:'POST',headers:{'Content-Type':'application/json',...H(tok)}});
+      const d=await r.json();
+      if(!r.ok) throw new Error(d.message ?? 'Error');
+      ok(`Pedido ${d.orderName ?? ''} creado en Shopify ✓`); load(tok);
     }catch(e){err(e instanceof Error?e.message:'Error');}
     finally{setAct(false);}
   }
@@ -675,7 +686,34 @@ export default function Page({params}:{params:Promise<{id:string}>}) {
             </motion.div>
           )}
 
-          {/* MODAL placeholder — generate label action already inline */}
+          {/* PRODUCTO NUEVO (solo cambios) */}
+          {data.type==='EXCHANGE'&&(
+            <motion.div variants={vSide}>
+              <div style={{borderRadius:16,background:T.card,border:`1px solid ${T.border}`,boxShadow:T.shadow,backdropFilter:'blur(16px)',overflow:'hidden'}}>
+                <div style={{padding:'13px 18px',borderBottom:`1px solid ${T.border}`,display:'flex',alignItems:'center',gap:9}}>
+                  <span style={{fontSize:16}}>🔁</span>
+                  <span style={{fontSize:11.5,fontWeight:700,color:T.faint,letterSpacing:'.07em',textTransform:'uppercase'}}>Producto nuevo</span>
+                </div>
+                <div style={{padding:'14px 18px'}}>
+                  {data.shopifyDraftOrderId?(
+                    <div style={{display:'flex',alignItems:'center',gap:8,fontSize:13,fontWeight:600,color:'#3fb98a'}}>
+                      ✓ Pedido de reemplazo creado en Shopify
+                    </div>
+                  ):(
+                    <>
+                      <p style={{fontSize:13,color:T.faint,margin:'0 0 12px'}}>No se ha creado el pedido del producto nuevo. Créalo en Shopify para que almacén lo prepare.</p>
+                      <motion.button whileHover={{y:-2,boxShadow:`0 10px 22px -8px ${G}99`}} whileTap={{scale:.97}}
+                        onClick={createExchangeOrder} disabled={act}
+                        style={{width:'100%',padding:'10px',background:`linear-gradient(140deg,${G},${G2})`,color:'#fff',border:'none',borderRadius:9,fontSize:13,fontWeight:600,cursor:'pointer',opacity:act?.5:1,fontFamily:FONT,display:'flex',alignItems:'center',justifyContent:'center',gap:7,boxShadow:`0 5px 14px -5px ${G}88`}}>
+                        🛒 Crear pedido en Shopify
+                      </motion.button>
+                    </>
+                  )}
+                </div>
+              </div>
+            </motion.div>
+          )}
+
         </div>{/* /SIDEBAR */}
 
       </motion.div>{/* /BODY */}
