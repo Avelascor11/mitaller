@@ -827,6 +827,16 @@ final class WorkshopStore {
         }
     }
 
+    func refreshSupplierPurchaseRecommendation() async {
+        guard let client = apiClient else { return }
+        do {
+            _ = try await client.generateDailySupplierPurchaseOrder(submit: false)
+            supplierPurchaseOrders = try await client.supplierPurchaseOrders()
+        } catch {
+            syncError = "No se pudo actualizar compra proveedor: \(error.localizedDescription)"
+        }
+    }
+
     func generateSupplierPurchaseOrder() async {
         guard let client = apiClient else { return }
         isSupplierPurchaseActionRunning = true
@@ -1457,7 +1467,10 @@ struct DashboardView: View {
             .navigationTitle("Hoy")
             .toolbar {
                 Button {
-                    Task { await store.syncFromAPI() }
+                    Task {
+                        await store.syncFromAPI()
+                        await store.refreshSupplierPurchaseRecommendation()
+                    }
                 } label: {
                     Image(systemName: "arrow.clockwise")
                 }
@@ -4080,10 +4093,10 @@ struct PurchaseMatrixView: View {
             }
             .refreshable {
                 await store.syncFromAPI()
-                await store.loadSupplierPurchaseOrders()
+                await store.refreshSupplierPurchaseRecommendation()
             }
             .task {
-                await store.loadSupplierPurchaseOrders()
+                await store.refreshSupplierPurchaseRecommendation()
             }
         }
     }
