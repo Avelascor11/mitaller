@@ -258,7 +258,7 @@ export class SupplierOrderService {
   }
 
   private async syncSupplierStockBeforeOrdering() {
-    if (this.config.get<string>('FALKROSS_SYNC_STOCK_BEFORE_ORDER') === 'false') return;
+    if (this.config.get<string>('FALKROSS_SYNC_STOCK_BEFORE_ORDER') !== 'true') return;
     if (!this.config.get<string>('FALKROSS_WEBSERVICE_USER') || !this.config.get<string>('FALKROSS_WEBSERVICE_PASSWORD')) return;
     try {
       const result = await this.supplier.syncStock();

@@ -46,12 +46,26 @@ export class SupplierAdapter {
     if (!user || !password) {
       throw new BadRequestException('Stock Falk & Ross no configurado. Define FALKROSS_WEBSERVICE_USER y FALKROSS_WEBSERVICE_PASSWORD.');
     }
-    const response = await fetch(this.stockCsvUrl(), {
-      headers: { Authorization: `Basic ${Buffer.from(`${user}:${password}`).toString('base64')}` }
-    });
-    const text = await response.text();
-    if (!response.ok) {
-      throw new BadRequestException(`Falk & Ross stock ${response.status}: ${text}`);
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), this.requestTimeoutMs());
+    let text = '';
+    try {
+      const response = await fetch(this.stockCsvUrl(), {
+        headers: { Authorization: `Basic ${Buffer.from(`${user}:${password}`).toString('base64')}` },
+        signal: controller.signal
+      });
+      text = await response.text();
+      if (!response.ok) {
+        throw new BadRequestException(`Falk & Ross stock ${response.status}: ${text}`);
+      }
+    } catch (error) {
+      if (error instanceof BadRequestException) throw error;
+      const message = error instanceof Error && error.name === 'AbortError'
+        ? `Falk & Ross stock timeout tras ${this.requestTimeoutMs()}ms`
+        : `Falk & Ross stock no disponible: ${error instanceof Error ? error.message : String(error)}`;
+      throw new BadRequestException(message);
+    } finally {
+      clearTimeout(timeout);
     }
     const stocks = this.parseFalkRossStockCsv(text);
     await this.prisma.supplierStock.deleteMany({ where: { supplier: 'FALK_ROSS' } });
@@ -249,6 +263,11 @@ export class SupplierAdapter {
 
   private stockCsvUrl() {
     return this.config.get<string>('FALKROSS_STOCK_CSV_URL') ?? 'https://ws.falk-ross.eu/webservice/R01_000/stockinfo/falkross_de.csv';
+  }
+
+  private requestTimeoutMs() {
+    const value = Number(this.config.get<string>('FALKROSS_REQUEST_TIMEOUT_MS') ?? 15000);
+    return Number.isFinite(value) ? Math.max(1000, value) : 15000;
   }
 
   private async loadCatalogSource(source: string) {
