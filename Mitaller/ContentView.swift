@@ -667,6 +667,9 @@ final class WorkshopStore {
     var stock: [StockRow] = []
     var purchaseNeeds: [PurchaseNeed] = []
     var purchaseMatrix: [PurchaseMatrixGroup] = []
+    var supplierPurchaseOrders: [SupplierPurchaseOrder] = []
+    var supplierPurchaseOrderMessage: String?
+    var isSupplierPurchaseActionRunning = false
     var mappingWorkbench: MappingWorkbench?
     var orderPickingLists: [String: OrderPickingList] = [:]
 
@@ -812,6 +815,56 @@ final class WorkshopStore {
         } catch {
             syncError = "No se pudo confirmar la entrada de stock: \(error.localizedDescription)"
             throw error
+        }
+    }
+
+    func loadSupplierPurchaseOrders() async {
+        guard let client = apiClient else { return }
+        do {
+            supplierPurchaseOrders = try await client.supplierPurchaseOrders()
+        } catch {
+            syncError = "No se pudieron cargar compras proveedor: \(error.localizedDescription)"
+        }
+    }
+
+    func generateSupplierPurchaseOrder() async {
+        guard let client = apiClient else { return }
+        isSupplierPurchaseActionRunning = true
+        supplierPurchaseOrderMessage = nil
+        syncError = nil
+        defer { isSupplierPurchaseActionRunning = false }
+        do {
+            let response = try await client.generateDailySupplierPurchaseOrder(submit: false)
+            supplierPurchaseOrderMessage = supplierPurchaseOrderStatusText(response.status)
+            supplierPurchaseOrders = try await client.supplierPurchaseOrders()
+        } catch {
+            syncError = "No se pudo crear compra proveedor: \(error.localizedDescription)"
+        }
+    }
+
+    func submitSupplierPurchaseOrder(_ order: SupplierPurchaseOrder) async {
+        guard let client = apiClient else { return }
+        isSupplierPurchaseActionRunning = true
+        supplierPurchaseOrderMessage = nil
+        syncError = nil
+        defer { isSupplierPurchaseActionRunning = false }
+        do {
+            let response = try await client.submitSupplierPurchaseOrder(id: order.id)
+            supplierPurchaseOrderMessage = supplierPurchaseOrderStatusText(response.status)
+            supplierPurchaseOrders = try await client.supplierPurchaseOrders()
+        } catch {
+            syncError = "No se pudo enviar compra proveedor: \(error.localizedDescription)"
+        }
+    }
+
+    private func supplierPurchaseOrderStatusText(_ status: String) -> String {
+        switch status {
+        case "created": "Borrador Falk & Ross creado"
+        case "already_exists": "Ya existe un borrador abierto para hoy"
+        case "submitted": "Pedido enviado a Falk & Ross"
+        case "draft": "Pedido guardado como borrador"
+        case "empty": "No hay prendas para pedir"
+        default: status
         }
     }
 
@@ -4000,6 +4053,8 @@ struct PurchaseMatrixView: View {
                         MetricTile(title: "Stock", value: garmentGroups.reduce(0) { $0 + $1.totalStock }, color: AppTheme.green, icon: "archivebox.fill")
                     }
 
+                    SupplierPurchaseOrderCard()
+
                     let groups = garmentGroups.filter { $0.totalRecommended > 0 }
 
                     if groups.isEmpty {
@@ -4025,8 +4080,193 @@ struct PurchaseMatrixView: View {
             }
             .refreshable {
                 await store.syncFromAPI()
+                await store.loadSupplierPurchaseOrders()
+            }
+            .task {
+                await store.loadSupplierPurchaseOrders()
             }
         }
+    }
+}
+
+struct SupplierPurchaseOrderCard: View {
+    @Environment(WorkshopStore.self) private var store
+    @State private var orderPendingSubmit: SupplierPurchaseOrder?
+    @State private var showSubmitConfirmation = false
+
+    private var latestOrder: SupplierPurchaseOrder? {
+        store.supplierPurchaseOrders.first
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(alignment: .top, spacing: 12) {
+                Image(systemName: "building.2.crop.circle.fill")
+                    .font(.system(size: 28, weight: .bold))
+                    .foregroundStyle(AppTheme.blue)
+                    .frame(width: 36)
+
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Compras proveedor")
+                        .font(.headline.weight(.black))
+                        .foregroundStyle(AppTheme.ink)
+                    Text("Borrador Falk & Ross para revisar y enviar manualmente.")
+                        .font(.caption.weight(.medium))
+                        .foregroundStyle(AppTheme.muted)
+                }
+
+                Spacer()
+
+                if let latestOrder {
+                    SupplierPurchaseStatusBadge(status: latestOrder.status)
+                }
+            }
+
+            if let message = store.supplierPurchaseOrderMessage {
+                Label(message, systemImage: "checkmark.circle.fill")
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(AppTheme.green)
+                    .padding(10)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(AppTheme.green.opacity(0.12))
+                    .clipShape(RoundedRectangle(cornerRadius: 12))
+            }
+
+            if let latestOrder {
+                VStack(alignment: .leading, spacing: 10) {
+                    HStack {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(latestOrder.orderNumber)
+                                .font(.title3.weight(.black))
+                                .foregroundStyle(AppTheme.ink)
+                            Text("\(latestOrder.lines.count) lineas · \(latestOrder.totalQuantity) prendas")
+                                .font(.caption.weight(.bold))
+                                .foregroundStyle(AppTheme.muted)
+                        }
+                        Spacer()
+                        if let externalOrderId = latestOrder.externalOrderId, !externalOrderId.isEmpty {
+                            Tag(text: externalOrderId, systemImage: "checkmark.seal.fill")
+                        }
+                    }
+
+                    VStack(spacing: 8) {
+                        ForEach(latestOrder.lines.prefix(5)) { line in
+                            SupplierPurchaseLineRow(line: line)
+                        }
+                        if latestOrder.lines.count > 5 {
+                            Text("+\(latestOrder.lines.count - 5) lineas mas")
+                                .font(.caption.weight(.bold))
+                                .foregroundStyle(AppTheme.muted)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                    }
+
+                    if let error = latestOrder.errorMessage, !error.isEmpty {
+                        Text(error)
+                            .font(.caption.weight(.bold))
+                            .foregroundStyle(AppTheme.red)
+                            .padding(10)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .background(AppTheme.red.opacity(0.12))
+                            .clipShape(RoundedRectangle(cornerRadius: 12))
+                    }
+                }
+                .padding(12)
+                .background(AppTheme.surfaceSoft)
+                .clipShape(RoundedRectangle(cornerRadius: 14))
+            } else {
+                EmptyStateCard(title: "Sin borrador proveedor", subtitle: "Crea la recomendacion del dia cuando quieras revisar la compra.")
+            }
+
+            HStack(spacing: 10) {
+                Button {
+                    Task { await store.generateSupplierPurchaseOrder() }
+                } label: {
+                    Label("Recomendar compra", systemImage: "sparkles")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(AppTheme.magenta)
+                .disabled(store.isSupplierPurchaseActionRunning)
+
+                Button {
+                    if let latestOrder {
+                        orderPendingSubmit = latestOrder
+                        showSubmitConfirmation = true
+                    }
+                } label: {
+                    Label("Hacer compra", systemImage: "paperplane.fill")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.bordered)
+                .tint(AppTheme.blue)
+                .disabled(store.isSupplierPurchaseActionRunning || latestOrder == nil || latestOrder?.status == "SUBMITTED")
+            }
+        }
+        .glassPanel(padding: 16, accent: AppTheme.blue)
+        .confirmationDialog("Enviar pedido a Falk & Ross", isPresented: $showSubmitConfirmation, titleVisibility: .visible) {
+            Button("Enviar \(orderPendingSubmit?.orderNumber ?? "pedido")", role: .destructive) {
+                if let orderPendingSubmit {
+                    Task { await store.submitSupplierPurchaseOrder(orderPendingSubmit) }
+                }
+            }
+            Button("Cancelar", role: .cancel) {}
+        } message: {
+            Text("Revisa cantidades y SKUs antes de confirmar. Esta accion envia el pedido al proveedor si la API esta activada.")
+        }
+    }
+}
+
+struct SupplierPurchaseStatusBadge: View {
+    let status: String
+
+    private var color: Color {
+        switch status.uppercased() {
+        case "SUBMITTED": AppTheme.green
+        case "ERROR": AppTheme.red
+        default: AppTheme.amber
+        }
+    }
+
+    var body: some View {
+        Text(status.uppercased() == "SUBMITTED" ? "ENVIADO" : "BORRADOR")
+            .font(.caption2.weight(.black))
+            .foregroundStyle(color)
+            .padding(.horizontal, 9)
+            .padding(.vertical, 5)
+            .background(color.opacity(0.14))
+            .clipShape(Capsule())
+    }
+}
+
+struct SupplierPurchaseLineRow: View {
+    let line: SupplierPurchaseOrderLine
+
+    var body: some View {
+        HStack(spacing: 10) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(line.name)
+                    .font(.subheadline.weight(.heavy))
+                    .foregroundStyle(AppTheme.ink)
+                    .lineLimit(1)
+                Text(line.supplierSku)
+                    .font(.caption2.weight(.bold))
+                    .foregroundStyle(AppTheme.muted)
+            }
+            Spacer()
+            if let available = line.supplierAvailableQuantity {
+                Text("prov \(available)")
+                    .font(.caption2.weight(.bold))
+                    .foregroundStyle(available >= line.quantity ? AppTheme.green : AppTheme.red)
+            }
+            Text("x\(line.quantity)")
+                .font(.headline.weight(.black))
+                .foregroundStyle(AppTheme.magenta)
+                .frame(minWidth: 42, alignment: .trailing)
+        }
+        .padding(10)
+        .background(AppTheme.surface)
+        .clipShape(RoundedRectangle(cornerRadius: 12))
     }
 }
 

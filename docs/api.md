@@ -61,6 +61,10 @@ http://localhost:3001
 - `GET /supplier/stock`
 - `POST /supplier/import-catalog`
 - `POST /supplier/sync-stock`
+- `GET /supplier/purchase-orders`
+- `GET /supplier/purchase-orders/:id`
+- `POST /supplier/purchase-orders/daily`
+- `POST /supplier/purchase-orders/:id/submit`
 
 ## Banco / PSD2
 

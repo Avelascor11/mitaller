@@ -89,8 +89,28 @@ La tarjeta "Pagos Shopify" usa los endpoints oficiales de Shopify Payments (`/sh
 - `FALKROSS_STOCK_CSV_URL`
 - `FALKROSS_STOCK_XML_URL`
 - `FALKROSS_ARTICLE_MASTER_URL`
+- `FALKROSS_DAILY_AUTO_ORDER`: si vale `true`, a las 20:00 Europe/Madrid se genera un borrador de pedido diario.
+- `FALKROSS_ALLOW_AUTO_SUBMIT`: debe quedarse en `false`. Solo existe como seguro técnico para impedir envíos automáticos.
+- `FALKROSS_AUTO_ORDER_ENABLED`: si vale `true`, permite enviar el pedido real solo cuando tú pulses la acción manual de envío. Si vale `false`, todo queda como borrador interno.
+- `FALKROSS_SYNC_STOCK_BEFORE_ORDER`: si no vale `false`, intenta sincronizar stock proveedor antes de crear el pedido diario.
+- `FALKROSS_ORDER_MODE`: `falkross-xml` para el webservice oficial o `draft` para no enviar nunca.
+- `FALKROSS_ORDER_ENDPOINT`: por defecto `https://ws.falk-ross.eu/webservice/R02_000/order?format=xml`.
+- `FALKROSS_WEBSERVICE_USER`
+- `FALKROSS_WEBSERVICE_PASSWORD`
+- `FALKROSS_CUSTOMER_NUMBER`
+- `FALKROSS_SHIPPING_METHOD`: por defecto `0`.
+- `FALKROSS_PARTIAL_SHIPMENT`: por defecto `true`.
+- `FALKROSS_ALLOW_BACKORDER`: si vale `false`, no pide mas unidades que el stock proveedor disponible cuando lo conocemos.
+- `FALKROSS_DELIVERY_ADDRESS_DIFFERENT`: si vale `false`, Falk & Ross usa la direccion de cuenta. Si vale `true`, rellena tambien las variables `FALKROSS_DELIVERY_*`.
 
-Si faltan fuentes, `SupplierAdapter` devuelve error claro. No se generan articulos ni stock de prueba.
+El webservice de Falk & Ross usa Basic Auth y XML UTF-8. No metas usuario/contraseña en URLs. El control final lo tiene el responsable del taller: el cron solo prepara el borrador; el envío real requiere acción manual sobre el pedido revisado.
+
+Prendas base configuradas:
+
+- Camisetas: B&C `TG002`, numero de producto `032.42`.
+- Sudaderas: B&C `WG005`, numero de producto `237.42`.
+
+El pedido a proveedor no debe enviar estos codigos de modelo directamente. Antes de crear el XML, la API busca en `SupplierArticle` la variante exacta por modelo + color + talla y usa el `supplierSku` largo de Falk & Ross como `p_sku`.
 
 ## Frontend
 

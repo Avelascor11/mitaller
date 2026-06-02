@@ -268,6 +268,7 @@ model StockItem {
   receiptLines       StockReceiptLine[]
   recipeComponents   RecipeComponent[]
   purchaseNeeds      PurchaseNeed[]
+  supplierOrderLines SupplierPurchaseOrderLine[]
 }
 
 model StockLocation {
@@ -420,6 +421,45 @@ model PurchaseNeed {
   status                       PurchaseNeedStatus @default(OPEN)
   generatedAt                  DateTime           @default(now())
   stockItem                    StockItem          @relation(fields: [stockItemId], references: [id], onDelete: Cascade)
+}
+
+model SupplierPurchaseOrder {
+  id              String                      @id @default(cuid())
+  supplier        String
+  orderNumber     String                      @unique
+  externalOrderId String?
+  status          String                      @default("DRAFT")
+  mode            String                      @default("draft")
+  orderDate       DateTime
+  submittedAt     DateTime?
+  errorMessage    String?
+  rawRequestJson  Json?
+  rawResponseJson Json?
+  createdAt       DateTime                    @default(now())
+  updatedAt       DateTime                    @updatedAt
+  lines           SupplierPurchaseOrderLine[]
+
+  @@unique([supplier, orderDate])
+  @@index([supplier, status])
+}
+
+model SupplierPurchaseOrderLine {
+  id                        String                @id @default(cuid())
+  orderId                   String
+  stockItemId               String
+  supplierSku               String
+  name                      String
+  color                     String?
+  size                      String?
+  quantity                  Int
+  supplierAvailableQuantity Int?
+  purchasePrice             Decimal?              @db.Decimal(10, 2)
+  rawDataJson               Json?
+  createdAt                 DateTime              @default(now())
+  order                     SupplierPurchaseOrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  stockItem                 StockItem             @relation(fields: [stockItemId], references: [id], onDelete: Cascade)
+
+  @@index([supplierSku])
 }
 
 model Shipment {

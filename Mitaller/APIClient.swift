@@ -175,6 +175,20 @@ struct APIClient {
         try await get("/purchase-needs/fulfillable")
     }
 
+    func supplierPurchaseOrders() async throws -> [SupplierPurchaseOrder] {
+        try await get("/supplier/purchase-orders")
+    }
+
+    func generateDailySupplierPurchaseOrder(submit: Bool = false) async throws -> SupplierPurchaseOrderActionResponse {
+        let request = try jsonRequest(path: "/supplier/purchase-orders/daily", method: "POST", body: SupplierPurchaseOrderGenerateRequest(submit: submit))
+        return try await perform(request)
+    }
+
+    func submitSupplierPurchaseOrder(id: String) async throws -> SupplierPurchaseOrderActionResponse {
+        let request = try jsonRequest(path: "/supplier/purchase-orders/\(Self.pathSegment(id))/submit", method: "POST", body: EmptyBody())
+        return try await perform(request)
+    }
+
     func scanStockReceipt(rawText: String, photo: Data? = nil) async throws -> StockReceipt {
         let request = try jsonRequest(
             path: "/stock/receipts/scan",
@@ -571,6 +585,44 @@ private struct ScanStockReceiptRequest: Encodable {
 
 private struct ConfirmStockReceiptRequest: Encodable {
     let lines: [StockReceiptConfirmLine]
+}
+
+private struct SupplierPurchaseOrderGenerateRequest: Encodable {
+    let submit: Bool
+}
+
+struct SupplierPurchaseOrderActionResponse: Decodable {
+    let status: String
+    let order: SupplierPurchaseOrder?
+    let lines: [SupplierPurchaseOrderLine]?
+}
+
+struct SupplierPurchaseOrder: Decodable, Identifiable {
+    let id: String
+    let supplier: String
+    let orderNumber: String
+    let externalOrderId: String?
+    let status: String
+    let mode: String
+    let orderDate: Date?
+    let submittedAt: Date?
+    let errorMessage: String?
+    let createdAt: Date?
+    let lines: [SupplierPurchaseOrderLine]
+
+    var totalQuantity: Int {
+        lines.reduce(0) { $0 + $1.quantity }
+    }
+}
+
+struct SupplierPurchaseOrderLine: Decodable, Identifiable {
+    let id: String
+    let supplierSku: String
+    let name: String
+    let color: String?
+    let size: String?
+    let quantity: Int
+    let supplierAvailableQuantity: Int?
 }
 
 struct ManualPrintResponse: Decodable {
