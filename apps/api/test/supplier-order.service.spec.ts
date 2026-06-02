@@ -114,4 +114,69 @@ describe('SupplierOrderService', () => {
       })
     }));
   });
+
+  it('resuelve camiseta marron con Falk & Ross 2000 / 102.09 en lugar de B&C TG002', async () => {
+    const { service, prisma } = buildService({
+      matrix: {
+        groups: [{
+          garmentType: 'CAMISETA',
+          color: 'MARRON',
+          sizes: [{
+            stockItemId: 'stock-brown',
+            supplierSku: 'FR-TS-BRN-M',
+            subproductName: 'Camiseta Marron - M',
+            size: 'M',
+            recommendedPurchaseQuantity: 1,
+            supplierAvailableQuantity: null,
+            pendingOrderNeed: 1,
+            currentInternalStock: 0,
+            minStockTarget: 0,
+            demandOrders: [{ orderNumber: '#9512' }]
+          }]
+        }]
+      },
+      supplierArticles: [
+        {
+          supplierSku: '180000111',
+          styleCode: 'TG002',
+          productName: 'B&C 032.42 Brown',
+          color: 'Brown',
+          size: 'M',
+          purchasePrice: null
+        },
+        {
+          supplierSku: '290000222',
+          styleCode: '2000',
+          productName: '102.09 Brown T-Shirt',
+          color: 'Brown',
+          size: 'M',
+          purchasePrice: null
+        }
+      ],
+      supplierStocks: [{ supplierSku: '290000222', availableQuantity: 8 }]
+    });
+
+    await service.generateDailyFalkRossOrder({ source: 'manual' });
+
+    expect(prisma.supplierPurchaseOrder.create).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        rawRequestJson: expect.objectContaining({
+          orderNote: expect.stringContaining('Camiseta 032.42 -> 2.73 EUR'),
+          lines: [expect.objectContaining({ supplierSku: '290000222', quantity: 1 })]
+        }),
+        lines: expect.objectContaining({
+          create: [expect.objectContaining({
+            supplierSku: '290000222',
+            supplierAvailableQuantity: 8,
+            rawDataJson: expect.objectContaining({
+              stockItemSupplierSku: 'FR-TS-BRN-M',
+              resolvedSupplierSku: '290000222',
+              resolvedStyleCode: '2000',
+              expectedProductNumber: '102.09'
+            })
+          })]
+        })
+      })
+    }));
+  });
 });

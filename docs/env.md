@@ -107,8 +107,10 @@ El webservice de Falk & Ross usa Basic Auth y XML UTF-8. No metas usuario/contra
 
 Prendas base configuradas:
 
-- Camisetas: B&C `TG002`, numero de producto `032.42`.
-- Sudaderas: B&C `WG005`, numero de producto `237.42`.
+- Camisetas normales: B&C `TG002`, numero de producto `032.42`.
+- Camiseta marron: codigo proveedor `2000`, numero de producto `102.09`.
+- Sudaderas por defecto: B&C `WG005`, numero de producto `237.42`.
+- Comentario enviado en `order_note`: `Camiseta 032.42 -> 2.73 EUR`, `Sudadera 290.09 -> 7.30 EUR`, `Sudadera 237.42 -> 6.60 EUR`, `Sudadera 240.42 -> 6.00 EUR`.
 
 El pedido a proveedor no debe enviar estos codigos de modelo directamente. Antes de crear el XML, la API busca en `SupplierArticle` la variante exacta por modelo + color + talla y usa el `supplierSku` largo de Falk & Ross como `p_sku`.
 

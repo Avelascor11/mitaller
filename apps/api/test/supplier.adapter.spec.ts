@@ -13,6 +13,7 @@ const payload = {
   orderNumber: 'FR-20260602',
   requestedAt: '2026-06-02T18:00:00.000Z',
   source: 'test',
+  orderNote: 'Mitaller: revisar precios antes de confirmar. Camiseta 032.42 -> 2.73 EUR',
   lines: [
     { supplierSku: '180000002', name: 'Camiseta Blanca - M', quantity: 3, color: 'BLANCA', size: 'M' }
   ]
@@ -57,6 +58,7 @@ describe('SupplierAdapter', () => {
     expect(url).toBe('https://ws.falk-ross.eu/webservice/R02_000/order?format=xml');
     expect(init.headers.Authorization).toBe(`Basic ${Buffer.from('user:pass').toString('base64')}`);
     expect(init.body).toContain('<customers_number><cn_value>12345</cn_value></customers_number>');
+    expect(init.body).toContain('<order_note><on_value><![CDATA[Mitaller: revisar precios antes de confirmar. Camiseta 032.42 -> 2.73 EUR]]></on_value></order_note>');
     expect(init.body).toContain('<p_sku>180000002</p_sku>');
     expect(init.body).toContain('<pq_ordered>3</pq_ordered>');
   });

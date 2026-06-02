@@ -182,7 +182,7 @@ export class SupplierAdapter {
   <shipping_method><sm_value>${this.xmlText(shippingMethod)}</sm_value></shipping_method>
   <partial_shipment><ps_value>${this.xmlText(partialShipment)}</ps_value></partial_shipment>
   <order_reference><or_value><![CDATA[${this.cdata(payload.orderNumber)}]]></or_value></order_reference>
-  <order_note><on_value><![CDATA[${this.cdata(`Mitaller automatic order ${payload.orderNumber}`)}]]></on_value></order_note>
+  <order_note><on_value><![CDATA[${this.cdata(payload.orderNote ?? `Mitaller automatic order ${payload.orderNumber}`)}]]></on_value></order_note>
   ${deliveryAddress}
   <product_list>${products}
   </product_list>
@@ -351,6 +351,7 @@ export interface SupplierPurchaseOrderPayload {
   orderNumber: string;
   requestedAt: string;
   source: string;
+  orderNote?: string;
   lines: Array<{
     supplierSku: string;
     name: string;

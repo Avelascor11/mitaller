@@ -8,6 +8,19 @@ import { PurchaseService } from '../purchasing/purchase.service';
 import { SupplierAdapter, SupplierPurchaseOrderPayload } from './supplier.adapter';
 
 const OPEN_SUPPLIER_ORDER_STATUSES = ['DRAFT', 'SUBMITTED'];
+const FALKROSS_PRICE_NOTE = [
+  'Camiseta 032.42 -> 2.73 EUR',
+  'Sudadera 290.09 -> 7.30 EUR',
+  'Sudadera 237.42 -> 6.60 EUR',
+  'Sudadera 240.42 -> 6.00 EUR'
+].join(' | ');
+
+const FALKROSS_STYLE_PRICES: Record<string, string> = {
+  '03242': '2.73',
+  '23742': '6.60',
+  '24042': '6.00',
+  '29009': '7.30'
+};
 
 @Injectable()
 export class SupplierOrderService {
@@ -58,8 +71,11 @@ export class SupplierOrderService {
       where: { supplier_orderDate: { supplier: 'FALK_ROSS', orderDate } },
       include: { lines: true }
     });
-    if (existing && OPEN_SUPPLIER_ORDER_STATUSES.includes(existing.status)) {
+    if (existing?.status === 'SUBMITTED') {
       return { status: 'already_exists', order: existing, lines: existing.lines };
+    }
+    if (existing?.status === 'DRAFT') {
+      await this.prisma.supplierPurchaseOrder.delete({ where: { id: existing.id } });
     }
 
     await this.syncSupplierStockBeforeOrdering();
@@ -79,6 +95,7 @@ export class SupplierOrderService {
       .map(({ group, entry }) => {
         const article = this.resolveFalkRossArticle(group.garmentType, group.color, entry.size, entry.supplierSku, supplierArticles, articleBySku);
         const supplierSku = article?.supplierSku ?? entry.supplierSku!;
+        const resolvedStyleKey = this.falkRossStyleKey(article?.styleCode ?? article?.productName ?? this.expectedFalkRossStyles(group.garmentType, group.color)[0]);
         const supplierAvailableQuantity = article ? stockBySku.get(supplierSku) ?? null : null;
         const alreadyPending = pendingByStockItemId.get(entry.stockItemId!) ?? 0;
         const requestedQuantity = Math.max(0, entry.recommendedPurchaseQuantity - alreadyPending);
@@ -91,7 +108,7 @@ export class SupplierOrderService {
           size: entry.size,
           quantity,
           supplierAvailableQuantity,
-          purchasePrice: article?.purchasePrice ?? null,
+          purchasePrice: article?.purchasePrice ?? FALKROSS_STYLE_PRICES[resolvedStyleKey] ?? null,
           rawDataJson: {
             pendingOrderNeed: entry.pendingOrderNeed,
             currentInternalStock: entry.currentInternalStock,
@@ -101,6 +118,8 @@ export class SupplierOrderService {
             stockItemSupplierSku: entry.supplierSku,
             resolvedSupplierSku: supplierSku,
             resolvedStyleCode: article?.styleCode,
+            expectedStyleCode: this.expectedFalkRossStyles(group.garmentType, group.color)[0],
+            expectedProductNumber: this.expectedFalkRossStyles(group.garmentType, group.color)[1],
             resolvedProductName: article?.productName,
             demandOrders: entry.demandOrders.map((order) => order.orderNumber)
           }
@@ -118,6 +137,7 @@ export class SupplierOrderService {
       orderNumber: this.orderNumber(orderDate),
       requestedAt: new Date().toISOString(),
       source: options.source ?? 'manual',
+      orderNote: this.falkRossOrderNote(),
       lines: lines.map((line) => ({
         supplierSku: line.supplierSku,
         name: line.name,
@@ -184,6 +204,7 @@ export class SupplierOrderService {
       orderNumber: order.orderNumber,
       requestedAt: new Date().toISOString(),
       source: 'submit',
+      orderNote: this.falkRossOrderNote(),
       lines: order.lines.map((line) => ({
         supplierSku: line.supplierSku,
         name: line.name,
@@ -285,9 +306,7 @@ export class SupplierOrderService {
     const direct = supplierSku ? articleBySku.get(supplierSku) : undefined;
     if (direct && this.articleMatchesGarment(direct, garmentType, color, size)) return direct;
 
-    const expectedStyles = garmentType === 'SUDADERA'
-      ? ['WG005', '237.42', '23742']
-      : ['TG002', '032.42', '03242'];
+    const expectedStyles = this.expectedFalkRossStyles(garmentType, color);
     return articles.find((article) =>
       this.articleMatchesStyle(article, expectedStyles) &&
       this.normalizedColor(article.color ?? article.productName) === this.normalizedColor(color) &&
@@ -301,9 +320,7 @@ export class SupplierOrderService {
     color: string,
     size: string
   ) {
-    const expectedStyles = garmentType === 'SUDADERA'
-      ? ['WG005', '237.42', '23742']
-      : ['TG002', '032.42', '03242'];
+    const expectedStyles = this.expectedFalkRossStyles(garmentType, color);
     return this.articleMatchesStyle(article, expectedStyles) &&
       this.normalizedColor(article.color ?? article.productName) === this.normalizedColor(color) &&
       this.normalizedSize(article.size ?? article.productName) === this.normalizedSize(size);
@@ -312,6 +329,26 @@ export class SupplierOrderService {
   private articleMatchesStyle(article: { styleCode: string | null; productName: string }, expectedStyles: string[]) {
     const haystack = this.normalizedToken(`${article.styleCode ?? ''} ${article.productName}`);
     return expectedStyles.some((style) => haystack.includes(this.normalizedToken(style)));
+  }
+
+  private expectedFalkRossStyles(garmentType: string, color: string) {
+    if (garmentType === 'SUDADERA') return ['WG005', '237.42', '23742'];
+    if (this.normalizedColor(color) === 'MARRON') return ['2000', '102.09', '10209'];
+    return ['TG002', '032.42', '03242'];
+  }
+
+  private falkRossStyleKey(value: string) {
+    const normalized = this.normalizedToken(value).replace(/\s/g, '');
+    if (normalized.includes('03242') || normalized.includes('tg002')) return '03242';
+    if (normalized.includes('23742') || normalized.includes('wg005')) return '23742';
+    if (normalized.includes('24042')) return '24042';
+    if (normalized.includes('29009')) return '29009';
+    if (normalized.includes('10209') || normalized === '2000') return '10209';
+    return normalized;
+  }
+
+  private falkRossOrderNote() {
+    return `Mitaller: revisar precios antes de confirmar. ${FALKROSS_PRICE_NOTE}`;
   }
 
   private normalizedColor(value: string) {
