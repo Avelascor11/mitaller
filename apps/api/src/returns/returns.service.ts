@@ -259,6 +259,8 @@ export class ReturnsService {
     let sendcloudParcelId: string | null = null;
     let sendcloudTracking: string | null = null;
     let sendcloudCarrier: string | null = null;
+    let exchangeOrderName: string | null = null;
+    let exchangeOrderUrl: string | null = null;
 
     // === Free/even EXCHANGE: create a real $0 order for the replacement product so the warehouse can fulfil it ===
     if (totalToPay === 0 && type === 'EXCHANGE' && replacementsInfo.length > 0) {
@@ -273,6 +275,8 @@ export class ReturnsService {
         });
         draftOrderId = draft.id;
         const completed = await this.shopify.completeDraftOrder(draft.id);
+        exchangeOrderName = completed.orderName;
+        exchangeOrderUrl = completed.adminUrl;
         console.log(`[ReturnsService] Free exchange order created: ${completed.orderName ?? completed.orderId ?? 'unknown'}`);
       } catch (error) {
         console.error('[ReturnsService] Free exchange order creation error:', error);
@@ -321,6 +325,8 @@ export class ReturnsService {
         sendcloudReturnId: sendcloudParcelId,
         trackingNumber: sendcloudTracking,
         carrier: sendcloudCarrier,
+        exchangeOrderName,
+        exchangeOrderUrl,
         paidAt: totalToPay === 0 ? new Date() : null,
         items: {
           create: dto.items.map((item) => ({

@@ -70,9 +70,10 @@ describe('SupplierAdapter', () => {
       text: async () => 'sku;stock\n180000002;7\n180000003;0\n'
     });
     vi.stubGlobal('fetch', fetchSpy);
-    const upsert = vi.fn();
+    const deleteMany = vi.fn();
+    const createMany = vi.fn();
     const adapter = new SupplierAdapter(
-      { supplierStock: { upsert } } as never,
+      { supplierStock: { deleteMany, createMany } } as never,
       {
         get: (key: string) => ({
           FALKROSS_WEBSERVICE_USER: 'user',
@@ -90,9 +91,44 @@ describe('SupplierAdapter', () => {
         headers: { Authorization: `Basic ${Buffer.from('user:pass').toString('base64')}` }
       })
     );
-    expect(upsert).toHaveBeenCalledWith(expect.objectContaining({
-      where: { supplier_supplierSku: { supplier: 'FALK_ROSS', supplierSku: '180000002' } },
-      create: { supplier: 'FALK_ROSS', supplierSku: '180000002', availableQuantity: 7 }
+    expect(deleteMany).toHaveBeenCalledWith({ where: { supplier: 'FALK_ROSS' } });
+    expect(createMany).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.arrayContaining([
+        expect.objectContaining({ supplier: 'FALK_ROSS', supplierSku: '180000002', availableQuantity: 7 }),
+        expect.objectContaining({ supplier: 'FALK_ROSS', supplierSku: '180000003', availableQuantity: 0 })
+      ]),
+      skipDuplicates: true
+    }));
+  });
+
+  it('sincroniza stock R03 sin cabecera usando la primera cantidad disponible', async () => {
+    const fetchSpy = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      text: async () => '2026-06-02 21:52:17\n110331217;4;35;250\n765542007;0;9;40\n'
+    });
+    vi.stubGlobal('fetch', fetchSpy);
+    const deleteMany = vi.fn();
+    const createMany = vi.fn();
+    const adapter = new SupplierAdapter(
+      { supplierStock: { deleteMany, createMany } } as never,
+      {
+        get: (key: string) => ({
+          FALKROSS_WEBSERVICE_USER: 'user',
+          FALKROSS_WEBSERVICE_PASSWORD: 'pass',
+          FALKROSS_STOCK_CSV_URL: 'https://example.test/r03.csv'
+        })[key]
+      } as never
+    );
+
+    const result = await adapter.syncStock();
+
+    expect(result.synced).toBe(2);
+    expect(createMany).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.arrayContaining([
+        expect.objectContaining({ supplierSku: '110331217', availableQuantity: 4 }),
+        expect.objectContaining({ supplierSku: '765542007', availableQuantity: 0 })
+      ])
     }));
   });
 

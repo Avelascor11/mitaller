@@ -54,11 +54,12 @@ export class SupplierAdapter {
       throw new BadRequestException(`Falk & Ross stock ${response.status}: ${text}`);
     }
     const stocks = this.parseFalkRossStockCsv(text);
-    for (const stock of stocks) {
-      await this.prisma.supplierStock.upsert({
-        where: { supplier_supplierSku: { supplier: 'FALK_ROSS', supplierSku: stock.supplierSku } },
-        create: stock,
-        update: { availableQuantity: stock.availableQuantity, lastSyncedAt: new Date() }
+    await this.prisma.supplierStock.deleteMany({ where: { supplier: 'FALK_ROSS' } });
+    const syncedAt = new Date();
+    for (const chunk of this.chunks(stocks, 1000)) {
+      await this.prisma.supplierStock.createMany({
+        data: chunk.map((stock) => ({ ...stock, lastSyncedAt: syncedAt })),
+        skipDuplicates: true
       });
     }
     return { synced: stocks.length, mode: 'falkross-csv' };
@@ -424,7 +425,7 @@ export class SupplierAdapter {
     for (const line of rows) {
       const cells = this.splitCsvLine(line, delimiter);
       const supplierSku = this.pickSupplierSku(cells, skuIndex);
-      const availableQuantity = this.pickStockQuantity(cells, stockIndex);
+      const availableQuantity = this.pickStockQuantity(cells, stockIndex, hasHeader);
       if (!supplierSku || availableQuantity == null) continue;
       stocks.set(supplierSku, availableQuantity);
     }
@@ -484,13 +485,23 @@ export class SupplierAdapter {
     return value?.replace(/^"|"$/g, '').trim() || null;
   }
 
-  private pickStockQuantity(cells: string[], stockIndex: number) {
+  private pickStockQuantity(cells: string[], stockIndex: number, hasHeader = true) {
     const value = stockIndex >= 0
       ? cells[stockIndex]
-      : [...cells].reverse().find((cell) => /^-?\d+$/.test(cell.replace(/\s/g, '')));
+      : hasHeader
+        ? [...cells].reverse().find((cell) => /^-?\d+$/.test(cell.replace(/\s/g, '')))
+        : cells[1];
     if (value == null) return null;
     const quantity = Number(value.replace(/\s/g, '').replace(',', '.'));
     return Number.isFinite(quantity) ? Math.max(0, Math.floor(quantity)) : null;
+  }
+
+  private chunks<T>(items: T[], size: number) {
+    const chunks: T[][] = [];
+    for (let index = 0; index < items.length; index += size) {
+      chunks.push(items.slice(index, index + size));
+    }
+    return chunks;
   }
 
   private formatFalkRossDate(date: Date) {
