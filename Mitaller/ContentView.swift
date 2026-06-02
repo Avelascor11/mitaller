@@ -1181,6 +1181,8 @@ struct MainTabView: View {
                 .tabItem { Label("Imprimir", systemImage: "printer.fill") }
             EconomicsView()
                 .tabItem { Label("Economía", systemImage: "eurosign.circle.fill") }
+            MetaAdsView()
+                .tabItem { Label("Meta Ads", systemImage: "megaphone.fill") }
             CashflowView()
                 .tabItem { Label("Caja", systemImage: "banknote.fill") }
             DevolucionesView()
@@ -5762,6 +5764,417 @@ struct ActiveFilterChip: View {
         .background(AppTheme.blueSoft)
         .overlay(Capsule().stroke(AppTheme.blue.opacity(0.25), lineWidth: 0.8))
         .clipShape(Capsule())
+    }
+}
+
+// MARK: - Meta Ads
+
+struct MetaAdsView: View {
+    @Environment(WorkshopStore.self) private var store
+    @State private var summary: MetaSummary?
+    @State private var loading = false
+    @State private var error: String?
+    @State private var range: MetaRange = .today
+    @State private var customFrom = Calendar.current.startOfDay(for: Date())
+    @State private var customTo = Calendar.current.startOfDay(for: Date())
+    @State private var showCreate = false
+    @State private var statusBusy: String?
+
+    enum MetaRange: String, CaseIterable, Identifiable {
+        case today, week, month, custom
+        var id: String { rawValue }
+        var label: String {
+            switch self {
+            case .today: "Hoy"; case .week: "Semana"; case .month: "Mes"; case .custom: "Calendario"
+            }
+        }
+    }
+
+    private var dateRange: (from: Date, to: Date) {
+        let cal = Calendar.current
+        let today = cal.startOfDay(for: Date())
+        switch range {
+        case .today: return (today, today)
+        case .week: return (cal.date(byAdding: .day, value: -6, to: today) ?? today, today)
+        case .month: return (cal.date(from: cal.dateComponents([.year, .month], from: today)) ?? today, today)
+        case .custom: return (customFrom, customTo)
+        }
+    }
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 16) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Meta Ads")
+                            .font(.system(size: 30, weight: .heavy, design: .rounded))
+                            .foregroundStyle(AppTheme.ink)
+                        Text("Gasto, campañas y lo más vendido.")
+                            .font(.subheadline.weight(.medium))
+                            .foregroundStyle(AppTheme.muted)
+                    }
+
+                    Picker("Rango", selection: $range) {
+                        ForEach(MetaRange.allCases) { Text($0.label).tag($0) }
+                    }
+                    .pickerStyle(.segmented)
+                    .onChange(of: range) { _, _ in Task { await reload() } }
+
+                    if range == .custom {
+                        CustomEconomicsDatePicker(
+                            from: $customFrom,
+                            to: $customTo,
+                            loading: loading,
+                            onApply: { Task { await reload() } }
+                        )
+                    }
+
+                    if loading && summary == nil {
+                        ProgressView().frame(maxWidth: .infinity)
+                    } else if let summary {
+                        if !summary.configured {
+                            Label("Meta Ads no configurado. Falta el token o la cuenta publicitaria en el servidor.", systemImage: "exclamationmark.triangle.fill")
+                                .font(.footnote.weight(.semibold))
+                                .foregroundStyle(AppTheme.amber)
+                                .padding(10)
+                                .glassPanel(padding: 10, accent: AppTheme.amber)
+                        }
+                        MetaKpiCard(summary: summary)
+
+                        if !summary.campaigns.isEmpty {
+                            SectionHeader(title: "Campañas", subtitle: "Rendimiento en el rango seleccionado")
+                            ForEach(summary.campaigns) { c in
+                                MetaCampaignRow(
+                                    campaign: c,
+                                    busy: statusBusy == c.id,
+                                    onToggle: { Task { await toggle(c) } }
+                                )
+                            }
+                        }
+
+                        if !summary.bestSellers.isEmpty {
+                            SectionHeader(title: "Lo más vendido", subtitle: "Por unidades en el rango")
+                            ForEach(Array(summary.bestSellers.enumerated()), id: \.element.id) { idx, b in
+                                MetaBestSellerRow(rank: idx + 1, seller: b)
+                            }
+                        }
+                    }
+
+                    if let error {
+                        Text(error)
+                            .font(.footnote)
+                            .foregroundStyle(AppTheme.red)
+                            .padding(10)
+                            .glassPanel(padding: 10, accent: AppTheme.red)
+                    }
+                }
+                .padding()
+            }
+            .screenBackground()
+            .navigationTitle("Meta Ads")
+            .toolbar {
+                ToolbarItem(placement: .primaryAction) {
+                    Button { showCreate = true } label: {
+                        Image(systemName: "plus.circle.fill")
+                    }
+                }
+                ToolbarItem(placement: .topBarLeading) {
+                    Button { Task { await reload() } } label: {
+                        Image(systemName: "arrow.clockwise")
+                    }.disabled(loading)
+                }
+            }
+            .sheet(isPresented: $showCreate) {
+                MetaCreateAdSheet(onCreated: { Task { await reload() } })
+                    .environment(store)
+            }
+            .task { await reload() }
+            .refreshable { await reload() }
+        }
+    }
+
+    private func reload() async {
+        guard let client = store.apiClient else { error = "API no configurada"; return }
+        loading = true
+        error = nil
+        defer { loading = false }
+        do {
+            let r = dateRange
+            summary = try await client.metaSummary(from: r.from, to: r.to)
+        } catch {
+            self.error = error.localizedDescription
+        }
+    }
+
+    private func toggle(_ c: MetaCampaign) async {
+        guard let client = store.apiClient else { return }
+        let next = c.status == "ACTIVE" ? "PAUSED" : "ACTIVE"
+        statusBusy = c.id
+        defer { statusBusy = nil }
+        do {
+            try await client.metaSetCampaignStatus(c.id, status: next)
+            await reload()
+        } catch {
+            self.error = error.localizedDescription
+        }
+    }
+}
+
+struct MetaKpiCard: View {
+    let summary: MetaSummary
+    var body: some View {
+        VStack(spacing: 12) {
+            HStack(spacing: 12) {
+                MetaStat(title: "Gasto", value: euro(summary.spend), accent: AppTheme.red)
+                MetaStat(title: "Ingresos atrib.", value: euro(summary.attributedRevenue), accent: AppTheme.green)
+            }
+            HStack(spacing: 12) {
+                MetaStat(title: "ROAS", value: summary.roas.map { String(format: "%.2fx", $0) } ?? "—", accent: AppTheme.blue)
+                MetaStat(title: "Compras", value: "\(summary.purchases)", accent: AppTheme.amber)
+                MetaStat(title: "Activas", value: "\(summary.activeCampaigns)", accent: AppTheme.ink)
+            }
+        }
+        .padding()
+        .glassPanel(padding: 16, accent: AppTheme.blue)
+    }
+
+    private func euro(_ v: Double) -> String { String(format: "%.2f €", v) }
+}
+
+struct MetaStat: View {
+    let title: String
+    let value: String
+    let accent: Color
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(title.uppercased())
+                .font(.caption2.weight(.heavy))
+                .foregroundStyle(AppTheme.muted)
+            Text(value)
+                .font(.system(size: 19, weight: .heavy, design: .rounded))
+                .foregroundStyle(accent)
+                .minimumScaleFactor(0.6)
+                .lineLimit(1)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+struct MetaCampaignRow: View {
+    let campaign: MetaCampaign
+    let busy: Bool
+    let onToggle: () -> Void
+    private var isActive: Bool { campaign.status == "ACTIVE" }
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(campaign.name)
+                        .font(.subheadline.weight(.bold))
+                        .foregroundStyle(AppTheme.ink)
+                        .lineLimit(2)
+                    Text(campaign.objective ?? "—")
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(AppTheme.muted)
+                }
+                Spacer()
+                Text(isActive ? "ACTIVA" : campaign.status)
+                    .font(.caption2.weight(.heavy))
+                    .padding(.horizontal, 8).padding(.vertical, 4)
+                    .background((isActive ? AppTheme.green : AppTheme.muted).opacity(0.18), in: Capsule())
+                    .foregroundStyle(isActive ? AppTheme.green : AppTheme.muted)
+            }
+            HStack(spacing: 14) {
+                metric("Gasto", String(format: "%.0f €", campaign.spend))
+                metric("ROAS", campaign.roas.map { String(format: "%.1fx", $0) } ?? "—")
+                metric("Compras", "\(campaign.purchases)")
+                metric("CTR", campaign.ctr.map { String(format: "%.1f%%", $0) } ?? "—")
+            }
+            Button(action: onToggle) {
+                if busy {
+                    ProgressView().frame(maxWidth: .infinity)
+                } else {
+                    Label(isActive ? "Pausar" : "Activar", systemImage: isActive ? "pause.fill" : "play.fill")
+                        .font(.caption.weight(.bold))
+                        .frame(maxWidth: .infinity)
+                }
+            }
+            .buttonStyle(.bordered)
+            .tint(isActive ? AppTheme.amber : AppTheme.green)
+            .disabled(busy)
+        }
+        .padding()
+        .glassPanel(padding: 14, accent: isActive ? AppTheme.green : AppTheme.muted)
+    }
+
+    private func metric(_ label: String, _ value: String) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(label.uppercased()).font(.caption2.weight(.bold)).foregroundStyle(AppTheme.muted)
+            Text(value).font(.footnote.weight(.heavy)).foregroundStyle(AppTheme.ink)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+struct MetaBestSellerRow: View {
+    let rank: Int
+    let seller: MetaBestSeller
+    var body: some View {
+        HStack(spacing: 12) {
+            Text("\(rank)")
+                .font(.headline.weight(.heavy))
+                .foregroundStyle(AppTheme.blue)
+                .frame(width: 28)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(seller.title).font(.subheadline.weight(.bold)).foregroundStyle(AppTheme.ink).lineLimit(1)
+                if let sku = seller.sku { Text(sku).font(.caption2).foregroundStyle(AppTheme.muted) }
+            }
+            Spacer()
+            VStack(alignment: .trailing, spacing: 2) {
+                Text("\(seller.quantity) ud").font(.subheadline.weight(.heavy)).foregroundStyle(AppTheme.green)
+                Text(String(format: "%.0f €", seller.revenue)).font(.caption2.weight(.semibold)).foregroundStyle(AppTheme.muted)
+            }
+        }
+        .padding(12)
+        .glassPanel(padding: 12, accent: AppTheme.blue)
+    }
+}
+
+struct MetaCreateAdSheet: View {
+    @Environment(WorkshopStore.self) private var store
+    @Environment(\.dismiss) private var dismiss
+    let onCreated: () -> Void
+
+    @State private var name = ""
+    @State private var templates: [MetaTemplate] = []
+    @State private var selectedTemplate: String?
+    @State private var dailyBudget = "5"
+    @State private var message = ""
+    @State private var headline = ""
+    @State private var link = "https://speedwear.es"
+    @State private var imageUrl = ""
+    @State private var cta = "SHOP_NOW"
+    @State private var loading = false
+    @State private var creating = false
+    @State private var error: String?
+    @State private var result: MetaCreateCampaignResult?
+
+    private let ctaOptions = ["SHOP_NOW", "LEARN_MORE", "BUY_NOW", "ORDER_NOW", "SIGN_UP"]
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                if let result {
+                    Section {
+                        Label("Campaña creada en PAUSA", systemImage: "checkmark.seal.fill")
+                            .font(.subheadline.weight(.bold))
+                            .foregroundStyle(AppTheme.green)
+                        Text(result.note).font(.footnote).foregroundStyle(AppTheme.muted)
+                        Text("ID: \(result.campaignId)").font(.caption2).foregroundStyle(AppTheme.muted)
+                    }
+                } else {
+                    Section("Plantilla (estructura a copiar)") {
+                        if loading {
+                            ProgressView()
+                        } else {
+                            Picker("Campaña base", selection: $selectedTemplate) {
+                                Text("Sin plantilla (Ventas)").tag(String?.none)
+                                ForEach(templates) { t in
+                                    Text(t.name).tag(String?.some(t.id))
+                                }
+                            }
+                        }
+                    }
+                    Section("Datos de la campaña") {
+                        TextField("Nombre interno", text: $name)
+                        HStack {
+                            Text("Presupuesto/día (€)")
+                            Spacer()
+                            TextField("5", text: $dailyBudget)
+                                .keyboardType(.decimalPad)
+                                .multilineTextAlignment(.trailing)
+                                .frame(width: 80)
+                        }
+                    }
+                    Section("Creativo") {
+                        TextField("Titular", text: $headline)
+                        TextField("Texto del anuncio", text: $message, axis: .vertical).lineLimit(3...6)
+                        TextField("URL destino", text: $link).keyboardType(.URL).autocapitalization(.none)
+                        TextField("URL de la imagen", text: $imageUrl).keyboardType(.URL).autocapitalization(.none)
+                        Picker("Botón", selection: $cta) {
+                            ForEach(ctaOptions, id: \.self) { Text($0).tag($0) }
+                        }
+                    }
+                    if let error {
+                        Section { Text(error).font(.footnote).foregroundStyle(AppTheme.red) }
+                    }
+                    Section {
+                        Button {
+                            Task { await create() }
+                        } label: {
+                            if creating {
+                                ProgressView().frame(maxWidth: .infinity)
+                            } else {
+                                Label("Crear campaña (en pausa)", systemImage: "paperplane.fill")
+                                    .frame(maxWidth: .infinity)
+                            }
+                        }
+                        .disabled(creating || !isValid)
+                    }
+                }
+            }
+            .navigationTitle("Nuevo anuncio")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button(result == nil ? "Cancelar" : "Cerrar") {
+                        if result != nil { onCreated() }
+                        dismiss()
+                    }
+                }
+            }
+            .task { await loadTemplates() }
+        }
+    }
+
+    private var isValid: Bool {
+        !name.trimmingCharacters(in: .whitespaces).isEmpty
+        && !message.trimmingCharacters(in: .whitespaces).isEmpty
+        && !imageUrl.trimmingCharacters(in: .whitespaces).isEmpty
+        && (Double(dailyBudget.replacingOccurrences(of: ",", with: ".")) ?? 0) > 0
+    }
+
+    private func loadTemplates() async {
+        guard let client = store.apiClient else { return }
+        loading = true
+        defer { loading = false }
+        templates = (try? await client.metaTemplates()) ?? []
+    }
+
+    private func create() async {
+        guard let client = store.apiClient else { return }
+        creating = true
+        error = nil
+        defer { creating = false }
+        let budget = Double(dailyBudget.replacingOccurrences(of: ",", with: ".")) ?? 0
+        let body = MetaCreateCampaignRequest(
+            name: name,
+            templateCampaignId: selectedTemplate,
+            objective: nil,
+            dailyBudget: budget,
+            message: message,
+            headline: headline.isEmpty ? nil : headline,
+            description: nil,
+            link: link,
+            imageUrl: imageUrl,
+            callToAction: cta,
+            startTime: nil
+        )
+        do {
+            result = try await client.metaCreateCampaign(body)
+        } catch {
+            self.error = error.localizedDescription
+        }
     }
 }
 

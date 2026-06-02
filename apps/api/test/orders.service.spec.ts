@@ -98,4 +98,95 @@ describe('OrdersService', () => {
       })
     }));
   });
+
+  it('cancela lineas eliminadas en Shopify y crea la nueva talla sin dejar la antigua en compras', async () => {
+    const existingOrder = {
+      id: 'order-1',
+      shopifyOrderId: 'gid://shopify/Order/9510',
+      orderNumber: '#9510',
+      operationalStatus: 'WAITING_PICKING',
+      priorityLevel: 'NORMAL',
+      internalDeadlineAt: new Date('2026-05-14T10:00:00Z'),
+      shipments: []
+    };
+    const oldItem = {
+      id: 'item-old',
+      orderId: 'order-1',
+      shopifyLineItemId: 'gid://shopify/LineItem/old',
+      shopifyProductId: 'gid://shopify/Product/1',
+      shopifyVariantId: 'gid://shopify/ProductVariant/old-s',
+      sku: 'CAM-BLANCA-S',
+      title: 'Camiseta Blanca',
+      variantTitle: 'S',
+      quantity: 1,
+      imageUrl: null,
+      imageUrlsJson: [],
+      color: 'Blanca',
+      size: 'S',
+      productType: 'Camiseta',
+      unitPrice: 20,
+      lineDiscount: 0,
+      status: 'PENDING'
+    };
+    const prisma = {
+      order: {
+        findUnique: vi.fn().mockResolvedValue(existingOrder),
+        upsert: vi.fn().mockResolvedValue(existingOrder),
+        findFirstOrThrow: vi.fn().mockResolvedValue({ ...existingOrder, items: [], shipments: [] })
+      },
+      orderItem: {
+        findMany: vi.fn()
+          .mockResolvedValueOnce([oldItem])
+          .mockResolvedValueOnce([{ ...oldItem, id: 'item-new', shopifyLineItemId: 'gid://shopify/LineItem/new', shopifyVariantId: 'gid://shopify/ProductVariant/new-m', sku: 'CAM-BLANCA-M', size: 'M' }]),
+        create: vi.fn().mockResolvedValue({}),
+        update: vi.fn().mockResolvedValue({})
+      },
+      productionTask: {
+        deleteMany: vi.fn().mockResolvedValue({ count: 1 }),
+        createMany: vi.fn().mockResolvedValue({ count: 1 })
+      }
+    };
+
+    await serviceWith(prisma).upsertImportedOrder({
+      shopifyOrderId: 'gid://shopify/Order/9510',
+      orderNumber: '#9510',
+      customerName: 'Cliente',
+      customerEmail: 'cliente@example.com',
+      shippingMethod: 'Correos Estandar',
+      shippingCountry: 'ES',
+      shippingAddressJson: {},
+      financialStatus: 'paid',
+      fulfillmentStatus: 'unfulfilled',
+      operationalStatus: 'WAITING_PICKING',
+      orderedAt: new Date('2026-05-14T09:00:00Z'),
+      items: [{
+        shopifyLineItemId: 'gid://shopify/LineItem/new',
+        shopifyProductId: 'gid://shopify/Product/1',
+        shopifyVariantId: 'gid://shopify/ProductVariant/new-m',
+        sku: 'CAM-BLANCA-M',
+        title: 'Camiseta Blanca',
+        variantTitle: 'M',
+        quantity: 1,
+        color: 'Blanca',
+        size: 'M',
+        productType: 'Camiseta',
+        unitPrice: 20,
+        lineDiscount: 0
+      }]
+    });
+
+    expect(prisma.orderItem.create).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        shopifyLineItemId: 'gid://shopify/LineItem/new',
+        sku: 'CAM-BLANCA-M',
+        size: 'M'
+      })
+    }));
+    expect(prisma.orderItem.update).toHaveBeenCalledWith({
+      where: { id: 'item-old' },
+      data: { status: 'CANCELLED' }
+    });
+    expect(prisma.productionTask.deleteMany).toHaveBeenCalledWith({ where: { orderId: 'order-1' } });
+    expect(prisma.productionTask.createMany).toHaveBeenCalled();
+  });
 });

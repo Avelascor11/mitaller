@@ -1,5 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { Prisma } from '@prisma/client';
+import { OrderItem, Prisma } from '@prisma/client';
 import { ConfigService } from '@nestjs/config';
 import { Cron } from '@nestjs/schedule';
 import { ActivityService } from '../activity/activity.service';
@@ -40,7 +40,7 @@ export class OrdersService {
   async findAll() {
     const orders = await this.prisma.order.findMany({
       orderBy: [{ priorityLevel: 'asc' }, { internalDeadlineAt: 'asc' }],
-      include: { items: true, shipments: true }
+      include: { items: this.activeOrderItemsInclude(), shipments: true }
     });
     return this.filterByMinimumOrderNumber(orders.map((order) => this.stripBlobs(order)));
   }
@@ -53,7 +53,7 @@ export class OrdersService {
         }
       },
       orderBy: [{ priorityLevel: 'asc' }, { internalDeadlineAt: 'asc' }, { orderedAt: 'asc' }],
-      include: { items: true, shipments: true }
+      include: { items: this.activeOrderItemsInclude(), shipments: true }
     });
     return this.filterByMinimumOrderNumber(orders.map((order) => this.stripBlobs(order)));
   }
@@ -61,9 +61,16 @@ export class OrdersService {
   async findOne(id: string) {
     const order = await this.prisma.order.findFirstOrThrow({
       where: { OR: [{ id }, { orderNumber: id }, { shopifyOrderId: id }] },
-      include: { items: true, productionTasks: true, shipments: true }
+      include: { items: this.activeOrderItemsInclude(), productionTasks: true, shipments: true }
     });
     return this.stripBlobs(order);
+  }
+
+  private activeOrderItemsInclude() {
+    return {
+      where: { status: { not: 'CANCELLED' as const } },
+      orderBy: { createdAt: 'asc' as const }
+    };
   }
 
   private stripBlobs<T extends { packagePhoto?: unknown; shipments?: Array<{ packagePhoto?: unknown }> }>(order: T): T {
@@ -89,7 +96,7 @@ export class OrdersService {
         preparedAt: new Date(),
         ...photoData
       },
-      include: { items: true, shipments: true }
+      include: { items: this.activeOrderItemsInclude(), shipments: true }
     });
     await this.prisma.productionTask.updateMany({
       where: {
@@ -124,7 +131,7 @@ export class OrdersService {
     return this.prisma.order.update({
       where: { id: existing.id },
       data: { operationalStatus: 'IN_PRODUCTION' },
-      include: { items: true, shipments: true }
+      include: { items: this.activeOrderItemsInclude(), shipments: true }
     });
   }
 
@@ -363,7 +370,7 @@ export class OrdersService {
         operationalStatus: 'WAITING_PICKING',
         preparedAt: null
       },
-      include: { items: true, shipments: true }
+      include: { items: this.activeOrderItemsInclude(), shipments: true }
     });
     await this.activity.log({
       entityType: 'Order',
@@ -603,27 +610,114 @@ export class OrdersService {
         totalTax: input.totalTax ?? null,
         totalDiscount: input.totalDiscount ?? null,
         totalPrice: input.totalPrice ?? null,
-        currency: input.currency ?? null,
-        items: { create: input.items }
+        currency: input.currency ?? null
       },
       include: { items: true }
     });
 
-    await this.prisma.orderItem.deleteMany({ where: { orderId: order.id } });
-    for (const item of input.items) {
-      await this.prisma.orderItem.create({
-        data: {
-          ...item,
-          imageUrlsJson: item.imageUrlsJson ?? [],
-          orderId: order.id
-        }
+    const syncResult = await this.syncOrderItemsFromShopify(order.id, input.items);
+    if (syncResult.changed) {
+      await this.prisma.productionTask.deleteMany({ where: { orderId: order.id } });
+      const items = await this.prisma.orderItem.findMany({
+        where: { orderId: order.id, status: { not: 'CANCELLED' } },
+        orderBy: { createdAt: 'asc' }
       });
+      await this.prisma.productionTask.createMany({ data: this.taskFactory.buildTasks(order, items) });
+      if (existingOrder) {
+        await this.activity.log({
+          entityType: 'Order',
+          entityId: order.id,
+          action: 'SHOPIFY_ORDER_LINES_SYNCED',
+          message: `Pedido ${order.orderNumber} actualizado desde Shopify: ${syncResult.created} nuevas, ${syncResult.updated} cambiadas, ${syncResult.cancelled} eliminadas`,
+          metadataJson: syncResult
+        });
+      }
     }
 
-    await this.prisma.productionTask.deleteMany({ where: { orderId: order.id } });
-    const items = await this.prisma.orderItem.findMany({ where: { orderId: order.id } });
-    await this.prisma.productionTask.createMany({ data: this.taskFactory.buildTasks(order, items) });
     return this.findOne(order.id);
+  }
+
+  private async syncOrderItemsFromShopify(orderId: string, incomingItems: ImportedOrder['items']) {
+    const existingItems = await this.prisma.orderItem.findMany({ where: { orderId } });
+    const existingByLineId = new Map(existingItems.filter((item) => item.shopifyLineItemId).map((item) => [item.shopifyLineItemId!, item]));
+    const seenIds = new Set<string>();
+    let created = 0;
+    let updated = 0;
+    let cancelled = 0;
+
+    for (const item of incomingItems) {
+      const data = this.orderItemData(orderId, item);
+      const existing = item.shopifyLineItemId ? existingByLineId.get(item.shopifyLineItemId) : undefined;
+      if (!existing) {
+        await this.prisma.orderItem.create({ data });
+        created += 1;
+        if (item.shopifyLineItemId) seenIds.add(item.shopifyLineItemId);
+        continue;
+      }
+      seenIds.add(existing.shopifyLineItemId!);
+      if (this.orderItemChanged(existing, item)) {
+        await this.prisma.orderItem.update({
+          where: { id: existing.id },
+          data: {
+            ...data,
+            status: existing.status === 'CANCELLED' ? 'PENDING' : existing.status
+          }
+        });
+        updated += 1;
+      } else if (existing.status === 'CANCELLED') {
+        await this.prisma.orderItem.update({ where: { id: existing.id }, data: { status: 'PENDING' } });
+        updated += 1;
+      }
+    }
+
+    const incomingIds = new Set(incomingItems.map((item) => item.shopifyLineItemId).filter((id): id is string => Boolean(id)));
+    const removedItems = existingItems.filter((item) =>
+      item.shopifyLineItemId &&
+      !incomingIds.has(item.shopifyLineItemId) &&
+      item.status !== 'CANCELLED'
+    );
+    for (const item of removedItems) {
+      await this.prisma.orderItem.update({ where: { id: item.id }, data: { status: 'CANCELLED' } });
+      cancelled += 1;
+    }
+
+    return { changed: created > 0 || updated > 0 || cancelled > 0, created, updated, cancelled, seenLineItemIds: [...seenIds] };
+  }
+
+  private orderItemData(orderId: string, item: ImportedOrder['items'][number]): Prisma.OrderItemUncheckedCreateInput {
+    return {
+      orderId,
+      shopifyLineItemId: item.shopifyLineItemId,
+      shopifyProductId: item.shopifyProductId,
+      shopifyVariantId: item.shopifyVariantId,
+      sku: item.sku,
+      title: item.title,
+      variantTitle: item.variantTitle,
+      quantity: item.quantity,
+      imageUrl: item.imageUrl,
+      imageUrlsJson: item.imageUrlsJson ?? [],
+      color: item.color,
+      size: item.size,
+      productType: item.productType,
+      unitPrice: item.unitPrice,
+      lineDiscount: item.lineDiscount
+    };
+  }
+
+  private orderItemChanged(existing: OrderItem, incoming: ImportedOrder['items'][number]) {
+    return existing.shopifyProductId !== (incoming.shopifyProductId ?? null) ||
+      existing.shopifyVariantId !== (incoming.shopifyVariantId ?? null) ||
+      existing.sku !== incoming.sku ||
+      existing.title !== incoming.title ||
+      existing.variantTitle !== (incoming.variantTitle ?? null) ||
+      existing.quantity !== incoming.quantity ||
+      existing.imageUrl !== (incoming.imageUrl ?? null) ||
+      JSON.stringify(existing.imageUrlsJson ?? []) !== JSON.stringify(incoming.imageUrlsJson ?? []) ||
+      existing.color !== (incoming.color ?? null) ||
+      existing.size !== (incoming.size ?? null) ||
+      existing.productType !== (incoming.productType ?? null) ||
+      existing.unitPrice !== (incoming.unitPrice ?? null) ||
+      existing.lineDiscount !== (incoming.lineDiscount ?? null);
   }
 
   private async filterByMinimumOrderNumber<T extends { id: string; orderNumber: string; shopifyOrderId?: string }>(orders: T[]) {

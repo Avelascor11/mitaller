@@ -7,6 +7,7 @@ import { AuthModule } from './auth/auth.module';
 import { BankModule } from './bank/bank.module';
 import { EconomicsModule } from './economics/economics.module';
 import { ManualPrintModule } from './manual-print/manual-print.module';
+import { MetaModule } from './meta/meta.module';
 import { OrdersModule } from './orders/orders.module';
 import { PortalConfigModule } from './portal-config/portal-config.module';
 import { PrismaModule } from './prisma/prisma.module';
@@ -40,6 +41,7 @@ import { SupplierModule } from './supplier/supplier.module';
     SupplierModule,
     ManualPrintModule,
     EconomicsModule,
+    MetaModule,
     PortalConfigModule
   ],
   controllers: [AppController]

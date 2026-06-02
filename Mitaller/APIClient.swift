@@ -265,6 +265,25 @@ struct APIClient {
         return try await perform(request)
     }
 
+    // MARK: - Meta Ads
+    func metaSummary(from: Date, to: Date) async throws -> MetaSummary {
+        let f = DateFormatter.apiDay
+        return try await get("/meta/summary?from=\(f.string(from: from))&to=\(f.string(from: to))")
+    }
+    func metaDailySpend(date: Date) async throws -> MetaDailySpend {
+        let f = DateFormatter.apiDay
+        return try await get("/meta/spend/daily?date=\(f.string(from: date))")
+    }
+    func metaTemplates() async throws -> [MetaTemplate] { try await get("/meta/templates") }
+    func metaCreateCampaign(_ body: MetaCreateCampaignRequest) async throws -> MetaCreateCampaignResult {
+        let request = try jsonRequest(path: "/meta/campaigns", method: "POST", body: body)
+        return try await perform(request)
+    }
+    func metaSetCampaignStatus(_ id: String, status: String) async throws {
+        let request = try jsonRequest(path: "/meta/campaigns/\(Self.pathSegment(id))/status", method: "POST", body: MetaStatusRequest(status: status))
+        let _: EmptyResponse = try await perform(request)
+    }
+
     func bankDaily(from: Date, to: Date) async throws -> BankDailySummary {
         let formatter = DateFormatter.apiDay
         return try await get("/bank/daily?from=\(formatter.string(from: from))&to=\(formatter.string(from: to))")
@@ -329,6 +348,86 @@ struct APIClient {
         }
         return String(data: data, encoding: .utf8)
     }
+}
+
+// MARK: - Meta Ads models
+struct MetaDailySpend: Decodable {
+    let date: String
+    let spend: Double
+    let currency: String
+}
+
+struct MetaCampaign: Decodable, Identifiable {
+    let id: String
+    let name: String
+    let status: String
+    let objective: String?
+    let spend: Double
+    let impressions: Int
+    let clicks: Int
+    let ctr: Double?
+    let cpc: Double?
+    let reach: Int
+    let purchases: Int
+    let purchaseValue: Double
+    let roas: Double?
+}
+
+struct MetaBestSeller: Decodable, Identifiable {
+    let sku: String?
+    let title: String
+    let quantity: Int
+    let revenue: Double
+    var id: String { sku ?? title }
+}
+
+struct MetaSummary: Decodable {
+    let from: String
+    let to: String
+    let configured: Bool
+    let currency: String
+    let spend: Double
+    let attributedRevenue: Double
+    let purchases: Int
+    let roas: Double?
+    let activeCampaigns: Int
+    let campaigns: [MetaCampaign]
+    let bestSellers: [MetaBestSeller]
+}
+
+struct MetaTemplate: Decodable, Identifiable {
+    let id: String
+    let name: String
+    let status: String
+    let objective: String?
+}
+
+struct MetaCreateCampaignRequest: Encodable {
+    let name: String
+    let templateCampaignId: String?
+    let objective: String?
+    let dailyBudget: Double
+    let message: String
+    let headline: String?
+    let description: String?
+    let link: String
+    let imageUrl: String
+    let callToAction: String?
+    let startTime: String?
+}
+
+struct MetaCreateCampaignResult: Decodable {
+    let campaignId: String
+    let adsetId: String
+    let creativeId: String
+    let adId: String
+    let status: String
+    let objective: String
+    let note: String
+}
+
+private struct MetaStatusRequest: Encodable {
+    let status: String
 }
 
 private extension JSONDecoder {

@@ -846,7 +846,10 @@ export default function DevolucionesPage() {
         setLoading(false);
         return;
       }
-      setLookup(lr);
+      // strip address object to avoid React #31 error
+      const { shippingAddressJson: _addr, ...lrClean } = lr as LookupResult & { shippingAddressJson?: unknown };
+      void _addr;
+      setLookup(lrClean as LookupResult);
       const initial: Record<string, ItemSelection> = {};
       for (const item of lr.items) {
         initial[item.id] = { selected: false, action: 'RETURN', quantity: 1, reason: '', notes: '' };

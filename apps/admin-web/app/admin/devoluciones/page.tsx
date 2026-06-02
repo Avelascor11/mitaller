@@ -2,18 +2,18 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001';
-
+const API = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001';
 const ACCENT = '#34B27B';
 const ACCENT2 = '#2A9D8F';
+const FONT = "Inter, -apple-system, BlinkMacSystemFont, 'SF Pro Display', sans-serif";
 
-const STATUS_META: Record<string, { label: string; fg: string; bg: string; dot: string; step: number }> = {
-  REQUESTED:     { label: 'En espera',        fg: '#f0b429', bg: 'rgba(240,180,41,0.12)',  dot: '#f0b429', step: 0 },
-  LABEL_CREATED: { label: 'Etiqueta enviada', fg: '#5b9bd5', bg: 'rgba(91,155,213,0.12)',  dot: '#5b9bd5', step: 1 },
-  RECEIVED:      { label: 'Por revisar',      fg: '#9b8cdb', bg: 'rgba(155,140,219,0.12)', dot: '#9b8cdb', step: 3 },
-  APPROVED:      { label: 'Aprobada',         fg: '#3fb98a', bg: 'rgba(63,185,138,0.12)',  dot: '#3fb98a', step: 4 },
-  REJECTED:      { label: 'Rechazada',        fg: '#e06a6a', bg: 'rgba(224,106,106,0.12)', dot: '#e06a6a', step: 4 },
-  CANCELLED:     { label: 'Cancelada',        fg: '#8A8A96', bg: 'rgba(138,138,150,0.12)', dot: '#8A8A96', step: 4 },
+const STATUS_META: Record<string, { label: string; fg: string; bg: string; dot: string }> = {
+  REQUESTED:     { label: 'En espera',        fg: '#f0b429', bg: 'rgba(240,180,41,0.12)',  dot: '#f0b429' },
+  LABEL_CREATED: { label: 'Etiqueta enviada', fg: '#5b9bd5', bg: 'rgba(91,155,213,0.12)',  dot: '#5b9bd5' },
+  RECEIVED:      { label: 'Por revisar',      fg: '#9b8cdb', bg: 'rgba(155,140,219,0.12)', dot: '#9b8cdb' },
+  APPROVED:      { label: 'Aprobada',         fg: '#3fb98a', bg: 'rgba(63,185,138,0.12)',  dot: '#3fb98a' },
+  REJECTED:      { label: 'Rechazada',        fg: '#e06a6a', bg: 'rgba(224,106,106,0.12)', dot: '#e06a6a' },
+  CANCELLED:     { label: 'Cancelada',        fg: '#8A8A96', bg: 'rgba(138,138,150,0.12)', dot: '#8A8A96' },
 };
 
 const EXCEPTION_LABELS: Record<string, { label: string; color: string }> = {
@@ -24,202 +24,69 @@ const EXCEPTION_LABELS: Record<string, { label: string; color: string }> = {
 };
 
 const REASON_LABELS: Record<string, { label: string; color: string }> = {
-  WRONG_SIZE:      { label: 'Talla incorrecta',    color: '#5b9bd5' },
-  DEFECTIVE:       { label: 'Defectuoso',           color: '#e06a6a' },
-  NOT_AS_DESCRIBED:{ label: 'No como esperaba',     color: '#9b8cdb' },
-  CHANGED_MIND:    { label: 'Cambio de opinión',    color: '#f0b429' },
-  WRONG_ITEM:      { label: 'Artículo incorrecto',  color: '#e0995a' },
-  OTHER:           { label: 'Otro',                 color: '#8A8A96' },
+  WRONG_SIZE:       { label: 'Talla incorrecta',   color: '#5b9bd5' },
+  DEFECTIVE:        { label: 'Defectuoso',          color: '#e06a6a' },
+  NOT_AS_DESCRIBED: { label: 'No como esperaba',    color: '#9b8cdb' },
+  CHANGED_MIND:     { label: 'Cambio de opinión',   color: '#f0b429' },
+  WRONG_ITEM:       { label: 'Artículo incorrecto', color: '#e0995a' },
+  OTHER:            { label: 'Otro',                color: '#8A8A96' },
 };
 
 const AV = ['#34B27B', '#5b9bd5', '#9b8cdb', '#e0995a', '#e06a6a'];
-
-interface ReturnRecord {
-  id: string;
-  shopifyOrderNumber: string;
-  customerName: string;
-  customerEmail: string;
-  status: string;
-  type: string;
-  paymentStatus: string;
-  labelUrl?: string | null;
-  trackingNumber?: string | null;
-  carrier?: string | null;
-  notes?: string | null;
-  totalAmount?: number | null;
-  refundAmount?: number | null;
-  createdAt: string;
-  updatedAt?: string;
-  receivedAt?: string | null;
-  verifiedAt?: string | null;
-  verificationStatus?: string | null;
-  refundedAt?: string | null;
-  shopifyRefundAmount?: number | null;
-  order: { orderNumber: string; customerName: string; customerEmail?: string | null };
-  items: Array<{
-    id: string;
-    quantity: number;
-    reason: string;
-    notes?: string | null;
-    replacementTitle?: string | null;
-    replacementPrice?: number | null;
-    orderItem: { title: string; variantTitle?: string | null; sku: string; imageUrl?: string | null };
-  }>;
-}
-
-interface ReturnConfig {
-  windowDays: number;
-  labelPrice: number;
-  shippingProductCode: string | null;
-  exchangePolicy: 'ANY' | 'SAME_TYPE' | 'VARIANT_ONLY';
-  termsText: string | null;
-  enabled: boolean;
-}
-
-interface ReturnException {
-  id: string;
-  orderNumber: string | null;
-  customerEmail: string | null;
-  type: string;
-  extraDays: number | null;
-  notes: string | null;
-  expiresAt: string | null;
-  active: boolean;
-  createdAt: string;
-}
-
-interface PortalConfig {
-  logoUrl: string | null;
-  faviconUrl: string | null;
-  backgroundUrl: string | null;
-  primaryColor: string;
-  cardStyle: string;
-  titleText: string;
-  subtitleText: string;
-  policyUrl: string | null;
-}
-
-interface Toast { id: number; msg: string; type: 'ok' | 'err' }
-type Tab = 'list' | 'config' | 'branding' | 'exceptions';
-
-type Theme = ReturnType<typeof makeTheme>;
-function makeTheme(dark: boolean) {
-  return dark
-    ? {
-        dark: true,
-        text: '#ECECEF', text2: '#B4B4BE', dim: '#7C7C88', faint: '#56565F',
-        card: 'rgba(255,255,255,0.025)', cardSolid: '#16161C', drawer: '#101015',
-        border: 'rgba(255,255,255,0.08)', borderSoft: 'rgba(255,255,255,0.05)',
-        side: 'rgba(255,255,255,0.015)', head: 'rgba(255,255,255,0.02)',
-        hover: 'rgba(255,255,255,0.03)', inputBg: 'rgba(255,255,255,0.04)',
-        bgBase: '#08080B',
-        shadow: '0 1px 0 rgba(255,255,255,0.05) inset, 0 24px 48px -16px rgba(0,0,0,0.65)',
-      }
-    : {
-        dark: false,
-        text: '#15171C', text2: '#3C4049', dim: '#6B7280', faint: '#9AA0AA',
-        card: 'rgba(255,255,255,0.9)', cardSolid: '#FFFFFF', drawer: '#FFFFFF',
-        border: 'rgba(20,22,28,0.08)', borderSoft: 'rgba(20,22,28,0.05)',
-        side: 'rgba(255,255,255,0.6)', head: 'rgba(20,22,28,0.02)',
-        hover: 'rgba(20,22,28,0.025)', inputBg: 'rgba(255,255,255,1)',
-        bgBase: '#EEF0F3',
-        shadow: '0 1px 0 rgba(255,255,255,0.9) inset, 0 18px 40px -16px rgba(20,22,28,0.16)',
-      };
-}
-
-const FONT = "Inter, -apple-system, BlinkMacSystemFont, 'SF Pro Display', sans-serif";
 const GRAIN = "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.5'/%3E%3C/svg%3E\")";
 
-function useToast() {
-  const [toasts, setToasts] = useState<Toast[]>([]);
-  const ctr = useRef(0);
-  function push(msg: string, type: 'ok' | 'err' = 'ok') {
-    const id = ++ctr.current;
-    setToasts(t => [...t, { id, msg, type }]);
-    setTimeout(() => setToasts(t => t.filter(x => x.id !== id)), 3500);
-  }
-  return { toasts, ok: (m: string) => push(m, 'ok'), err: (m: string) => push(m, 'err') };
-}
-
-function timeAgo(date: string) {
-  const diff = Date.now() - new Date(date).getTime();
-  const m = Math.floor(diff / 60000);
-  if (m < 2) return 'Ahora mismo';
-  if (m < 60) return `Hace ${m} min`;
-  const h = Math.floor(m / 60);
-  if (h < 24) return `Hace ${h} h`;
-  const d = Math.floor(h / 24);
-  if (d < 30) return `Hace ${d} d`;
-  return new Date(date).toLocaleDateString('es-ES', { day: '2-digit', month: 'short' });
+function makeTheme(dark: boolean) {
+  return dark
+    ? { dark: true, text: '#ECECEF', text2: '#B4B4BE', dim: '#7C7C88', faint: '#56565F', card: 'rgba(255,255,255,0.025)', cardSolid: '#16161C', drawer: '#101015', border: 'rgba(255,255,255,0.08)', borderSoft: 'rgba(255,255,255,0.05)', side: 'rgba(255,255,255,0.015)', head: 'rgba(255,255,255,0.02)', hover: 'rgba(255,255,255,0.03)', inputBg: 'rgba(255,255,255,0.04)', bgBase: '#08080B', shadow: '0 1px 0 rgba(255,255,255,0.05) inset, 0 24px 48px -16px rgba(0,0,0,0.65)' }
+    : { dark: false, text: '#15171C', text2: '#3C4049', dim: '#6B7280', faint: '#9AA0AA', card: 'rgba(255,255,255,0.9)', cardSolid: '#FFFFFF', drawer: '#FFFFFF', border: 'rgba(20,22,28,0.08)', borderSoft: 'rgba(20,22,28,0.05)', side: 'rgba(255,255,255,0.6)', head: 'rgba(20,22,28,0.02)', hover: 'rgba(20,22,28,0.025)', inputBg: '#FFFFFF', bgBase: '#EEF0F3', shadow: '0 1px 0 rgba(255,255,255,0.9) inset, 0 18px 40px -16px rgba(20,22,28,0.16)' };
 }
 
 function Icon({ d, size = 17, c, sw = 1.8 }: { d: string; size?: number; c: string; sw?: number }) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth={sw} strokeLinecap="round" strokeLinejoin="round">
-      {d.split('|').map((p, i) => <path key={i} d={p} />)}
-    </svg>
-  );
+  return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth={sw} strokeLinecap="round" strokeLinejoin="round">{d.split('|').map((p, i) => <path key={i} d={p} />)}</svg>;
 }
 const ICONS = {
-  returns: 'M3 7h13a4 4 0 0 1 0 8H8 M8 11l-4 4 4 4',
-  config: 'M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z|M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1Z',
-  brand: 'M12 3l2.09 4.26L19 8l-3.5 3.4.83 4.85L12 13.9l-4.33 2.35L8.5 11.4 5 8l4.91-.74Z',
-  exc: 'M12 9v4|M12 17h.01|M10.3 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.7 3.86a2 2 0 0 0-3.42 0Z',
-  search: 'M11 19a8 8 0 1 0 0-16 8 8 0 0 0 0 16Z|M21 21l-4.3-4.3',
-  bell: 'M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9|M13.7 21a2 2 0 0 1-3.4 0',
-  logout: 'M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4|M16 17l5-5-5-5|M21 12H9',
+  returns: 'M3 7h13a4 4 0 0 1 0 8H8|M8 11l-4 4 4 4',
+  config:  'M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z|M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1Z',
+  brand:   'M12 3l2.09 4.26L19 8l-3.5 3.4.83 4.85L12 13.9l-4.33 2.35L8.5 11.4 5 8l4.91-.74Z',
+  exc:     'M12 9v4|M12 17h.01|M10.3 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.7 3.86a2 2 0 0 0-3.42 0Z',
+  search:  'M11 19a8 8 0 1 0 0-16 8 8 0 0 0 0 16Z|M21 21l-4.3-4.3',
   refresh: 'M23 4v6h-6|M1 20v-6h6|M3.51 9a9 9 0 0 1 14.85-3.36L23 10|M1 14l4.64 4.36A9 9 0 0 0 20.49 15',
+  logout:  'M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4|M16 17l5-5-5-5|M21 12H9',
 };
 
 function Spark({ data, color }: { data: number[]; color: string }) {
-  if (data.length < 2) data = [...data, ...data];
-  const w = 60, h = 20, max = Math.max(...data), min = Math.min(...data);
-  const pts = data.map((v, i) => [(i / (data.length - 1)) * w, h - ((v - min) / (max - min || 1)) * (h - 4) - 2]);
+  const d2 = data.length < 2 ? [...data, ...data] : data;
+  const w = 60, h = 20, max = Math.max(...d2), min = Math.min(...d2);
+  const pts = d2.map((v, i) => [(i / (d2.length - 1)) * w, h - ((v - min) / (max - min || 1)) * (h - 4) - 2]);
   const line = pts.map((p, i) => `${i ? 'L' : 'M'}${p[0].toFixed(1)} ${p[1].toFixed(1)}`).join(' ');
-  return (
-    <svg width={w} height={h} style={{ display: 'block' }}>
-      <path d={line} fill="none" stroke={color} strokeWidth={1.6} strokeLinecap="round" strokeLinejoin="round" />
-      <circle cx={pts[pts.length - 1][0]} cy={pts[pts.length - 1][1]} r={2} fill={color} />
-    </svg>
-  );
+  return <svg width={w} height={h} style={{ display: 'block' }}><path d={line} fill="none" stroke={color} strokeWidth={1.6} strokeLinecap="round" strokeLinejoin="round" /><circle cx={pts[pts.length-1][0]} cy={pts[pts.length-1][1]} r={2} fill={color} /></svg>;
 }
 
 function AreaChart({ data, color, dark }: { data: number[]; color: string; dark: boolean }) {
-  const safe = data.length >= 2 ? data : [0, 0];
-  const w = 560, h = 120, pad = 6, max = Math.max(...safe, 1), min = 0;
-  const x = (i: number) => pad + (i / (safe.length - 1)) * (w - pad * 2);
-  const y = (v: number) => h - pad - ((v - min) / (max - min || 1)) * (h - pad * 2 - 8);
-  const line = safe.map((v, i) => `${i ? 'L' : 'M'}${x(i).toFixed(1)} ${y(v).toFixed(1)}`).join(' ');
-  const area = `${line} L${x(safe.length - 1).toFixed(1)} ${h - pad} L${x(0).toFixed(1)} ${h - pad} Z`;
+  const s = data.length >= 2 ? data : [0, 0];
+  const w = 560, h = 120, pad = 6, max = Math.max(...s, 1);
+  const x = (i: number) => pad + (i / (s.length - 1)) * (w - pad * 2);
+  const y = (v: number) => h - pad - (v / max) * (h - pad * 2 - 8);
+  const line = s.map((v, i) => `${i ? 'L' : 'M'}${x(i).toFixed(1)} ${y(v).toFixed(1)}`).join(' ');
+  const area = `${line} L${x(s.length-1).toFixed(1)} ${h-pad} L${x(0).toFixed(1)} ${h-pad} Z`;
   return (
     <svg width="100%" height={h} viewBox={`0 0 ${w} ${h}`} preserveAspectRatio="none" style={{ display: 'block' }}>
-      <defs>
-        <linearGradient id="ag" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stopColor={color} stopOpacity={dark ? 0.34 : 0.26} />
-          <stop offset="100%" stopColor={color} stopOpacity={0} />
-        </linearGradient>
-      </defs>
-      {[0.33, 0.66].map(g => <line key={g} x1={pad} x2={w - pad} y1={h * g} y2={h * g} stroke={dark ? 'rgba(255,255,255,0.05)' : 'rgba(20,22,28,0.05)'} strokeWidth={1} />)}
+      <defs><linearGradient id="ag" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor={color} stopOpacity={dark ? 0.34 : 0.26} /><stop offset="100%" stopColor={color} stopOpacity={0} /></linearGradient></defs>
+      {[0.33, 0.66].map(g => <line key={g} x1={pad} x2={w-pad} y1={h*g} y2={h*g} stroke={dark ? 'rgba(255,255,255,0.05)' : 'rgba(20,22,28,0.05)'} strokeWidth={1} />)}
       <path d={area} fill="url(#ag)" />
       <path className="ad-chartline" d={line} fill="none" stroke={color} strokeWidth={2.2} strokeLinecap="round" strokeLinejoin="round" />
-      <circle cx={x(safe.length - 1)} cy={y(safe[safe.length - 1])} r={3.5} fill={color} stroke={dark ? '#0b0b0f' : '#fff'} strokeWidth={2} />
+      <circle cx={x(s.length-1)} cy={y(s[s.length-1])} r={3.5} fill={color} stroke={dark ? '#0b0b0f' : '#fff'} strokeWidth={2} />
     </svg>
   );
 }
 
-function Donut({ segments, total, dark }: { segments: Array<{ value: number; color: string }>; total: number; dark: boolean }) {
-  const r = 42, C = 2 * Math.PI * r;
-  let off = 0;
+function Donut({ segments, total, dark }: { segments: { value: number; color: string }[]; total: number; dark: boolean }) {
+  const r = 42, C = 2 * Math.PI * r; let off = 0;
   return (
     <svg className="ad-donut" width={108} height={108} viewBox="0 0 108 108">
       <g transform="translate(54,54) rotate(-90)">
         <circle r={r} fill="none" stroke={dark ? 'rgba(255,255,255,0.05)' : 'rgba(20,22,28,0.05)'} strokeWidth={11} />
-        {total > 0 && segments.map((s, i) => {
-          const len = (s.value / total) * C;
-          const el = <circle key={i} r={r} fill="none" stroke={s.color} strokeWidth={11} strokeDasharray={`${len} ${C - len}`} strokeDashoffset={-off} strokeLinecap="round" />;
-          off += len;
-          return el;
-        })}
+        {total > 0 && segments.map((s, i) => { const len = (s.value/total)*C; const el = <circle key={i} r={r} fill="none" stroke={s.color} strokeWidth={11} strokeDasharray={`${len} ${C-len}`} strokeDashoffset={-off} strokeLinecap="round" />; off += len; return el; })}
       </g>
       <text x={54} y={50} textAnchor="middle" fontSize={20} fontWeight={750} fill={dark ? '#ECECEF' : '#15171C'}>{total}</text>
       <text x={54} y={66} textAnchor="middle" fontSize={9.5} fill={dark ? '#7C7C88' : '#9AA0AA'}>artículos</text>
@@ -227,29 +94,42 @@ function Donut({ segments, total, dark }: { segments: Array<{ value: number; col
   );
 }
 
+function useToast() {
+  const [toasts, setToasts] = useState<{ id: number; msg: string; ok: boolean }[]>([]);
+  const ctr = useRef(0);
+  const push = (msg: string, ok2 = true) => { const id = ++ctr.current; setToasts(t => [...t, { id, msg, ok: ok2 }]); setTimeout(() => setToasts(t => t.filter(x => x.id !== id)), 3500); };
+  return { toasts, ok: (m: string) => push(m, true), err: (m: string) => push(m, false) };
+}
+
+function timeAgo(date: string) {
+  const diff = Date.now() - new Date(date).getTime(), m = Math.floor(diff / 60000);
+  if (m < 2) return 'Ahora mismo'; if (m < 60) return `Hace ${m} min`;
+  const h = Math.floor(m / 60); if (h < 24) return `Hace ${h} h`;
+  const d = Math.floor(h / 24); if (d < 30) return `Hace ${d} d`;
+  return new Date(date).toLocaleDateString('es-ES', { day: '2-digit', month: 'short' });
+}
+
+type Tab = 'list' | 'config' | 'branding' | 'exceptions';
+
 export default function AdminDevolucionesPage() {
   const [dark, setDark] = useState(true);
   const [tab, setTab] = useState<Tab>('list');
   const [token, setToken] = useState('');
   const [tokenInput, setTokenInput] = useState('');
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
   const { toasts, ok, err } = useToast();
-
-  const [returns, setReturns]     = useState<ReturnRecord[]>([]);
+  const [returns, setReturns] = useState<any[]>([]);
   const [filterStatus, setFilter] = useState('ALL');
-  const [search, setSearch]       = useState('');
-  const [sortBy, setSortBy]       = useState<'date' | 'status'>('date');
-
-  const [config, setConfig]       = useState<ReturnConfig | null>(null);
-  const [configDraft, setDraft]   = useState<ReturnConfig | null>(null);
-  const [savingConfig, setSaving] = useState(false);
-
-  const [portalCfg, setPortalCfg]       = useState<PortalConfig | null>(null);
-  const [portalDraft, setPortalDraft]   = useState<PortalConfig | null>(null);
+  const [search, setSearch] = useState('');
+  const [sortBy, setSortBy] = useState<'date' | 'status'>('date');
+  const [config, setConfig] = useState<any>(null);
+  const [configDraft, setDraft] = useState<any>(null);
+  const [savingConfig, setSavingConfig] = useState(false);
+  const [portalCfg, setPortalCfg] = useState<any>(null);
+  const [portalDraft, setPortalDraft] = useState<any>(null);
   const [savingPortal, setSavingPortal] = useState(false);
-
-  const [exceptions, setExceptions] = useState<ReturnException[]>([]);
-  const [showNewEx, setShowNewEx]   = useState(false);
+  const [exceptions, setExceptions] = useState<any[]>([]);
+  const [showNewEx, setShowNewEx] = useState(false);
   const [newEx, setNewEx] = useState({ orderNumber: '', customerEmail: '', type: 'EXTEND_WINDOW', extraDays: 7, notes: '', expiresAt: '' });
 
   const t = makeTheme(dark);
@@ -258,131 +138,81 @@ export default function AdminDevolucionesPage() {
     const storedTheme = localStorage.getItem('admin-theme');
     if (storedTheme) setDark(storedTheme === 'dark');
     const stored = localStorage.getItem('token') || localStorage.getItem('mitaller_token');
-    if (stored) { setToken(stored); loadAll(stored); }
+    if (stored) { setToken(stored); loadAll(stored, 'list'); }
     else { window.location.href = '/login'; }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => { localStorage.setItem('admin-theme', dark ? 'dark' : 'light'); }, [dark]);
-  useEffect(() => { if (token) loadAll(token); /* eslint-disable-next-line */ }, [tab]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => { if (token) loadAll(token, tab); }, [tab]);
 
-  function auth(t: string) { return { Authorization: `Bearer ${t}` }; }
-  function logout() {
-    ['token', 'mitaller_token'].forEach(k => localStorage.removeItem(k));
-    document.cookie = 'admin-token=; path=/; max-age=0';
-    window.location.href = '/login';
-  }
+  function auth(tk: string) { return { Authorization: `Bearer ${tk}` }; }
+  function logout() { ['token', 'mitaller_token'].forEach(k => localStorage.removeItem(k)); document.cookie = 'admin-token=; path=/; max-age=0'; window.location.href = '/login'; }
 
-  async function loadAll(jwt: string) {
+  async function loadAll(jwt: string, t2: Tab) {
     setLoading(true);
     try {
-      if (tab === 'list') {
-        const r = await fetch(`${API_URL}/returns`, { headers: auth(jwt) });
-        if (r.status === 401) { logout(); return; }
-        setReturns(await r.json());
-      } else if (tab === 'config') {
-        const r = await fetch(`${API_URL}/returns/admin/config`, { headers: auth(jwt) });
-        if (r.status === 401) { logout(); return; }
-        const c = await r.json(); setConfig(c); setDraft(c);
-      } else if (tab === 'exceptions') {
-        const r = await fetch(`${API_URL}/returns/admin/exceptions`, { headers: auth(jwt) });
-        if (r.status === 401) { logout(); return; }
-        setExceptions(await r.json());
-      } else if (tab === 'branding') {
-        const r = await fetch(`${API_URL}/portal-config`, { headers: auth(jwt) });
-        if (r.status === 401) { logout(); return; }
-        const c = await r.json(); setPortalCfg(c); setPortalDraft(c);
-      }
-    } catch (e) { err(e instanceof Error ? e.message : 'Error cargando'); }
+      if (t2 === 'list') { const r = await fetch(`${API}/returns`, { headers: auth(jwt) }); if (r.status === 401) { logout(); return; } if (r.ok) setReturns(await r.json()); }
+      else if (t2 === 'config') { const r = await fetch(`${API}/returns/admin/config`, { headers: auth(jwt) }); if (r.status === 401) { logout(); return; } if (r.ok) { const c = await r.json(); setConfig(c); setDraft(c); } }
+      else if (t2 === 'exceptions') { const r = await fetch(`${API}/returns/admin/exceptions`, { headers: auth(jwt) }); if (r.status === 401) { logout(); return; } if (r.ok) setExceptions(await r.json()); }
+      else if (t2 === 'branding') { const r = await fetch(`${API}/portal-config`, { headers: auth(jwt) }); if (r.status === 401) { logout(); return; } if (r.ok) { const c = await r.json(); setPortalCfg(c); setPortalDraft(c); } }
+    } catch (e) { err(e instanceof Error ? e.message : 'Error'); }
     finally { setLoading(false); }
   }
 
   async function saveConfig() {
-    if (!configDraft) return;
-    setSaving(true);
-    try {
-      const res = await fetch(`${API_URL}/returns/admin/config`,
-        { method: 'PUT', headers: { 'Content-Type': 'application/json', ...auth(token) }, body: JSON.stringify(configDraft) });
-      if (!res.ok) throw new Error(`Error ${res.status}`);
-      const updated = await res.json(); setConfig(updated); setDraft(updated);
-      ok('Configuración guardada ✓');
-    } catch (e) { err(e instanceof Error ? e.message : 'Error guardando'); }
-    finally { setSaving(false); }
+    if (!configDraft) return; setSavingConfig(true);
+    try { const r = await fetch(`${API}/returns/admin/config`, { method: 'PUT', headers: { 'Content-Type': 'application/json', ...auth(token) }, body: JSON.stringify(configDraft) }); if (r.ok) { const c = await r.json(); setConfig(c); setDraft(c); ok('Guardado ✓'); } else err('Error guardando'); } catch { err('Error'); } finally { setSavingConfig(false); }
   }
 
   async function saveBranding() {
-    if (!portalDraft) return;
-    setSavingPortal(true);
-    try {
-      const res = await fetch(`${API_URL}/portal-config`,
-        { method: 'PUT', headers: { 'Content-Type': 'application/json', ...auth(token) }, body: JSON.stringify(portalDraft) });
-      if (!res.ok) throw new Error(`Error ${res.status}`);
-      const updated = await res.json(); setPortalCfg(updated); setPortalDraft(updated);
-      ok('Personalización guardada ✓');
-    } catch (e) { err(e instanceof Error ? e.message : 'Error guardando'); }
-    finally { setSavingPortal(false); }
+    if (!portalDraft) return; setSavingPortal(true);
+    try { const r = await fetch(`${API}/portal-config`, { method: 'PUT', headers: { 'Content-Type': 'application/json', ...auth(token) }, body: JSON.stringify(portalDraft) }); if (r.ok) { const c = await r.json(); setPortalCfg(c); setPortalDraft(c); ok('Guardado ✓'); } else err('Error guardando'); } catch { err('Error'); } finally { setSavingPortal(false); }
   }
 
   async function createException() {
-    if (!newEx.orderNumber && !newEx.customerEmail) { err('Indica número de pedido o email'); return; }
-    try {
-      const body: Record<string, unknown> = { type: newEx.type, notes: newEx.notes || undefined, expiresAt: newEx.expiresAt || undefined };
-      if (newEx.orderNumber) body.orderNumber = newEx.orderNumber;
-      if (newEx.customerEmail) body.customerEmail = newEx.customerEmail;
-      if (newEx.type === 'EXTEND_WINDOW') body.extraDays = newEx.extraDays;
-      const res = await fetch(`${API_URL}/returns/admin/exceptions`,
-        { method: 'POST', headers: { 'Content-Type': 'application/json', ...auth(token) }, body: JSON.stringify(body) });
-      if (!res.ok) throw new Error((await res.json()).message ?? `Error ${res.status}`);
-      ok('Excepción creada ✓');
-      setShowNewEx(false);
-      setNewEx({ orderNumber: '', customerEmail: '', type: 'EXTEND_WINDOW', extraDays: 7, notes: '', expiresAt: '' });
-      loadAll(token);
-    } catch (e) { err(e instanceof Error ? e.message : 'Error'); }
+    if (!newEx.orderNumber && !newEx.customerEmail) { err('Indica pedido o email'); return; }
+    const body: Record<string, unknown> = { type: newEx.type };
+    if (newEx.orderNumber) body.orderNumber = newEx.orderNumber;
+    if (newEx.customerEmail) body.customerEmail = newEx.customerEmail;
+    if (newEx.type === 'EXTEND_WINDOW') body.extraDays = newEx.extraDays;
+    if (newEx.notes) body.notes = newEx.notes;
+    if (newEx.expiresAt) body.expiresAt = newEx.expiresAt;
+    try { const r = await fetch(`${API}/returns/admin/exceptions`, { method: 'POST', headers: { 'Content-Type': 'application/json', ...auth(token) }, body: JSON.stringify(body) }); if (r.ok) { ok('Excepción creada ✓'); setShowNewEx(false); setNewEx({ orderNumber: '', customerEmail: '', type: 'EXTEND_WINDOW', extraDays: 7, notes: '', expiresAt: '' }); loadAll(token, 'exceptions'); } else err('Error'); } catch { err('Error'); }
   }
 
   async function toggleException(id: string, active: boolean) {
-    await fetch(`${API_URL}/returns/admin/exceptions/${id}`,
-      { method: 'PATCH', headers: { 'Content-Type': 'application/json', ...auth(token) }, body: JSON.stringify({ active }) });
-    loadAll(token);
+    await fetch(`${API}/returns/admin/exceptions/${id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json', ...auth(token) }, body: JSON.stringify({ active }) });
+    loadAll(token, 'exceptions');
   }
 
   async function deleteException(id: string) {
-    if (!confirm('¿Borrar esta excepción?')) return;
-    await fetch(`${API_URL}/returns/admin/exceptions/${id}`, { method: 'DELETE', headers: auth(token) });
-    ok('Excepción eliminada');
-    loadAll(token);
+    if (!confirm('¿Borrar excepción?')) return;
+    await fetch(`${API}/returns/admin/exceptions/${id}`, { method: 'DELETE', headers: auth(token) });
+    ok('Eliminada'); loadAll(token, 'exceptions');
   }
 
-  // KPIs
   const now30 = Date.now() - 30 * 24 * 60 * 60 * 1000;
   const kpis = {
-    espera:    returns.filter(r => r.status === 'REQUESTED').length,
-    revisar:   returns.filter(r => r.status === 'RECEIVED').length,
-    aprobadas: returns.filter(r => r.status === 'APPROVED' && !r.refundedAt).length,
-    trans30:   returns.filter(r => new Date(r.createdAt).getTime() > now30).length,
-    refund:    returns.filter(r => r.refundedAt).reduce((s, r) => s + (r.shopifyRefundAmount ?? r.refundAmount ?? 0), 0),
+    espera: returns.filter(r => r.status === 'REQUESTED').length,
+    revisar: returns.filter(r => r.status === 'RECEIVED').length,
+    refund: returns.filter(r => r.refundedAt).reduce((s: number, r: any) => s + (r.shopifyRefundAmount ?? r.refundAmount ?? 0), 0),
+    trans30: returns.filter(r => new Date(r.createdAt).getTime() > now30).length,
   };
 
-  // Daily area data (last 14 days, real)
   const daily = useMemo(() => {
-    const days = 14;
-    const buckets = new Array(days).fill(0);
-    const start = new Date(); start.setHours(0, 0, 0, 0);
+    const days = 14, buckets = new Array(days).fill(0), start = new Date(); start.setHours(0,0,0,0);
     const startMs = start.getTime() - (days - 1) * 86400000;
-    returns.forEach(r => {
-      const idx = Math.floor((new Date(r.createdAt).getTime() - startMs) / 86400000);
-      if (idx >= 0 && idx < days) buckets[idx]++;
-    });
+    returns.forEach(r => { const idx = Math.floor((new Date(r.createdAt).getTime() - startMs) / 86400000); if (idx >= 0 && idx < days) buckets[idx]++; });
     return buckets;
   }, [returns]);
 
-  // Reasons donut (real)
   const reasons = useMemo(() => {
     const map: Record<string, number> = {};
-    returns.forEach(r => r.items.forEach(it => { map[it.reason] = (map[it.reason] ?? 0) + it.quantity; }));
+    returns.forEach(r => r.items?.forEach((it: any) => { map[it.reason] = (map[it.reason] ?? 0) + it.quantity; }));
     const entries = Object.entries(map).sort((a, b) => b[1] - a[1]);
-    const total = entries.reduce((s, [, v]) => s + v, 0);
-    return { entries, total };
+    return { entries, total: entries.reduce((s, [, v]) => s + v, 0) };
   }, [returns]);
 
   const stats = [
@@ -392,65 +222,21 @@ export default function AdminDevolucionesPage() {
     { label: 'Últimos 30d', value: String(kpis.trans30), accent: '#5b9bd5', spark: daily.slice(-7) },
   ];
 
-  // Filtered + sorted list
-  const filtered = returns
-    .filter(r => {
-      const matchStatus = filterStatus === 'ALL' || r.status === filterStatus;
-      const q = search.toLowerCase();
-      const matchSearch = !q
-        || r.shopifyOrderNumber.toLowerCase().includes(q)
-        || r.customerName.toLowerCase().includes(q)
-        || r.customerEmail.toLowerCase().includes(q);
-      return matchStatus && matchSearch;
-    })
-    .sort((a, b) => {
-      if (sortBy === 'status') return a.status.localeCompare(b.status);
-      return new Date(b.updatedAt ?? b.createdAt).getTime() - new Date(a.updatedAt ?? a.createdAt).getTime();
-    });
-
-  const inp: React.CSSProperties = {
-    padding: '10px 13px', borderRadius: 10, border: `1px solid ${t.border}`,
-    fontSize: 14, color: t.text, background: t.inputBg, outline: 'none', width: '100%', fontFamily: FONT,
-  };
-  const cfgLabel: React.CSSProperties = { display: 'flex', flexDirection: 'column', gap: 7, fontSize: 13, fontWeight: 500, color: t.text2 };
-  const btnPrimary: React.CSSProperties = {
-    padding: '11px 18px', background: `linear-gradient(140deg, ${ACCENT}, ${ACCENT2})`, color: '#fff', border: 'none',
-    borderRadius: 11, fontSize: 14, fontWeight: 650, cursor: 'pointer', fontFamily: FONT, boxShadow: `0 8px 18px -8px ${ACCENT}aa`,
-  };
-  const btnSecondary: React.CSSProperties = {
-    padding: '10px 16px', background: t.card, color: t.text2, border: `1px solid ${t.border}`,
-    borderRadius: 11, fontSize: 14, fontWeight: 500, cursor: 'pointer', fontFamily: FONT,
-  };
-
-  // ── LOGIN ──
-  if (!token) return (
-    <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: t.bgBase, fontFamily: FONT }}>
-      <div style={{ background: t.card, border: `1px solid ${t.border}`, borderRadius: 18, padding: '36px 32px', width: '100%', maxWidth: 380, boxShadow: t.shadow, backdropFilter: 'blur(14px)' }}>
-        <div style={{ marginBottom: 24 }}>
-          <div style={{ fontSize: 22, fontWeight: 750, color: t.text, letterSpacing: '-0.02em' }}>Panel de devoluciones</div>
-          <div style={{ fontSize: 14, color: t.dim, marginTop: 4 }}>Speedwear Admin</div>
-        </div>
-        <form onSubmit={e => {
-          e.preventDefault();
-          if (!tokenInput.trim()) return;
-          localStorage.setItem('token', tokenInput.trim());
-          localStorage.setItem('mitaller_token', tokenInput.trim());
-          setToken(tokenInput.trim());
-          loadAll(tokenInput.trim());
-        }}>
-          <label style={{ ...cfgLabel, marginBottom: 16 }}>
-            Token JWT
-            <input type="password" style={inp} value={tokenInput} onChange={e => setTokenInput(e.target.value)} placeholder="eyJ..." required />
-          </label>
-          <button type="submit" className="ad-btn-primary" style={{ ...btnPrimary, width: '100%' }}>Entrar →</button>
-        </form>
-      </div>
-    </div>
-  );
+  const filtered = returns.filter(r => {
+    const ms = filterStatus === 'ALL' || r.status === filterStatus;
+    const q = search.toLowerCase();
+    const mq = !q || r.shopifyOrderNumber?.toLowerCase().includes(q) || r.customerName?.toLowerCase().includes(q) || r.customerEmail?.toLowerCase().includes(q);
+    return ms && mq;
+  }).sort((a, b) => sortBy === 'status' ? a.status.localeCompare(b.status) : new Date(b.updatedAt ?? b.createdAt).getTime() - new Date(a.updatedAt ?? a.createdAt).getTime());
 
   const mesh = dark
     ? `radial-gradient(900px 500px at 12% -8%, rgba(52,178,123,0.10), transparent 60%), radial-gradient(800px 600px at 100% 0%, rgba(91,120,213,0.08), transparent 55%), radial-gradient(700px 500px at 50% 120%, rgba(120,90,200,0.06), transparent 60%)`
     : `radial-gradient(900px 500px at 12% -8%, rgba(52,178,123,0.12), transparent 60%), radial-gradient(800px 600px at 100% 0%, rgba(91,120,213,0.10), transparent 55%)`;
+
+  const inp: React.CSSProperties = { padding: '10px 13px', borderRadius: 10, border: `1px solid ${t.border}`, fontSize: 14, color: t.text, background: t.inputBg, outline: 'none', width: '100%', fontFamily: FONT };
+  const cl: React.CSSProperties = { display: 'flex', flexDirection: 'column', gap: 7, fontSize: 13, fontWeight: 500, color: t.text2 };
+  const btnP: React.CSSProperties = { padding: '11px 18px', background: `linear-gradient(140deg,${ACCENT},${ACCENT2})`, color: '#fff', border: 'none', borderRadius: 11, fontSize: 14, fontWeight: 600, cursor: 'pointer', fontFamily: FONT, boxShadow: `0 8px 18px -8px ${ACCENT}aa` };
+  const btnS: React.CSSProperties = { padding: '10px 16px', background: t.card, color: t.text2, border: `1px solid ${t.border}`, borderRadius: 11, fontSize: 14, fontWeight: 500, cursor: 'pointer', fontFamily: FONT };
 
   const SIDE: Array<{ id: Tab; label: string; icon: string; badge?: number }> = [
     { id: 'list', label: 'Devoluciones', icon: ICONS.returns, badge: kpis.espera + kpis.revisar },
@@ -459,6 +245,19 @@ export default function AdminDevolucionesPage() {
     { id: 'exceptions', label: 'Excepciones', icon: ICONS.exc },
   ];
 
+  if (!token) return (
+    <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: t.bgBase, fontFamily: FONT }}>
+      <style>{`@keyframes fu{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:none}}`}</style>
+      <div style={{ background: t.card, border: `1px solid ${t.border}`, borderRadius: 18, padding: '36px 32px', width: '100%', maxWidth: 380, boxShadow: t.shadow, backdropFilter: 'blur(14px)', animation: 'fu .4s ease both' }}>
+        <div style={{ width: 40, height: 40, borderRadius: 11, background: `linear-gradient(140deg,${ACCENT},${ACCENT2})`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 18, fontWeight: 900, color: '#fff', marginBottom: 16 }}>S</div>
+        <div style={{ fontSize: 22, fontWeight: 750, color: t.text, letterSpacing: '-0.02em' }}>Panel de devoluciones</div>
+        <div style={{ fontSize: 14, color: t.dim, marginTop: 4, marginBottom: 24 }}>Speedwear Admin</div>
+        <label style={{ ...cl, marginBottom: 16 }}>Token JWT<input type="password" style={inp} value={tokenInput} onChange={e => setTokenInput(e.target.value)} placeholder="eyJ..." /></label>
+        <button onClick={() => { if (!tokenInput.trim()) return; localStorage.setItem('token', tokenInput.trim()); localStorage.setItem('mitaller_token', tokenInput.trim()); document.cookie = `admin-token=${tokenInput.trim()}; path=/; max-age=${60*60*24*7}; SameSite=Lax`; setToken(tokenInput.trim()); loadAll(tokenInput.trim(), 'list'); }} style={{ ...btnP, width: '100%' }}>Entrar →</button>
+      </div>
+    </div>
+  );
+
   return (
     <div className="adminx" style={{ minHeight: '100vh', display: 'flex', position: 'relative', overflow: 'hidden', background: t.bgBase, fontFamily: FONT, color: t.text, transition: 'background .45s ease, color .3s ease' }}>
       <style>{`
@@ -466,35 +265,24 @@ export default function AdminDevolucionesPage() {
         @keyframes fi{from{opacity:0}to{opacity:1}}
         @keyframes pop{from{opacity:0;transform:scale(.94)}to{opacity:1;transform:none}}
         @keyframes spin{to{transform:rotate(360deg)}}
-        @keyframes drawIn{from{stroke-dashoffset:2000}to{stroke-dashoffset:0}}
         @keyframes slideL{from{opacity:0;transform:translateX(26px)}to{opacity:1;transform:none}}
-        @keyframes shimmer{0%{background-position:-450px 0}100%{background-position:450px 0}}
-        @keyframes glowPulse{0%,100%{box-shadow:0 0 0 0 ${ACCENT}00}50%{box-shadow:0 0 0 4px ${ACCENT}22}}
-        .adminx button,.adminx a[href],.adminx select,.adminx input[type=color]{transition:transform .16s cubic-bezier(.34,1.56,.64,1),background .2s ease,border-color .2s ease,box-shadow .25s ease,color .18s ease,filter .15s ease}
-        .adminx button:hover{filter:brightness(1.06)}
-        .adminx button:active{transform:scale(.95)}
-        .adminx select:hover,.adminx input[type=color]:hover{border-color:${ACCENT}66 !important}
-        .ad-nav{transition:background .18s ease,transform .18s cubic-bezier(.34,1.56,.64,1),color .18s ease}
+        @keyframes drawIn{from{stroke-dashoffset:2000}to{stroke-dashoffset:0}}
+        .adminx button,.adminx a[href]{transition:transform .16s cubic-bezier(.34,1.56,.64,1),background .2s,border-color .2s,box-shadow .25s,color .18s,filter .15s}
+        .adminx button:hover{filter:brightness(1.06)}.adminx button:active{transform:scale(.95)}
         .ad-nav:hover{background:${t.hover} !important;transform:translateX(3px)}
-        .ad-pill:hover{transform:translateY(-2px);box-shadow:0 6px 16px -6px rgba(0,0,0,.35)}
-        .ad-lift{transition:transform .24s cubic-bezier(.34,1.4,.5,1),box-shadow .24s ease,border-color .2s ease}
+        .ad-lift{transition:transform .24s cubic-bezier(.34,1.4,.5,1),box-shadow .24s,border-color .2s}
         .ad-lift:hover{transform:translateY(-4px);border-color:${ACCENT}55 !important;box-shadow:0 22px 46px -18px rgba(0,0,0,.55)}
-        .ad-card{transition:border-color .25s ease,box-shadow .25s ease}
-        .ad-card:hover{border-color:${ACCENT}33 !important}
-        .ad-btn-primary:hover{transform:translateY(-2px);box-shadow:0 16px 30px -10px ${ACCENT}cc !important;filter:brightness(1.04)}
-        .ad-icon:hover{background:${t.hover} !important;transform:translateY(-2px) rotate(-4deg)}
+        .ad-card{transition:border-color .25s,box-shadow .25s}.ad-card:hover{border-color:${ACCENT}33 !important}
+        .ad-btnP:hover{transform:translateY(-2px);box-shadow:0 16px 30px -10px ${ACCENT}cc !important;filter:brightness(1.04)}
         .ad-spin:hover svg{animation:spin .7s cubic-bezier(.4,0,.2,1)}
-        .ad-row{transition:background .16s ease,box-shadow .2s ease}
+        .ad-row{transition:background .16s,box-shadow .2s}
         .ad-row:hover{background:${t.hover} !important;box-shadow:inset 3px 0 0 ${ACCENT}}
-        .ad-row:hover .ad-av{transform:scale(1.1) rotate(-4deg)}
-        .ad-row:hover .ad-amt{transform:translateX(-3px)}
-        .ad-av{transition:transform .22s cubic-bezier(.34,1.56,.64,1)}
-        .ad-amt{transition:transform .18s ease}
-        .ad-input:focus{border-color:${ACCENT}88 !important;box-shadow:0 0 0 3px ${ACCENT}1f}
-        .ad-toggle:hover{filter:none !important}
+        .ad-row:hover .ad-av{transform:scale(1.1) rotate(-4deg)}.ad-av{transition:transform .22s cubic-bezier(.34,1.56,.64,1)}
+        .ad-row:hover .ad-amt{transform:translateX(-3px)}.ad-amt{transition:transform .18s}
+        .ad-pill:hover{transform:translateY(-2px);box-shadow:0 6px 16px -6px rgba(0,0,0,.35)}
         .ad-chartline{stroke-dasharray:2000;animation:drawIn 1.3s cubic-bezier(.4,0,.2,1) forwards}
-        .ad-donut circle{transition:stroke-width .2s ease}
-        .ad-donut:hover circle{stroke-width:13}
+        .ad-donut circle{transition:stroke-width .2s}.ad-donut:hover circle{stroke-width:13}
+        input:focus,select:focus,textarea:focus{border-color:${ACCENT}88 !important;box-shadow:0 0 0 3px ${ACCENT}1f !important;outline:none}
         ::placeholder{color:${t.faint}}
       `}</style>
 
@@ -502,17 +290,14 @@ export default function AdminDevolucionesPage() {
       <div style={{ position: 'fixed', inset: 0, backgroundImage: GRAIN, opacity: dark ? 0.045 : 0.03, mixBlendMode: dark ? 'screen' : 'multiply', pointerEvents: 'none', zIndex: 0 }} />
       <div style={{ position: 'fixed', inset: 0, backgroundImage: `linear-gradient(${dark ? 'rgba(255,255,255,0.016)' : 'rgba(20,22,28,0.018)'} 1px, transparent 1px), linear-gradient(90deg, ${dark ? 'rgba(255,255,255,0.016)' : 'rgba(20,22,28,0.018)'} 1px, transparent 1px)`, backgroundSize: '44px 44px', pointerEvents: 'none', zIndex: 0 }} />
 
-      {/* Toast */}
       <div style={{ position: 'fixed', bottom: 24, right: 24, display: 'flex', flexDirection: 'column', gap: 8, zIndex: 999 }}>
-        {toasts.map(toast => (
-          <div key={toast.id} style={{ padding: '12px 18px', borderRadius: 11, fontSize: 14, fontWeight: 600, background: toast.type === 'ok' ? `linear-gradient(140deg,${ACCENT},${ACCENT2})` : '#e06a6a', color: '#fff', boxShadow: '0 8px 24px rgba(0,0,0,0.25)', animation: 'slideL .3s cubic-bezier(.34,1.56,.64,1) both' }}>{toast.msg}</div>
-        ))}
+        {toasts.map(toast => <div key={toast.id} style={{ padding: '12px 18px', borderRadius: 11, fontSize: 14, fontWeight: 600, background: toast.ok ? `linear-gradient(140deg,${ACCENT},${ACCENT2})` : '#e06a6a', color: '#fff', boxShadow: '0 8px 24px rgba(0,0,0,.25)', animation: 'slideL .3s cubic-bezier(.34,1.56,.64,1) both' }}>{toast.msg}</div>)}
       </div>
 
       {/* SIDEBAR */}
       <div style={{ position: 'relative', zIndex: 3, width: 240, flexShrink: 0, minHeight: '100vh', display: 'flex', flexDirection: 'column', padding: '20px 14px', background: t.side, backdropFilter: 'blur(20px)', borderRight: `1px solid ${t.border}` }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 11, padding: '4px 8px 20px' }}>
-          <div style={{ width: 32, height: 32, borderRadius: 9, background: `linear-gradient(140deg, ${ACCENT}, ${ACCENT2})`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 15, fontWeight: 800, color: '#fff', boxShadow: `0 6px 16px -4px ${ACCENT}88, 0 1px 0 rgba(255,255,255,0.3) inset` }}>S</div>
+          <div style={{ width: 32, height: 32, borderRadius: 9, background: `linear-gradient(140deg,${ACCENT},${ACCENT2})`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 15, fontWeight: 800, color: '#fff', boxShadow: `0 6px 16px -4px ${ACCENT}88, 0 1px 0 rgba(255,255,255,0.3) inset` }}>S</div>
           <div style={{ display: 'flex', flexDirection: 'column', lineHeight: 1.15 }}>
             <span style={{ fontSize: 14.5, fontWeight: 700, letterSpacing: '-0.02em', color: t.text }}>Speedwear</span>
             <span style={{ fontSize: 11, fontWeight: 500, color: t.faint }}>Devoluciones</span>
@@ -533,16 +318,16 @@ export default function AdminDevolucionesPage() {
           })}
         </div>
         <div style={{ marginTop: 'auto', display: 'flex', flexDirection: 'column', gap: 10 }}>
-          <a href="/devoluciones" target="_blank" style={{ display: 'flex', alignItems: 'center', gap: 9, padding: '9px 11px', borderRadius: 10, fontSize: 13, fontWeight: 500, color: t.dim, textDecoration: 'none', border: `1px solid ${t.border}`, background: t.card }}>
+          <a href="/devoluciones" target="_blank" style={{ display: 'flex', alignItems: 'center', gap: 9, padding: '9px 11px', borderRadius: 10, fontSize: 13, color: t.dim, textDecoration: 'none', border: `1px solid ${t.border}`, background: t.card }}>
             <Icon d={ICONS.returns} size={15} c={t.dim} /> Ver portal ↗
           </a>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '8px 11px', borderRadius: 10, background: t.card, border: `1px solid ${t.border}` }}>
-            <span style={{ fontSize: 12.5, fontWeight: 500, color: t.dim }}>{dark ? 'Modo oscuro' : 'Modo claro'}</span>
-            <button className="ad-toggle" onClick={() => setDark(d => !d)} style={{ width: 44, height: 24, borderRadius: 100, border: `1px solid ${t.border}`, background: dark ? 'rgba(52,178,123,0.25)' : '#E2E5EA', cursor: 'pointer', position: 'relative', padding: 0, transition: 'background .2s' }}>
+            <span style={{ fontSize: 12.5, color: t.dim }}>{dark ? 'Modo oscuro' : 'Modo claro'}</span>
+            <button onClick={() => setDark(d => !d)} style={{ width: 44, height: 24, borderRadius: 100, border: `1px solid ${t.border}`, background: dark ? 'rgba(52,178,123,0.25)' : '#E2E5EA', cursor: 'pointer', position: 'relative', padding: 0, transition: 'background .2s' }}>
               <div style={{ position: 'absolute', top: 2, left: dark ? 22 : 2, width: 18, height: 18, borderRadius: '50%', background: dark ? ACCENT : '#fff', boxShadow: '0 1px 3px rgba(0,0,0,0.3)', transition: 'left .22s cubic-bezier(.4,0,.2,1)' }} />
             </button>
           </div>
-          <button onClick={logout} style={{ display: 'flex', alignItems: 'center', gap: 9, padding: '9px 11px', borderRadius: 10, fontSize: 13, fontWeight: 500, color: t.dim, background: 'transparent', border: `1px solid ${t.border}`, cursor: 'pointer', fontFamily: FONT }}>
+          <button onClick={logout} style={{ display: 'flex', alignItems: 'center', gap: 9, padding: '9px 11px', borderRadius: 10, fontSize: 13, color: t.dim, background: 'transparent', border: `1px solid ${t.border}`, cursor: 'pointer', fontFamily: FONT }}>
             <Icon d={ICONS.logout} size={15} c={t.dim} /> Cerrar sesión
           </button>
         </div>
@@ -550,40 +335,34 @@ export default function AdminDevolucionesPage() {
 
       {/* MAIN */}
       <div style={{ position: 'relative', zIndex: 2, flex: 1, minHeight: '100vh', display: 'flex', flexDirection: 'column' }}>
-        {/* topbar */}
         <div style={{ height: 64, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 28px', borderBottom: `1px solid ${t.border}` }}>
           <div>
-            <div style={{ fontSize: 19, fontWeight: 700, letterSpacing: '-0.02em', color: t.text }}>
-              {tab === 'list' ? 'Devoluciones' : tab === 'config' ? 'Configuración' : tab === 'branding' ? 'Personalización' : 'Excepciones'}
-            </div>
-            <div style={{ fontSize: 12.5, color: t.dim, marginTop: 1 }}>
-              {new Date().toLocaleDateString('es-ES', { weekday: 'long', day: 'numeric', month: 'long' })}
-              {tab === 'list' && ` · ${filtered.length} transacciones`}
-            </div>
+            <div style={{ fontSize: 19, fontWeight: 700, letterSpacing: '-0.02em', color: t.text }}>{tab === 'list' ? 'Devoluciones' : tab === 'config' ? 'Configuración' : tab === 'branding' ? 'Personalización' : 'Excepciones'}</div>
+            <div style={{ fontSize: 12.5, color: t.dim, marginTop: 1 }}>{new Date().toLocaleDateString('es-ES', { weekday: 'long', day: 'numeric', month: 'long' })}{tab === 'list' && ` · ${filtered.length} transacciones`}</div>
           </div>
           {tab === 'list' && (
             <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 13px', borderRadius: 10, background: t.card, border: `1px solid ${t.border}`, minWidth: 230 }}>
                 <Icon d={ICONS.search} size={15} c={t.faint} />
-                <input className="ad-input" value={search} onChange={e => setSearch(e.target.value)} placeholder="Buscar pedido o cliente…" style={{ flex: 1, background: 'transparent', border: 'none', outline: 'none', fontSize: 13, color: t.text, fontFamily: FONT }} />
+                <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Buscar pedido o cliente…" style={{ flex: 1, background: 'transparent', border: 'none', outline: 'none', fontSize: 13, color: t.text, fontFamily: FONT }} />
               </div>
-              <button className="ad-icon ad-spin" onClick={() => loadAll(token)} style={{ width: 38, height: 38, borderRadius: 10, background: t.card, border: `1px solid ${t.border}`, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              <button className="ad-spin" onClick={() => loadAll(token, 'list')} style={{ width: 38, height: 38, borderRadius: 10, background: t.card, border: `1px solid ${t.border}`, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                 <Icon d={ICONS.refresh} size={16} c={t.dim} />
               </button>
             </div>
           )}
         </div>
 
-        <div style={{ flex: 1, padding: '20px 28px' }}>
+        <div style={{ flex: 1, padding: '20px 28px', overflow: 'auto' }}>
+
           {/* ── LIST ── */}
           {tab === 'list' && (
             <>
-              {/* row1: chart + stats */}
               <div style={{ display: 'grid', gridTemplateColumns: '1.55fr 1fr', gap: 14, marginBottom: 14, animation: 'fu .4s ease both' }}>
                 <div className="ad-card" style={{ padding: '18px 20px 6px', borderRadius: 16, background: t.card, border: `1px solid ${t.border}`, boxShadow: t.shadow, backdropFilter: 'blur(14px)', overflow: 'hidden' }}>
-                  <div style={{ fontSize: 13, fontWeight: 500, color: t.dim }}>Devoluciones · últimos 14 días</div>
+                  <div style={{ fontSize: 13, color: t.dim }}>Devoluciones · últimos 14 días</div>
                   <div style={{ display: 'flex', alignItems: 'baseline', gap: 9, margin: '5px 0 4px' }}>
-                    <span style={{ fontSize: 27, fontWeight: 750, letterSpacing: '-0.02em', color: t.text, fontVariantNumeric: 'tabular-nums' }}>{daily.reduce((a, b) => a + b, 0)}</span>
+                    <span style={{ fontSize: 27, fontWeight: 750, color: t.text, fontVariantNumeric: 'tabular-nums' }}>{daily.reduce((a, b) => a + b, 0)}</span>
                     <span style={{ fontSize: 12, fontWeight: 600, color: ACCENT }}>últimas 2 semanas</span>
                   </div>
                   <AreaChart data={daily} color={ACCENT} dark={dark} />
@@ -591,9 +370,9 @@ export default function AdminDevolucionesPage() {
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gridTemplateRows: '1fr 1fr', gap: 14 }}>
                   {stats.map(s => (
                     <div key={s.label} className="ad-lift" style={{ padding: '13px 15px', borderRadius: 14, background: t.card, border: `1px solid ${t.border}`, boxShadow: t.shadow, backdropFilter: 'blur(14px)', display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
-                      <span style={{ fontSize: 11.5, fontWeight: 500, color: t.dim }}>{s.label}</span>
+                      <span style={{ fontSize: 11.5, color: t.dim }}>{s.label}</span>
                       <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', marginTop: 6 }}>
-                        <span style={{ fontSize: 21, fontWeight: 750, letterSpacing: '-0.02em', color: t.text, lineHeight: 1, fontVariantNumeric: 'tabular-nums' }}>{s.value}</span>
+                        <span style={{ fontSize: 21, fontWeight: 750, color: t.text, lineHeight: 1, fontVariantNumeric: 'tabular-nums' }}>{s.value}</span>
                         <Spark data={s.spark} color={s.accent} />
                       </div>
                     </div>
@@ -601,48 +380,39 @@ export default function AdminDevolucionesPage() {
                 </div>
               </div>
 
-              {/* row2: reasons donut + filters card */}
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14, marginBottom: 14, animation: 'fu .5s ease both' }}>
                 <div className="ad-card" style={{ padding: '16px 20px', borderRadius: 16, background: t.card, border: `1px solid ${t.border}`, boxShadow: t.shadow, backdropFilter: 'blur(14px)' }}>
                   <div style={{ fontSize: 13.5, fontWeight: 650, color: t.text, marginBottom: 12 }}>Motivos de devolución</div>
-                  {reasons.total === 0 ? (
-                    <div style={{ fontSize: 13, color: t.faint, padding: '20px 0' }}>Sin datos todavía</div>
-                  ) : (
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 18 }}>
-                      <Donut segments={reasons.entries.map(([k, v]) => ({ value: v, color: REASON_LABELS[k]?.color ?? '#8A8A96' }))} total={reasons.total} dark={dark} />
-                      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 7 }}>
-                        {reasons.entries.slice(0, 5).map(([k, v]) => (
-                          <div key={k} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                            <span style={{ width: 8, height: 8, borderRadius: 3, background: REASON_LABELS[k]?.color ?? '#8A8A96', flexShrink: 0 }} />
-                            <span style={{ fontSize: 12, color: t.text2, flex: 1 }}>{REASON_LABELS[k]?.label ?? k}</span>
-                            <span style={{ fontSize: 12, fontWeight: 600, color: t.dim, fontVariantNumeric: 'tabular-nums' }}>{Math.round((v / reasons.total) * 100)}%</span>
-                          </div>
-                        ))}
+                  {reasons.total === 0
+                    ? <div style={{ fontSize: 13, color: t.faint, padding: '20px 0' }}>Sin datos todavía</div>
+                    : <div style={{ display: 'flex', alignItems: 'center', gap: 18 }}>
+                        <Donut segments={reasons.entries.map(([k, v]) => ({ value: v, color: REASON_LABELS[k]?.color ?? '#8A8A96' }))} total={reasons.total} dark={dark} />
+                        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 7 }}>
+                          {reasons.entries.slice(0, 5).map(([k, v]) => (
+                            <div key={k} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                              <span style={{ width: 8, height: 8, borderRadius: 3, background: REASON_LABELS[k]?.color ?? '#8A8A96', flexShrink: 0 }} />
+                              <span style={{ fontSize: 12, color: t.text2, flex: 1 }}>{REASON_LABELS[k]?.label ?? k}</span>
+                              <span style={{ fontSize: 12, fontWeight: 600, color: t.dim }}>{Math.round((v / reasons.total) * 100)}%</span>
+                            </div>
+                          ))}
+                        </div>
                       </div>
-                    </div>
-                  )}
+                  }
                 </div>
                 <div className="ad-card" style={{ padding: '16px 20px', borderRadius: 16, background: t.card, border: `1px solid ${t.border}`, boxShadow: t.shadow, backdropFilter: 'blur(14px)' }}>
                   <div style={{ fontSize: 13.5, fontWeight: 650, color: t.text, marginBottom: 12 }}>Filtrar por estado</div>
-                  <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                  <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 14 }}>
                     {([['ALL', 'Todas'], ...Object.entries(STATUS_META).map(([k, v]) => [k, v.label])] as [string, string][]).map(([key, label]) => {
                       const on = filterStatus === key;
-                      return (
-                        <button key={key} className="ad-pill" onClick={() => setFilter(key)} style={{ padding: '6px 13px', fontSize: 12.5, fontWeight: on ? 600 : 500, borderRadius: 100, cursor: 'pointer', fontFamily: FONT, background: on ? 'rgba(52,178,123,0.12)' : t.head, color: on ? ACCENT : t.dim, border: `1px solid ${on ? ACCENT + '55' : t.border}` }}>{label}</button>
-                      );
+                      return <button key={key} className="ad-pill" onClick={() => setFilter(key)} style={{ padding: '6px 13px', fontSize: 12.5, fontWeight: on ? 600 : 500, borderRadius: 100, cursor: 'pointer', fontFamily: FONT, background: on ? 'rgba(52,178,123,0.12)' : t.head, color: on ? ACCENT : t.dim, border: `1px solid ${on ? ACCENT + '55' : t.border}` }}>{label}</button>;
                     })}
                   </div>
-                  <div style={{ marginTop: 14, display: 'flex', alignItems: 'center', gap: 8 }}>
-                    <span style={{ fontSize: 12.5, color: t.dim }}>Ordenar:</span>
-                    <select value={sortBy} onChange={e => setSortBy(e.target.value as 'date' | 'status')} style={{ ...inp, width: 'auto', padding: '7px 11px', fontSize: 13 }}>
-                      <option value="date">Recientes primero</option>
-                      <option value="status">Por estado</option>
-                    </select>
-                  </div>
+                  <select value={sortBy} onChange={e => setSortBy(e.target.value as 'date' | 'status')} style={{ ...inp, width: 'auto', padding: '7px 11px', fontSize: 13 }}>
+                    <option value="date">Recientes primero</option><option value="status">Por estado</option>
+                  </select>
                 </div>
               </div>
 
-              {/* table */}
               <div style={{ borderRadius: 16, background: t.card, border: `1px solid ${t.border}`, boxShadow: t.shadow, backdropFilter: 'blur(14px)', overflow: 'hidden', animation: 'fu .6s ease both' }}>
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '15px 20px', borderBottom: `1px solid ${t.border}` }}>
                   <span style={{ fontSize: 14.5, fontWeight: 650, color: t.text }}>Transacciones recientes</span>
@@ -651,36 +421,23 @@ export default function AdminDevolucionesPage() {
                 <div style={{ display: 'grid', gridTemplateColumns: '120px 1fr 110px 115px 150px 80px', padding: '10px 20px', background: t.head, borderBottom: `1px solid ${t.border}`, fontSize: 10.5, fontWeight: 600, color: t.faint, letterSpacing: '0.06em' }}>
                   <span>PEDIDO</span><span>CLIENTE</span><span>FECHA</span><span>TIPO</span><span>ESTADO</span><span style={{ textAlign: 'right' }}>IMPORTE</span>
                 </div>
-
-                {loading && <div style={{ textAlign: 'center', color: t.faint, padding: 60, fontSize: 14 }}>Cargando…</div>}
-
-                {!loading && filtered.length === 0 && (
-                  <div style={{ textAlign: 'center', padding: '60px 20px' }}>
-                    <div style={{ fontSize: 32, marginBottom: 12 }}>📭</div>
-                    <div style={{ color: t.faint, fontSize: 15 }}>{returns.length === 0 ? 'No hay devoluciones todavía' : 'Sin resultados para este filtro'}</div>
-                  </div>
-                )}
-
+                {loading && <div style={{ textAlign: 'center', color: t.faint, padding: 60 }}>Cargando…</div>}
+                {!loading && filtered.length === 0 && <div style={{ textAlign: 'center', padding: '60px 20px', color: t.faint }}>{returns.length === 0 ? 'No hay devoluciones todavía' : 'Sin resultados'}</div>}
                 {!loading && filtered.map((ret, i) => {
                   const s = STATUS_META[ret.status] ?? { label: ret.status, fg: t.dim, bg: t.head, dot: t.faint };
-                  const amount = ret.type === 'EXCHANGE'
-                    ? (ret.totalAmount ?? 0)
-                    : (ret.shopifyRefundAmount ?? ret.refundAmount ?? ret.totalAmount ?? 0);
-                  const amountLabel = ret.type === 'EXCHANGE'
-                    ? (amount > 0 ? `+${amount.toFixed(2)}€` : '—')
-                    : (amount > 0 ? `−${amount.toFixed(2)}€` : '—');
-                  const amountColor = amount <= 0 ? t.faint : ret.type === 'EXCHANGE' ? '#f0b429' : ACCENT;
-                  const initials = ret.customerName.split(' ').map(n => n[0]).slice(0, 2).join('');
-                  const urgent = ret.status === 'REQUESTED';
+                  const amount = ret.type === 'EXCHANGE' ? (ret.totalAmount ?? 0) : (ret.shopifyRefundAmount ?? ret.refundAmount ?? ret.totalAmount ?? 0);
+                  const amtLabel = ret.type === 'EXCHANGE' ? (amount > 0 ? `+${amount.toFixed(2)}€` : '—') : (amount > 0 ? `−${amount.toFixed(2)}€` : '—');
+                  const amtColor = amount <= 0 ? t.faint : ret.type === 'EXCHANGE' ? '#f0b429' : ACCENT;
+                  const initials = ret.customerName?.split(' ').map((n: string) => n[0]).slice(0, 2).join('') ?? '?';
                   return (
-                    <div key={ret.id} className="ad-row" onClick={() => window.location.href = `/admin/devoluciones/${ret.id}`}
-                      style={{ display: 'grid', gridTemplateColumns: '120px 1fr 110px 115px 150px 80px', padding: '13px 20px', alignItems: 'center', borderTop: i === 0 ? 'none' : `1px solid ${t.borderSoft}`, cursor: 'pointer', animation: `fu .4s ease both`, animationDelay: `${Math.min(i, 12) * 35}ms` }}>
+                    <div key={ret.id} className="ad-row" onClick={() => { window.location.href = `/admin/devoluciones/${ret.id}`; }}
+                      style={{ display: 'grid', gridTemplateColumns: '120px 1fr 110px 115px 150px 80px', padding: '13px 20px', alignItems: 'center', borderTop: i === 0 ? 'none' : `1px solid ${t.borderSoft}`, cursor: 'pointer', animation: 'fu .4s ease both', animationDelay: `${Math.min(i, 12) * 35}ms` }}>
                       <div>
                         <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                           <span style={{ fontSize: 14, fontWeight: 650, color: t.text, fontVariantNumeric: 'tabular-nums' }}>{ret.shopifyOrderNumber}</span>
-                          {urgent && <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#e06a6a', boxShadow: '0 0 6px #e06a6a' }} />}
+                          {ret.status === 'REQUESTED' && <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#e06a6a', boxShadow: '0 0 6px #e06a6a' }} />}
                         </div>
-                        <div style={{ fontSize: 11, color: t.faint, marginTop: 1 }}>{ret.items.length} artículo{ret.items.length !== 1 ? 's' : ''}</div>
+                        <div style={{ fontSize: 11, color: t.faint, marginTop: 1 }}>{ret.items?.length ?? 0} art.</div>
                       </div>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 11 }}>
                         <div className="ad-av" style={{ width: 32, height: 32, borderRadius: '50%', flexShrink: 0, background: `${AV[i % AV.length]}22`, border: `1px solid ${AV[i % AV.length]}44`, color: AV[i % AV.length], display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11.5, fontWeight: 700 }}>{initials}</div>
@@ -690,15 +447,9 @@ export default function AdminDevolucionesPage() {
                         </div>
                       </div>
                       <div style={{ fontSize: 12.5, color: t.dim }}>{timeAgo(ret.updatedAt ?? ret.createdAt)}</div>
-                      <div>
-                        <span style={{ fontSize: 11.5, fontWeight: 600, padding: '4px 10px', borderRadius: 8, background: ret.type === 'EXCHANGE' ? 'rgba(155,140,219,0.12)' : 'rgba(91,155,213,0.12)', color: ret.type === 'EXCHANGE' ? '#9b8cdb' : '#5b9bd5' }}>{ret.type === 'EXCHANGE' ? 'Cambio' : 'Devolución'}</span>
-                      </div>
-                      <div>
-                        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 7, fontSize: 12, fontWeight: 600, padding: '5px 12px', borderRadius: 100, color: s.fg, background: s.bg }}>
-                          <span style={{ width: 6, height: 6, borderRadius: '50%', background: s.dot, boxShadow: `0 0 6px ${s.dot}aa` }} />{s.label}
-                        </span>
-                      </div>
-                      <div className="ad-amt" style={{ textAlign: 'right', fontSize: 14, fontWeight: 650, color: amountColor, fontVariantNumeric: 'tabular-nums' }}>{amountLabel}</div>
+                      <div><span style={{ fontSize: 11.5, fontWeight: 600, padding: '4px 10px', borderRadius: 8, background: ret.type === 'EXCHANGE' ? 'rgba(155,140,219,0.12)' : 'rgba(91,155,213,0.12)', color: ret.type === 'EXCHANGE' ? '#9b8cdb' : '#5b9bd5' }}>{ret.type === 'EXCHANGE' ? 'Cambio' : 'Devolución'}</span></div>
+                      <div><span style={{ display: 'inline-flex', alignItems: 'center', gap: 7, fontSize: 12, fontWeight: 600, padding: '5px 12px', borderRadius: 100, color: s.fg, background: s.bg }}><span style={{ width: 6, height: 6, borderRadius: '50%', background: s.dot, boxShadow: `0 0 6px ${s.dot}aa` }} />{s.label}</span></div>
+                      <div className="ad-amt" style={{ textAlign: 'right', fontSize: 14, fontWeight: 650, color: amtColor, fontVariantNumeric: 'tabular-nums' }}>{amtLabel}</div>
                     </div>
                   );
                 })}
@@ -708,67 +459,105 @@ export default function AdminDevolucionesPage() {
 
           {/* ── CONFIG ── */}
           {tab === 'config' && configDraft && !loading && (
-            <div style={{ background: t.card, border: `1px solid ${t.border}`, borderRadius: 16, padding: 28, maxWidth: 720, boxShadow: t.shadow, backdropFilter: 'blur(14px)', animation: 'fu .4s ease both' }}>
-              <h2 style={{ margin: '0 0 20px', fontSize: 18, fontWeight: 700, color: t.text }}>Configuración del sistema</h2>
-              <label style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '14px 16px', background: t.head, border: `1px solid ${t.border}`, borderRadius: 12, marginBottom: 20, cursor: 'pointer' }}>
-                <input type="checkbox" checked={configDraft.enabled} onChange={e => setDraft({ ...configDraft, enabled: e.target.checked })} style={{ width: 18, height: 18, accentColor: ACCENT }} />
-                <div>
-                  <div style={{ fontWeight: 600, fontSize: 14, color: t.text }}>Sistema de devoluciones activo</div>
-                  <div style={{ fontSize: 12, color: t.dim }}>Desactiva para pausar el portal completamente</div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, animation: 'fu .4s ease both', alignItems: 'start' }}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+                <div style={{ borderRadius: 16, background: t.card, border: `1px solid ${t.border}`, boxShadow: t.shadow, backdropFilter: 'blur(14px)', overflow: 'hidden' }}>
+                  <div style={{ padding: '16px 20px', borderBottom: `1px solid ${t.border}`, display: 'flex', alignItems: 'center', gap: 10 }}>
+                    <span style={{ width: 32, height: 32, borderRadius: 9, background: configDraft.enabled ? 'rgba(52,178,123,0.15)' : 'rgba(224,106,106,0.1)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 16 }}>{configDraft.enabled ? '✓' : '✗'}</span>
+                    <div style={{ flex: 1 }}><div style={{ fontSize: 14, fontWeight: 650, color: t.text }}>Estado del sistema</div><div style={{ fontSize: 12, color: t.dim }}>Activa o pausa el portal</div></div>
+                    <span style={{ fontSize: 12, fontWeight: 700, padding: '4px 12px', borderRadius: 100, background: configDraft.enabled ? 'rgba(52,178,123,0.14)' : 'rgba(224,106,106,0.14)', color: configDraft.enabled ? '#3fb98a' : '#e06a6a' }}>{configDraft.enabled ? 'Activo' : 'Pausado'}</span>
+                  </div>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '16px 20px', cursor: 'pointer' }}>
+                    <input type="checkbox" checked={configDraft.enabled} onChange={e => setDraft({ ...configDraft, enabled: e.target.checked })} style={{ width: 18, height: 18, accentColor: ACCENT }} />
+                    <div><div style={{ fontSize: 14, fontWeight: 500, color: t.text }}>Sistema de devoluciones activo</div><div style={{ fontSize: 12, color: t.dim, marginTop: 2 }}>Los clientes pueden solicitar devoluciones</div></div>
+                  </label>
                 </div>
-                <span style={{ marginLeft: 'auto', fontSize: 12, fontWeight: 600, padding: '4px 11px', borderRadius: 100, background: configDraft.enabled ? 'rgba(63,185,138,0.14)' : 'rgba(224,106,106,0.14)', color: configDraft.enabled ? '#3fb98a' : '#e06a6a' }}>{configDraft.enabled ? 'Activo' : 'Pausado'}</span>
-              </label>
-              <div style={{ height: 1, background: t.border, margin: '0 0 20px' }} />
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 16 }}>
-                <label style={cfgLabel}><span>Plazo de devolución (días)</span>
-                  <input type="number" min={1} max={365} style={inp} value={configDraft.windowDays} onChange={e => setDraft({ ...configDraft, windowDays: Number(e.target.value) })} /></label>
-                <label style={cfgLabel}><span>Precio etiqueta (€)</span>
-                  <input type="number" step="0.01" min={0} style={inp} value={configDraft.labelPrice} onChange={e => setDraft({ ...configDraft, labelPrice: Number(e.target.value) })} /></label>
-                <label style={cfgLabel}><span>Política de cambios</span>
-                  <select style={inp} value={configDraft.exchangePolicy} onChange={e => setDraft({ ...configDraft, exchangePolicy: e.target.value as ReturnConfig['exchangePolicy'] })}>
-                    <option value="ANY">Cualquier producto</option><option value="SAME_TYPE">Mismo tipo</option><option value="VARIANT_ONLY">Solo otra variante</option>
-                  </select></label>
-                <label style={cfgLabel}><span>Código SendCloud retorno</span>
-                  <input type="text" style={inp} value={configDraft.shippingProductCode ?? ''} placeholder="correos:paqretorno" onChange={e => setDraft({ ...configDraft, shippingProductCode: e.target.value || null })} /></label>
+                <div style={{ borderRadius: 16, background: t.card, border: `1px solid ${t.border}`, boxShadow: t.shadow, backdropFilter: 'blur(14px)' }}>
+                  <div style={{ padding: '16px 20px 14px', borderBottom: `1px solid ${t.border}` }}><div style={{ fontSize: 14, fontWeight: 650, color: t.text }}>Plazos y precios</div></div>
+                  <div style={{ padding: '18px 20px', display: 'flex', flexDirection: 'column', gap: 14 }}>
+                    <label style={cl}><span>Plazo de devolución (días)</span><input type="number" min={1} max={365} style={inp} value={configDraft.windowDays} onChange={e => setDraft({ ...configDraft, windowDays: Number(e.target.value) })} /><span style={{ fontSize: 11.5, color: t.faint }}>{configDraft.windowDays} días desde la entrega</span></label>
+                    <label style={cl}><span>Precio etiqueta (€)</span><input type="number" step="0.01" min={0} style={inp} value={configDraft.labelPrice} onChange={e => setDraft({ ...configDraft, labelPrice: Number(e.target.value) })} /><span style={{ fontSize: 11.5, color: t.faint }}>{configDraft.labelPrice === 0 ? 'Gratuita' : `${configDraft.labelPrice}€ al cliente`}</span></label>
+                  </div>
+                </div>
               </div>
-              <label style={{ ...cfgLabel, marginBottom: 24 }}><span>Texto términos legales (opcional)</span>
-                <textarea style={{ ...inp, minHeight: 90, resize: 'vertical' }} value={configDraft.termsText ?? ''} onChange={e => setDraft({ ...configDraft, termsText: e.target.value || null })} placeholder="Se mostrará al cliente en el portal…" /></label>
-              <div style={{ display: 'flex', gap: 10 }}>
-                <button onClick={() => setDraft(config)} style={btnSecondary}>Descartar</button>
-                <button onClick={saveConfig} className="ad-btn-primary" disabled={savingConfig || JSON.stringify(config) === JSON.stringify(configDraft)} style={{ ...btnPrimary, flex: 1, opacity: (savingConfig || JSON.stringify(config) === JSON.stringify(configDraft)) ? 0.5 : 1 }}>{savingConfig ? 'Guardando…' : 'Guardar cambios'}</button>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+                <div style={{ borderRadius: 16, background: t.card, border: `1px solid ${t.border}`, boxShadow: t.shadow, backdropFilter: 'blur(14px)' }}>
+                  <div style={{ padding: '16px 20px 14px', borderBottom: `1px solid ${t.border}` }}><div style={{ fontSize: 14, fontWeight: 650, color: t.text }}>Política de cambios</div></div>
+                  <div style={{ padding: '18px 20px', display: 'flex', flexDirection: 'column', gap: 14 }}>
+                    <label style={cl}><span>Política</span>
+                      <select style={inp} value={configDraft.exchangePolicy} onChange={e => setDraft({ ...configDraft, exchangePolicy: e.target.value })}>
+                        <option value="ANY">Cualquier producto del catálogo</option><option value="SAME_TYPE">Mismo tipo de producto</option><option value="VARIANT_ONLY">Solo otra variante del mismo</option>
+                      </select></label>
+                    <label style={cl}><span>Código SendCloud retorno</span><input type="text" style={inp} value={configDraft.shippingProductCode ?? ''} placeholder="correos:paqretorno" onChange={e => setDraft({ ...configDraft, shippingProductCode: e.target.value || null })} /></label>
+                  </div>
+                </div>
+                <div style={{ borderRadius: 16, background: t.card, border: `1px solid ${t.border}`, boxShadow: t.shadow, backdropFilter: 'blur(14px)' }}>
+                  <div style={{ padding: '16px 20px 14px', borderBottom: `1px solid ${t.border}` }}><div style={{ fontSize: 14, fontWeight: 650, color: t.text }}>Términos legales</div></div>
+                  <div style={{ padding: '18px 20px' }}><textarea style={{ ...inp, minHeight: 100, resize: 'vertical' }} value={configDraft.termsText ?? ''} onChange={e => setDraft({ ...configDraft, termsText: e.target.value || null })} placeholder="Política de devoluciones…" /></div>
+                </div>
+                <div style={{ display: 'flex', gap: 10 }}>
+                  <button onClick={() => setDraft(config)} style={btnS}>Descartar</button>
+                  <button onClick={saveConfig} className="ad-btnP" disabled={savingConfig} style={{ ...btnP, flex: 1, opacity: savingConfig ? 0.5 : 1 }}>{savingConfig ? 'Guardando…' : 'Guardar cambios'}</button>
+                </div>
               </div>
             </div>
           )}
 
           {/* ── BRANDING ── */}
           {tab === 'branding' && portalDraft && !loading && (
-            <div style={{ background: t.card, border: `1px solid ${t.border}`, borderRadius: 16, padding: 28, maxWidth: 720, boxShadow: t.shadow, backdropFilter: 'blur(14px)', animation: 'fu .4s ease both' }}>
-              <h2 style={{ margin: '0 0 6px', fontSize: 18, fontWeight: 700, color: t.text }}>Personalización del portal</h2>
-              <p style={{ margin: '0 0 24px', fontSize: 13, color: t.dim }}>Estos ajustes se aplican al portal público de devoluciones.</p>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 16 }}>
-                <label style={cfgLabel}><span>Título del portal</span><input type="text" style={inp} value={portalDraft.titleText} onChange={e => setPortalDraft({ ...portalDraft, titleText: e.target.value })} /></label>
-                <label style={cfgLabel}><span>Subtítulo</span><input type="text" style={inp} value={portalDraft.subtitleText} onChange={e => setPortalDraft({ ...portalDraft, subtitleText: e.target.value })} /></label>
-                <label style={cfgLabel}><span>Color principal</span>
-                  <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                    <input type="color" value={portalDraft.primaryColor} onChange={e => setPortalDraft({ ...portalDraft, primaryColor: e.target.value })} style={{ width: 42, height: 40, border: `1px solid ${t.border}`, borderRadius: 8, cursor: 'pointer', padding: 2, background: t.inputBg }} />
-                    <input type="text" style={{ ...inp, flex: 1 }} value={portalDraft.primaryColor} onChange={e => setPortalDraft({ ...portalDraft, primaryColor: e.target.value })} />
-                  </div></label>
-                <label style={cfgLabel}><span>Estilo tarjeta</span>
-                  <select style={inp} value={portalDraft.cardStyle} onChange={e => setPortalDraft({ ...portalDraft, cardStyle: e.target.value })}><option value="light">Claro</option><option value="dark">Oscuro</option></select></label>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, animation: 'fu .4s ease both', alignItems: 'start' }}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+                <div style={{ borderRadius: 16, background: t.card, border: `1px solid ${t.border}`, boxShadow: t.shadow, backdropFilter: 'blur(14px)' }}>
+                  <div style={{ padding: '16px 20px 14px', borderBottom: `1px solid ${t.border}` }}><div style={{ fontSize: 14, fontWeight: 650, color: t.text }}>Textos del portal</div></div>
+                  <div style={{ padding: '18px 20px', display: 'flex', flexDirection: 'column', gap: 14 }}>
+                    <label style={cl}><span>Título principal</span><input type="text" style={inp} value={portalDraft.titleText} onChange={e => setPortalDraft({ ...portalDraft, titleText: e.target.value })} /></label>
+                    <label style={cl}><span>Subtítulo</span><input type="text" style={inp} value={portalDraft.subtitleText} onChange={e => setPortalDraft({ ...portalDraft, subtitleText: e.target.value })} /></label>
+                  </div>
+                </div>
+                <div style={{ borderRadius: 16, background: t.card, border: `1px solid ${t.border}`, boxShadow: t.shadow, backdropFilter: 'blur(14px)' }}>
+                  <div style={{ padding: '16px 20px 14px', borderBottom: `1px solid ${t.border}` }}><div style={{ fontSize: 14, fontWeight: 650, color: t.text }}>Color y estilo</div></div>
+                  <div style={{ padding: '18px 20px', display: 'flex', flexDirection: 'column', gap: 14 }}>
+                    <label style={cl}><span>Color principal</span>
+                      <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+                        <input type="color" value={portalDraft.primaryColor} onChange={e => setPortalDraft({ ...portalDraft, primaryColor: e.target.value })} style={{ width: 46, height: 46, border: `1px solid ${t.border}`, borderRadius: 10, cursor: 'pointer', padding: 3, background: t.inputBg, flexShrink: 0 }} />
+                        <input type="text" style={{ ...inp, flex: 1 }} value={portalDraft.primaryColor} onChange={e => setPortalDraft({ ...portalDraft, primaryColor: e.target.value })} />
+                      </div>
+                    </label>
+                    <label style={cl}><span>Estilo tarjeta</span>
+                      <select style={inp} value={portalDraft.cardStyle} onChange={e => setPortalDraft({ ...portalDraft, cardStyle: e.target.value })}><option value="light">Claro</option><option value="dark">Oscuro</option></select>
+                    </label>
+                  </div>
+                </div>
+                <div style={{ borderRadius: 16, border: `1px solid ${t.border}`, overflow: 'hidden', background: portalDraft.cardStyle === 'dark' ? '#0f172a' : '#f8fafc' }}>
+                  <div style={{ padding: '10px 16px', fontSize: 10.5, color: t.faint, fontWeight: 600, letterSpacing: '0.06em', borderBottom: `1px solid ${t.border}` }}>PREVIEW</div>
+                  <div style={{ padding: '18px 16px', display: 'flex', flexDirection: 'column', gap: 10 }}>
+                    {portalDraft.logoUrl && <img src={portalDraft.logoUrl} alt="" style={{ height: 26, objectFit: 'contain', objectPosition: 'left' }} />}
+                    <div style={{ fontSize: 16, fontWeight: 750, color: portalDraft.cardStyle === 'dark' ? '#fff' : '#111', letterSpacing: '-0.02em' }}>{portalDraft.titleText || 'Cambios & Devoluciones'}</div>
+                    <div style={{ fontSize: 12, color: portalDraft.cardStyle === 'dark' ? 'rgba(255,255,255,0.5)' : '#64748b' }}>{portalDraft.subtitleText || 'Gestiona tu devolución'}</div>
+                    <div style={{ display: 'flex', gap: 8 }}>
+                      <div style={{ height: 36, flex: 1, borderRadius: 9, background: `${portalDraft.primaryColor}20`, border: `1px solid ${portalDraft.primaryColor}40`, display: 'flex', alignItems: 'center', paddingLeft: 12 }}><span style={{ fontSize: 12, color: portalDraft.cardStyle === 'dark' ? 'rgba(255,255,255,0.3)' : '#94a3b8' }}>#1234</span></div>
+                      <div style={{ height: 36, paddingInline: 14, borderRadius: 9, background: portalDraft.primaryColor, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, fontWeight: 700, color: '#fff' }}>Buscar</div>
+                    </div>
+                  </div>
+                </div>
               </div>
-              <div style={{ height: 1, background: t.border, margin: '4px 0 20px' }} />
-              <p style={{ margin: '0 0 12px', fontSize: 13, fontWeight: 600, color: t.text2 }}>Imágenes y favicon</p>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 16 }}>
-                <label style={cfgLabel}><span>URL del logo</span><input type="url" style={inp} value={portalDraft.logoUrl ?? ''} placeholder="https://…" onChange={e => setPortalDraft({ ...portalDraft, logoUrl: e.target.value || null })} /></label>
-                <label style={cfgLabel}>
-                  <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>URL del favicon{portalDraft.faviconUrl && <img src={portalDraft.faviconUrl} alt="" style={{ width: 16, height: 16, borderRadius: 2 }} />}</span>
-                  <input type="url" style={inp} value={portalDraft.faviconUrl ?? ''} placeholder="https://…/favicon.png" onChange={e => setPortalDraft({ ...portalDraft, faviconUrl: e.target.value || null })} /></label>
-                <label style={cfgLabel}><span>URL imagen de fondo</span><input type="url" style={inp} value={portalDraft.backgroundUrl ?? ''} placeholder="https://…" onChange={e => setPortalDraft({ ...portalDraft, backgroundUrl: e.target.value || null })} /></label>
-                <label style={cfgLabel}><span>URL política / términos</span><input type="url" style={inp} value={portalDraft.policyUrl ?? ''} placeholder="https://…" onChange={e => setPortalDraft({ ...portalDraft, policyUrl: e.target.value || null })} /></label>
-              </div>
-              <div style={{ display: 'flex', gap: 10, marginTop: 8 }}>
-                <button onClick={() => setPortalDraft(portalCfg)} style={btnSecondary}>Descartar</button>
-                <button onClick={saveBranding} className="ad-btn-primary" disabled={savingPortal || JSON.stringify(portalCfg) === JSON.stringify(portalDraft)} style={{ ...btnPrimary, flex: 1, opacity: (savingPortal || JSON.stringify(portalCfg) === JSON.stringify(portalDraft)) ? 0.5 : 1 }}>{savingPortal ? 'Guardando…' : 'Guardar personalización'}</button>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+                <div style={{ borderRadius: 16, background: t.card, border: `1px solid ${t.border}`, boxShadow: t.shadow, backdropFilter: 'blur(14px)' }}>
+                  <div style={{ padding: '16px 20px 14px', borderBottom: `1px solid ${t.border}` }}><div style={{ fontSize: 14, fontWeight: 650, color: t.text }}>Imágenes</div></div>
+                  <div style={{ padding: '18px 20px', display: 'flex', flexDirection: 'column', gap: 14 }}>
+                    <label style={cl}><span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>Logo{portalDraft.logoUrl && <img src={portalDraft.logoUrl} alt="" style={{ height: 18, borderRadius: 3, objectFit: 'contain' }} />}</span><input type="url" style={inp} value={portalDraft.logoUrl ?? ''} placeholder="https://cdn.shopify.com/…" onChange={e => setPortalDraft({ ...portalDraft, logoUrl: e.target.value || null })} /></label>
+                    <label style={cl}><span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>Favicon{portalDraft.faviconUrl && <img src={portalDraft.faviconUrl} alt="" style={{ width: 16, height: 16, borderRadius: 3 }} />}</span><input type="url" style={inp} value={portalDraft.faviconUrl ?? ''} placeholder="https://…/favicon.png" onChange={e => setPortalDraft({ ...portalDraft, faviconUrl: e.target.value || null })} /></label>
+                    <label style={cl}><span>Imagen de fondo</span><input type="url" style={inp} value={portalDraft.backgroundUrl ?? ''} placeholder="https://…" onChange={e => setPortalDraft({ ...portalDraft, backgroundUrl: e.target.value || null })} /></label>
+                  </div>
+                </div>
+                <div style={{ borderRadius: 16, background: t.card, border: `1px solid ${t.border}`, boxShadow: t.shadow, backdropFilter: 'blur(14px)' }}>
+                  <div style={{ padding: '16px 20px 14px', borderBottom: `1px solid ${t.border}` }}><div style={{ fontSize: 14, fontWeight: 650, color: t.text }}>Legal</div></div>
+                  <div style={{ padding: '18px 20px' }}><label style={cl}><span>URL política</span><input type="url" style={inp} value={portalDraft.policyUrl ?? ''} placeholder="https://speedwear.es/policies/refund-policy" onChange={e => setPortalDraft({ ...portalDraft, policyUrl: e.target.value || null })} /></label></div>
+                </div>
+                <div style={{ display: 'flex', gap: 10 }}>
+                  <button onClick={() => setPortalDraft(portalCfg)} style={btnS}>Descartar</button>
+                  <button onClick={saveBranding} className="ad-btnP" disabled={savingPortal} style={{ ...btnP, flex: 1, opacity: savingPortal ? 0.5 : 1 }}>{savingPortal ? 'Guardando…' : 'Guardar personalización'}</button>
+                </div>
               </div>
             </div>
           )}
@@ -776,71 +565,79 @@ export default function AdminDevolucionesPage() {
           {/* ── EXCEPTIONS ── */}
           {tab === 'exceptions' && !loading && (
             <div style={{ animation: 'fu .4s ease both' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-                <div style={{ fontSize: 14, color: t.dim }}>{exceptions.length} excepcion{exceptions.length !== 1 ? 'es' : ''}</div>
-                <button onClick={() => setShowNewEx(true)} className="ad-btn-primary" style={btnPrimary}>+ Nueva excepción</button>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 18 }}>
+                <div><div style={{ fontSize: 15, fontWeight: 650, color: t.text }}>Excepciones activas</div><div style={{ fontSize: 12.5, color: t.dim, marginTop: 2 }}>{exceptions.length} regla{exceptions.length !== 1 ? 's' : ''}</div></div>
+                <button onClick={() => setShowNewEx(true)} className="ad-btnP" style={btnP}>+ Nueva excepción</button>
               </div>
-              {exceptions.length === 0 ? (
-                <div style={{ textAlign: 'center', color: t.faint, padding: 80, background: t.card, border: `1px solid ${t.border}`, borderRadius: 16, boxShadow: t.shadow }}>
-                  Sin excepciones. Crea una para extender plazos, regalar etiquetas o bloquear devoluciones.
-                </div>
-              ) : (
-                <div style={{ background: t.card, border: `1px solid ${t.border}`, borderRadius: 16, overflow: 'hidden', boxShadow: t.shadow, backdropFilter: 'blur(14px)' }}>
-                  <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-                    <thead>
-                      <tr style={{ background: t.head, fontSize: 10.5, textTransform: 'uppercase', color: t.faint, letterSpacing: '0.06em' }}>
-                        {['Match', 'Tipo', 'Detalle', 'Expira', 'Estado', ''].map((h, i) => <th key={i} style={{ padding: '11px 16px', textAlign: 'left', fontWeight: 600 }}>{h}</th>)}
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {exceptions.map((ex, i) => {
-                        const meta = EXCEPTION_LABELS[ex.type] ?? { label: ex.type, color: t.dim };
-                        return (
-                          <tr key={ex.id} style={{ borderTop: i === 0 ? 'none' : `1px solid ${t.borderSoft}`, fontSize: 14 }}>
-                            <td style={{ padding: '13px 16px' }}>
-                              {ex.orderNumber && <div style={{ fontWeight: 600, color: t.text }}>{ex.orderNumber}</div>}
-                              {ex.customerEmail && <div style={{ fontSize: 12, color: t.dim }}>{ex.customerEmail}</div>}
-                            </td>
-                            <td style={{ padding: '13px 16px' }}><span style={{ fontSize: 12, fontWeight: 600, color: meta.color }}>{meta.label}</span></td>
-                            <td style={{ padding: '13px 16px', color: t.text2 }}>
-                              {ex.type === 'EXTEND_WINDOW' && <span>+{ex.extraDays} días</span>}
-                              {ex.notes && <div style={{ fontSize: 12, color: t.dim }}>{ex.notes}</div>}
-                            </td>
-                            <td style={{ padding: '13px 16px', fontSize: 12, color: t.faint }}>{ex.expiresAt ? new Date(ex.expiresAt).toLocaleDateString('es-ES') : '—'}</td>
-                            <td style={{ padding: '13px 16px' }}>
-                              <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}>
-                                <input type="checkbox" checked={ex.active} onChange={e => toggleException(ex.id, e.target.checked)} style={{ accentColor: ACCENT }} />
-                                <span style={{ fontSize: 12, color: ex.active ? '#3fb98a' : t.faint }}>{ex.active ? 'Activa' : 'Inactiva'}</span>
-                              </label>
-                            </td>
-                            <td style={{ padding: '13px 16px', textAlign: 'right' }}>
-                              <button onClick={() => deleteException(ex.id)} style={{ padding: '6px 12px', fontSize: 12, fontWeight: 500, background: 'rgba(224,106,106,0.08)', border: '1px solid rgba(224,106,106,0.3)', color: '#e06a6a', borderRadius: 8, cursor: 'pointer', fontFamily: FONT }}>Borrar</button>
-                            </td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
+              {exceptions.length === 0 && (
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2,1fr)', gap: 12 }}>
+                  {Object.entries(EXCEPTION_LABELS).map(([key, meta]) => (
+                    <button key={key} onClick={() => { setNewEx(p => ({ ...p, type: key })); setShowNewEx(true); }} style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '16px 18px', borderRadius: 14, background: t.card, border: `1px dashed ${t.border}`, cursor: 'pointer', fontFamily: FONT, textAlign: 'left', transition: 'all .2s' }}
+                      onMouseEnter={e => { (e.currentTarget as HTMLElement).style.borderColor = meta.color + '66'; (e.currentTarget as HTMLElement).style.background = meta.color + '0a'; }}
+                      onMouseLeave={e => { (e.currentTarget as HTMLElement).style.borderColor = t.border; (e.currentTarget as HTMLElement).style.background = t.card; }}>
+                      <span style={{ width: 36, height: 36, borderRadius: 10, background: meta.color + '18', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 18 }}>{key === 'EXTEND_WINDOW' ? '📅' : key === 'FREE_LABEL' ? '🏷️' : key === 'ACCEPT_EXPIRED' ? '✅' : '🚫'}</span>
+                      <div><div style={{ fontSize: 13.5, fontWeight: 600, color: meta.color }}>{meta.label}</div><div style={{ fontSize: 12, color: t.dim, marginTop: 2 }}>{key === 'EXTEND_WINDOW' ? 'Amplía el plazo' : key === 'FREE_LABEL' ? 'Sin coste de etiqueta' : key === 'ACCEPT_EXPIRED' ? 'Fuera de plazo' : 'Bloquea devoluciones'}</div></div>
+                    </button>
+                  ))}
                 </div>
               )}
-
+              {exceptions.length > 0 && (
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2,1fr)', gap: 12 }}>
+                  {exceptions.map((ex, i) => {
+                    const meta = EXCEPTION_LABELS[ex.type] ?? { label: ex.type, color: t.dim };
+                    const emoji = ex.type === 'EXTEND_WINDOW' ? '📅' : ex.type === 'FREE_LABEL' ? '🏷️' : ex.type === 'ACCEPT_EXPIRED' ? '✅' : '🚫';
+                    return (
+                      <div key={ex.id} className="ad-lift" style={{ padding: '18px 20px', borderRadius: 16, background: t.card, border: `1px solid ${ex.active ? meta.color + '33' : t.border}`, boxShadow: t.shadow, backdropFilter: 'blur(14px)', opacity: ex.active ? 1 : 0.6, position: 'relative', overflow: 'hidden', animation: 'fu .4s ease both', animationDelay: `${i * 40}ms` }}>
+                        {ex.active && <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 2, background: `linear-gradient(90deg,${meta.color},transparent)` }} />}
+                        <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 12 }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 11 }}>
+                            <span style={{ width: 36, height: 36, borderRadius: 10, background: meta.color + '18', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 18 }}>{emoji}</span>
+                            <div><div style={{ fontSize: 13.5, fontWeight: 650, color: meta.color }}>{meta.label}</div>{ex.type === 'EXTEND_WINDOW' && <div style={{ fontSize: 12, color: t.dim }}>+{ex.extraDays} días</div>}</div>
+                          </div>
+                          <div onClick={() => toggleException(ex.id, !ex.active)} style={{ cursor: 'pointer' }}>
+                            <div style={{ width: 38, height: 22, borderRadius: 100, background: ex.active ? ACCENT : t.head, border: `1px solid ${ex.active ? ACCENT : t.border}`, position: 'relative', transition: 'background .2s' }}>
+                              <div style={{ position: 'absolute', top: 2, left: ex.active ? 18 : 2, width: 16, height: 16, borderRadius: '50%', background: '#fff', boxShadow: '0 1px 3px rgba(0,0,0,0.2)', transition: 'left .2s' }} />
+                            </div>
+                          </div>
+                        </div>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                          {ex.orderNumber && <div style={{ display: 'flex', gap: 8 }}><span style={{ fontSize: 11, fontWeight: 600, color: t.faint, width: 52 }}>PEDIDO</span><span style={{ fontSize: 13, fontWeight: 650, color: t.text }}>{ex.orderNumber}</span></div>}
+                          {ex.customerEmail && <div style={{ display: 'flex', gap: 8 }}><span style={{ fontSize: 11, fontWeight: 600, color: t.faint, width: 52 }}>EMAIL</span><span style={{ fontSize: 13, color: t.text2 }}>{ex.customerEmail}</span></div>}
+                          {ex.notes && <div style={{ fontSize: 12, color: t.dim, padding: '8px 10px', borderRadius: 8, background: t.head }}>{ex.notes}</div>}
+                        </div>
+                        <button onClick={() => deleteException(ex.id)} style={{ marginTop: 14, width: '100%', padding: '8px', fontSize: 12.5, fontWeight: 500, background: 'transparent', border: `1px solid ${t.border}`, color: t.dim, borderRadius: 9, cursor: 'pointer', fontFamily: FONT, transition: 'all .15s' }}
+                          onMouseEnter={e => { (e.currentTarget as HTMLElement).style.borderColor = '#e06a6a66'; (e.currentTarget as HTMLElement).style.color = '#e06a6a'; }}
+                          onMouseLeave={e => { (e.currentTarget as HTMLElement).style.borderColor = t.border; (e.currentTarget as HTMLElement).style.color = t.dim; }}>
+                          Eliminar excepción
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
               {showNewEx && (
-                <div onClick={() => setShowNewEx(false)} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', backdropFilter: 'blur(3px)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16, zIndex: 100, animation: 'fi .15s ease both' }}>
-                  <div onClick={e => e.stopPropagation()} style={{ background: t.drawer, borderRadius: 16, width: '100%', maxWidth: 480, padding: 28, boxShadow: '0 30px 80px -20px rgba(0,0,0,0.6)', border: `1px solid ${t.border}` }}>
-                    <h3 style={{ margin: '0 0 20px', fontSize: 17, fontWeight: 700, color: t.text }}>Nueva excepción</h3>
-                    {[
-                      { label: 'Tipo', content: (<select style={inp} value={newEx.type} onChange={e => setNewEx({ ...newEx, type: e.target.value })}><option value="EXTEND_WINDOW">Ampliar plazo</option><option value="FREE_LABEL">Etiqueta gratis</option><option value="ACCEPT_EXPIRED">Aceptar fuera de plazo</option><option value="BLOCK">Bloquear devolución</option></select>) },
-                      { label: 'Número de pedido (opcional)', content: (<input type="text" style={inp} placeholder="#12345" value={newEx.orderNumber} onChange={e => setNewEx({ ...newEx, orderNumber: e.target.value })} />) },
-                      { label: 'Email cliente (opcional)', content: (<input type="email" style={inp} placeholder="cliente@email.com" value={newEx.customerEmail} onChange={e => setNewEx({ ...newEx, customerEmail: e.target.value })} />) },
-                      ...(newEx.type === 'EXTEND_WINDOW' ? [{ label: 'Días extra', content: (<input type="number" min={1} max={365} style={inp} value={newEx.extraDays} onChange={e => setNewEx({ ...newEx, extraDays: Number(e.target.value) })} />) }] : []),
-                      { label: 'Notas internas', content: (<input type="text" style={inp} placeholder="Ej: cliente VIP, error nuestro…" value={newEx.notes} onChange={e => setNewEx({ ...newEx, notes: e.target.value })} />) },
-                      { label: 'Expira (opcional)', content: (<input type="date" style={inp} value={newEx.expiresAt} onChange={e => setNewEx({ ...newEx, expiresAt: e.target.value })} />) },
-                    ].map((row, i) => (
-                      <label key={i} style={{ ...cfgLabel, marginBottom: 14 }}><span>{row.label}</span>{row.content}</label>
-                    ))}
-                    <div style={{ display: 'flex', gap: 10, marginTop: 8 }}>
-                      <button onClick={() => setShowNewEx(false)} style={btnSecondary}>Cancelar</button>
-                      <button onClick={createException} className="ad-btn-primary" style={{ ...btnPrimary, flex: 1 }}>Crear excepción</button>
+                <div onClick={() => setShowNewEx(false)} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', backdropFilter: 'blur(3px)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 100, animation: 'fi .15s ease both' }}>
+                  <div onClick={e => e.stopPropagation()} style={{ background: t.drawer, borderRadius: 18, width: '100%', maxWidth: 500, padding: 28, boxShadow: '0 30px 80px -20px rgba(0,0,0,0.6)', border: `1px solid ${t.border}`, animation: 'pop .18s ease both', margin: 16 }}>
+                    <h3 style={{ margin: '0 0 6px', fontSize: 18, fontWeight: 700, color: t.text }}>Nueva excepción</h3>
+                    <p style={{ margin: '0 0 22px', fontSize: 13, color: t.dim }}>Regla especial para un pedido o cliente</p>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+                      <label style={cl}><span>Tipo</span>
+                        <select style={inp} value={newEx.type} onChange={e => setNewEx({ ...newEx, type: e.target.value })}>
+                          <option value="EXTEND_WINDOW">📅 Ampliar plazo</option><option value="FREE_LABEL">🏷️ Etiqueta gratis</option><option value="ACCEPT_EXPIRED">✅ Aceptar fuera de plazo</option><option value="BLOCK">🚫 Bloquear devolución</option>
+                        </select></label>
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                        <label style={cl}><span>Nº pedido</span><input type="text" style={inp} placeholder="#12345" value={newEx.orderNumber} onChange={e => setNewEx({ ...newEx, orderNumber: e.target.value })} /></label>
+                        <label style={cl}><span>Email</span><input type="email" style={inp} placeholder="cliente@email.com" value={newEx.customerEmail} onChange={e => setNewEx({ ...newEx, customerEmail: e.target.value })} /></label>
+                      </div>
+                      {newEx.type === 'EXTEND_WINDOW' && <label style={cl}><span>Días extra</span><input type="number" min={1} max={365} style={inp} value={newEx.extraDays} onChange={e => setNewEx({ ...newEx, extraDays: Number(e.target.value) })} /></label>}
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                        <label style={cl}><span>Notas</span><input type="text" style={inp} placeholder="Cliente VIP…" value={newEx.notes} onChange={e => setNewEx({ ...newEx, notes: e.target.value })} /></label>
+                        <label style={cl}><span>Expira</span><input type="date" style={inp} value={newEx.expiresAt} onChange={e => setNewEx({ ...newEx, expiresAt: e.target.value })} /></label>
+                      </div>
+                    </div>
+                    <div style={{ display: 'flex', gap: 10, marginTop: 22 }}>
+                      <button onClick={() => setShowNewEx(false)} style={btnS}>Cancelar</button>
+                      <button onClick={createException} className="ad-btnP" style={{ ...btnP, flex: 1 }}>Crear excepción</button>
                     </div>
                   </div>
                 </div>

@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { MetaService } from '../meta/meta.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { ShopifyAdapter, ShopifyBalanceTransaction } from '../shopify/shopify.adapter';
 
@@ -57,7 +58,8 @@ export class EconomicsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly config: ConfigService,
-    private readonly shopify: ShopifyAdapter
+    private readonly shopify: ShopifyAdapter,
+    private readonly meta: MetaService
   ) {}
 
   async today() {
@@ -370,9 +372,14 @@ export class EconomicsService {
       }
     );
 
+    const adSpend = await this.meta.spendForRange(
+      start.toISOString().slice(0, 10),
+      end.toISOString().slice(0, 10)
+    );
+
     const shippingReserve = breakdowns.reduce((sum, breakdown) => sum + breakdown.shippingCost, 0);
     const replacementReserve = totals.productCost + totals.wasteCost;
-    const cashOut = totals.shippingCost + replacementReserve + totals.shopifyFee + totals.taxReserve;
+    const cashOut = totals.shippingCost + replacementReserve + totals.shopifyFee + totals.taxReserve + adSpend;
     const cashFree = totals.grossRevenue - cashOut;
     const cashFreePct = totals.grossRevenue > 0 ? (cashFree / totals.grossRevenue) * 100 : null;
     const cashStatus = this.cashStatus(cashFree, totals.grossRevenue);
@@ -382,9 +389,11 @@ export class EconomicsService {
       to: end.toISOString(),
       currency: breakdowns[0]?.currency ?? 'EUR',
       ...totals,
-      netMarginPct: totals.grossRevenue > 0 ? (totals.netMargin / totals.grossRevenue) * 100 : null,
+      netMargin: totals.netMargin - adSpend,
+      netMarginPct: totals.grossRevenue > 0 ? ((totals.netMargin - adSpend) / totals.grossRevenue) * 100 : null,
       shippingReserve,
       replacementReserve,
+      adSpend,
       taxReserveRate: this.taxReserveRate(),
       cashOut,
       cashFree,
