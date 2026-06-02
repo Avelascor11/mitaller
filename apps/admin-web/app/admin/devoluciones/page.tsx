@@ -201,7 +201,7 @@ function AreaChart({ data, color, dark }: { data: number[]; color: string; dark:
       </defs>
       {[0.33, 0.66].map(g => <line key={g} x1={pad} x2={w - pad} y1={h * g} y2={h * g} stroke={dark ? 'rgba(255,255,255,0.05)' : 'rgba(20,22,28,0.05)'} strokeWidth={1} />)}
       <path d={area} fill="url(#ag)" />
-      <path d={line} fill="none" stroke={color} strokeWidth={2.2} strokeLinecap="round" strokeLinejoin="round" />
+      <path className="ad-chartline" d={line} fill="none" stroke={color} strokeWidth={2.2} strokeLinecap="round" strokeLinejoin="round" />
       <circle cx={x(safe.length - 1)} cy={y(safe[safe.length - 1])} r={3.5} fill={color} stroke={dark ? '#0b0b0f' : '#fff'} strokeWidth={2} />
     </svg>
   );
@@ -211,7 +211,7 @@ function Donut({ segments, total, dark }: { segments: Array<{ value: number; col
   const r = 42, C = 2 * Math.PI * r;
   let off = 0;
   return (
-    <svg width={108} height={108} viewBox="0 0 108 108">
+    <svg className="ad-donut" width={108} height={108} viewBox="0 0 108 108">
       <g transform="translate(54,54) rotate(-90)">
         <circle r={r} fill="none" stroke={dark ? 'rgba(255,255,255,0.05)' : 'rgba(20,22,28,0.05)'} strokeWidth={11} />
         {total > 0 && segments.map((s, i) => {
@@ -442,7 +442,7 @@ export default function AdminDevolucionesPage() {
             Token JWT
             <input type="password" style={inp} value={tokenInput} onChange={e => setTokenInput(e.target.value)} placeholder="eyJ..." required />
           </label>
-          <button type="submit" style={{ ...btnPrimary, width: '100%' }}>Entrar →</button>
+          <button type="submit" className="ad-btn-primary" style={{ ...btnPrimary, width: '100%' }}>Entrar →</button>
         </form>
       </div>
     </div>
@@ -460,11 +460,43 @@ export default function AdminDevolucionesPage() {
   ];
 
   return (
-    <div style={{ minHeight: '100vh', display: 'flex', position: 'relative', overflow: 'hidden', background: t.bgBase, fontFamily: FONT, color: t.text }}>
-      <style>{`@keyframes fu{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}@keyframes fi{from{opacity:0}to{opacity:1}}
-        .ad-row:hover{background:${t.hover} !important}
-        .ad-input:focus{border-color:${ACCENT}88 !important}
-        ::placeholder{color:${t.faint}}`}</style>
+    <div className="adminx" style={{ minHeight: '100vh', display: 'flex', position: 'relative', overflow: 'hidden', background: t.bgBase, fontFamily: FONT, color: t.text, transition: 'background .45s ease, color .3s ease' }}>
+      <style>{`
+        @keyframes fu{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:none}}
+        @keyframes fi{from{opacity:0}to{opacity:1}}
+        @keyframes pop{from{opacity:0;transform:scale(.94)}to{opacity:1;transform:none}}
+        @keyframes spin{to{transform:rotate(360deg)}}
+        @keyframes drawIn{from{stroke-dashoffset:2000}to{stroke-dashoffset:0}}
+        @keyframes slideL{from{opacity:0;transform:translateX(26px)}to{opacity:1;transform:none}}
+        @keyframes shimmer{0%{background-position:-450px 0}100%{background-position:450px 0}}
+        @keyframes glowPulse{0%,100%{box-shadow:0 0 0 0 ${ACCENT}00}50%{box-shadow:0 0 0 4px ${ACCENT}22}}
+        .adminx button,.adminx a[href],.adminx select,.adminx input[type=color]{transition:transform .16s cubic-bezier(.34,1.56,.64,1),background .2s ease,border-color .2s ease,box-shadow .25s ease,color .18s ease,filter .15s ease}
+        .adminx button:hover{filter:brightness(1.06)}
+        .adminx button:active{transform:scale(.95)}
+        .adminx select:hover,.adminx input[type=color]:hover{border-color:${ACCENT}66 !important}
+        .ad-nav{transition:background .18s ease,transform .18s cubic-bezier(.34,1.56,.64,1),color .18s ease}
+        .ad-nav:hover{background:${t.hover} !important;transform:translateX(3px)}
+        .ad-pill:hover{transform:translateY(-2px);box-shadow:0 6px 16px -6px rgba(0,0,0,.35)}
+        .ad-lift{transition:transform .24s cubic-bezier(.34,1.4,.5,1),box-shadow .24s ease,border-color .2s ease}
+        .ad-lift:hover{transform:translateY(-4px);border-color:${ACCENT}55 !important;box-shadow:0 22px 46px -18px rgba(0,0,0,.55)}
+        .ad-card{transition:border-color .25s ease,box-shadow .25s ease}
+        .ad-card:hover{border-color:${ACCENT}33 !important}
+        .ad-btn-primary:hover{transform:translateY(-2px);box-shadow:0 16px 30px -10px ${ACCENT}cc !important;filter:brightness(1.04)}
+        .ad-icon:hover{background:${t.hover} !important;transform:translateY(-2px) rotate(-4deg)}
+        .ad-spin:hover svg{animation:spin .7s cubic-bezier(.4,0,.2,1)}
+        .ad-row{transition:background .16s ease,box-shadow .2s ease}
+        .ad-row:hover{background:${t.hover} !important;box-shadow:inset 3px 0 0 ${ACCENT}}
+        .ad-row:hover .ad-av{transform:scale(1.1) rotate(-4deg)}
+        .ad-row:hover .ad-amt{transform:translateX(-3px)}
+        .ad-av{transition:transform .22s cubic-bezier(.34,1.56,.64,1)}
+        .ad-amt{transition:transform .18s ease}
+        .ad-input:focus{border-color:${ACCENT}88 !important;box-shadow:0 0 0 3px ${ACCENT}1f}
+        .ad-toggle:hover{filter:none !important}
+        .ad-chartline{stroke-dasharray:2000;animation:drawIn 1.3s cubic-bezier(.4,0,.2,1) forwards}
+        .ad-donut circle{transition:stroke-width .2s ease}
+        .ad-donut:hover circle{stroke-width:13}
+        ::placeholder{color:${t.faint}}
+      `}</style>
 
       <div style={{ position: 'fixed', inset: 0, backgroundImage: mesh, pointerEvents: 'none', zIndex: 0 }} />
       <div style={{ position: 'fixed', inset: 0, backgroundImage: GRAIN, opacity: dark ? 0.045 : 0.03, mixBlendMode: dark ? 'screen' : 'multiply', pointerEvents: 'none', zIndex: 0 }} />
@@ -473,7 +505,7 @@ export default function AdminDevolucionesPage() {
       {/* Toast */}
       <div style={{ position: 'fixed', bottom: 24, right: 24, display: 'flex', flexDirection: 'column', gap: 8, zIndex: 999 }}>
         {toasts.map(toast => (
-          <div key={toast.id} style={{ padding: '12px 18px', borderRadius: 11, fontSize: 14, fontWeight: 600, background: toast.type === 'ok' ? `linear-gradient(140deg,${ACCENT},${ACCENT2})` : '#e06a6a', color: '#fff', boxShadow: '0 8px 24px rgba(0,0,0,0.25)', animation: 'fu 0.2s ease' }}>{toast.msg}</div>
+          <div key={toast.id} style={{ padding: '12px 18px', borderRadius: 11, fontSize: 14, fontWeight: 600, background: toast.type === 'ok' ? `linear-gradient(140deg,${ACCENT},${ACCENT2})` : '#e06a6a', color: '#fff', boxShadow: '0 8px 24px rgba(0,0,0,0.25)', animation: 'slideL .3s cubic-bezier(.34,1.56,.64,1) both' }}>{toast.msg}</div>
         ))}
       </div>
 
@@ -491,7 +523,7 @@ export default function AdminDevolucionesPage() {
           {SIDE.map(s => {
             const on = tab === s.id;
             return (
-              <button key={s.id} onClick={() => setTab(s.id)} style={{ position: 'relative', display: 'flex', alignItems: 'center', gap: 11, padding: '9px 11px', borderRadius: 10, border: 'none', cursor: 'pointer', fontFamily: FONT, fontSize: 13.5, fontWeight: on ? 600 : 500, color: on ? t.text : t.dim, background: on ? 'rgba(52,178,123,0.10)' : 'transparent', transition: 'all .15s', textAlign: 'left' }}>
+              <button key={s.id} className="ad-nav" onClick={() => setTab(s.id)} style={{ position: 'relative', display: 'flex', alignItems: 'center', gap: 11, padding: '9px 11px', borderRadius: 10, border: 'none', cursor: 'pointer', fontFamily: FONT, fontSize: 13.5, fontWeight: on ? 600 : 500, color: on ? t.text : t.dim, background: on ? 'rgba(52,178,123,0.10)' : 'transparent', textAlign: 'left' }}>
                 {on && <span style={{ position: 'absolute', left: 0, top: '50%', transform: 'translateY(-50%)', width: 3, height: 18, borderRadius: 4, background: ACCENT }} />}
                 <Icon d={s.icon} c={on ? ACCENT : t.dim} />
                 <span style={{ flex: 1 }}>{s.label}</span>
@@ -506,7 +538,7 @@ export default function AdminDevolucionesPage() {
           </a>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '8px 11px', borderRadius: 10, background: t.card, border: `1px solid ${t.border}` }}>
             <span style={{ fontSize: 12.5, fontWeight: 500, color: t.dim }}>{dark ? 'Modo oscuro' : 'Modo claro'}</span>
-            <button onClick={() => setDark(d => !d)} style={{ width: 44, height: 24, borderRadius: 100, border: `1px solid ${t.border}`, background: dark ? 'rgba(52,178,123,0.25)' : '#E2E5EA', cursor: 'pointer', position: 'relative', padding: 0, transition: 'background .2s' }}>
+            <button className="ad-toggle" onClick={() => setDark(d => !d)} style={{ width: 44, height: 24, borderRadius: 100, border: `1px solid ${t.border}`, background: dark ? 'rgba(52,178,123,0.25)' : '#E2E5EA', cursor: 'pointer', position: 'relative', padding: 0, transition: 'background .2s' }}>
               <div style={{ position: 'absolute', top: 2, left: dark ? 22 : 2, width: 18, height: 18, borderRadius: '50%', background: dark ? ACCENT : '#fff', boxShadow: '0 1px 3px rgba(0,0,0,0.3)', transition: 'left .22s cubic-bezier(.4,0,.2,1)' }} />
             </button>
           </div>
@@ -535,7 +567,7 @@ export default function AdminDevolucionesPage() {
                 <Icon d={ICONS.search} size={15} c={t.faint} />
                 <input className="ad-input" value={search} onChange={e => setSearch(e.target.value)} placeholder="Buscar pedido o cliente…" style={{ flex: 1, background: 'transparent', border: 'none', outline: 'none', fontSize: 13, color: t.text, fontFamily: FONT }} />
               </div>
-              <button onClick={() => loadAll(token)} style={{ width: 38, height: 38, borderRadius: 10, background: t.card, border: `1px solid ${t.border}`, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              <button className="ad-icon ad-spin" onClick={() => loadAll(token)} style={{ width: 38, height: 38, borderRadius: 10, background: t.card, border: `1px solid ${t.border}`, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                 <Icon d={ICONS.refresh} size={16} c={t.dim} />
               </button>
             </div>
@@ -548,7 +580,7 @@ export default function AdminDevolucionesPage() {
             <>
               {/* row1: chart + stats */}
               <div style={{ display: 'grid', gridTemplateColumns: '1.55fr 1fr', gap: 14, marginBottom: 14, animation: 'fu .4s ease both' }}>
-                <div style={{ padding: '18px 20px 6px', borderRadius: 16, background: t.card, border: `1px solid ${t.border}`, boxShadow: t.shadow, backdropFilter: 'blur(14px)', overflow: 'hidden' }}>
+                <div className="ad-card" style={{ padding: '18px 20px 6px', borderRadius: 16, background: t.card, border: `1px solid ${t.border}`, boxShadow: t.shadow, backdropFilter: 'blur(14px)', overflow: 'hidden' }}>
                   <div style={{ fontSize: 13, fontWeight: 500, color: t.dim }}>Devoluciones · últimos 14 días</div>
                   <div style={{ display: 'flex', alignItems: 'baseline', gap: 9, margin: '5px 0 4px' }}>
                     <span style={{ fontSize: 27, fontWeight: 750, letterSpacing: '-0.02em', color: t.text, fontVariantNumeric: 'tabular-nums' }}>{daily.reduce((a, b) => a + b, 0)}</span>
@@ -558,7 +590,7 @@ export default function AdminDevolucionesPage() {
                 </div>
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gridTemplateRows: '1fr 1fr', gap: 14 }}>
                   {stats.map(s => (
-                    <div key={s.label} style={{ padding: '13px 15px', borderRadius: 14, background: t.card, border: `1px solid ${t.border}`, boxShadow: t.shadow, backdropFilter: 'blur(14px)', display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
+                    <div key={s.label} className="ad-lift" style={{ padding: '13px 15px', borderRadius: 14, background: t.card, border: `1px solid ${t.border}`, boxShadow: t.shadow, backdropFilter: 'blur(14px)', display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
                       <span style={{ fontSize: 11.5, fontWeight: 500, color: t.dim }}>{s.label}</span>
                       <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', marginTop: 6 }}>
                         <span style={{ fontSize: 21, fontWeight: 750, letterSpacing: '-0.02em', color: t.text, lineHeight: 1, fontVariantNumeric: 'tabular-nums' }}>{s.value}</span>
@@ -571,7 +603,7 @@ export default function AdminDevolucionesPage() {
 
               {/* row2: reasons donut + filters card */}
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14, marginBottom: 14, animation: 'fu .5s ease both' }}>
-                <div style={{ padding: '16px 20px', borderRadius: 16, background: t.card, border: `1px solid ${t.border}`, boxShadow: t.shadow, backdropFilter: 'blur(14px)' }}>
+                <div className="ad-card" style={{ padding: '16px 20px', borderRadius: 16, background: t.card, border: `1px solid ${t.border}`, boxShadow: t.shadow, backdropFilter: 'blur(14px)' }}>
                   <div style={{ fontSize: 13.5, fontWeight: 650, color: t.text, marginBottom: 12 }}>Motivos de devolución</div>
                   {reasons.total === 0 ? (
                     <div style={{ fontSize: 13, color: t.faint, padding: '20px 0' }}>Sin datos todavía</div>
@@ -590,13 +622,13 @@ export default function AdminDevolucionesPage() {
                     </div>
                   )}
                 </div>
-                <div style={{ padding: '16px 20px', borderRadius: 16, background: t.card, border: `1px solid ${t.border}`, boxShadow: t.shadow, backdropFilter: 'blur(14px)' }}>
+                <div className="ad-card" style={{ padding: '16px 20px', borderRadius: 16, background: t.card, border: `1px solid ${t.border}`, boxShadow: t.shadow, backdropFilter: 'blur(14px)' }}>
                   <div style={{ fontSize: 13.5, fontWeight: 650, color: t.text, marginBottom: 12 }}>Filtrar por estado</div>
                   <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
                     {([['ALL', 'Todas'], ...Object.entries(STATUS_META).map(([k, v]) => [k, v.label])] as [string, string][]).map(([key, label]) => {
                       const on = filterStatus === key;
                       return (
-                        <button key={key} onClick={() => setFilter(key)} style={{ padding: '6px 13px', fontSize: 12.5, fontWeight: on ? 600 : 500, borderRadius: 100, cursor: 'pointer', fontFamily: FONT, background: on ? 'rgba(52,178,123,0.12)' : t.head, color: on ? ACCENT : t.dim, border: `1px solid ${on ? ACCENT + '55' : t.border}` }}>{label}</button>
+                        <button key={key} className="ad-pill" onClick={() => setFilter(key)} style={{ padding: '6px 13px', fontSize: 12.5, fontWeight: on ? 600 : 500, borderRadius: 100, cursor: 'pointer', fontFamily: FONT, background: on ? 'rgba(52,178,123,0.12)' : t.head, color: on ? ACCENT : t.dim, border: `1px solid ${on ? ACCENT + '55' : t.border}` }}>{label}</button>
                       );
                     })}
                   </div>
@@ -642,7 +674,7 @@ export default function AdminDevolucionesPage() {
                   const urgent = ret.status === 'REQUESTED';
                   return (
                     <div key={ret.id} className="ad-row" onClick={() => window.location.href = `/admin/devoluciones/${ret.id}`}
-                      style={{ display: 'grid', gridTemplateColumns: '120px 1fr 110px 115px 150px 80px', padding: '13px 20px', alignItems: 'center', borderTop: i === 0 ? 'none' : `1px solid ${t.borderSoft}`, cursor: 'pointer', transition: 'background .12s' }}>
+                      style={{ display: 'grid', gridTemplateColumns: '120px 1fr 110px 115px 150px 80px', padding: '13px 20px', alignItems: 'center', borderTop: i === 0 ? 'none' : `1px solid ${t.borderSoft}`, cursor: 'pointer', animation: `fu .4s ease both`, animationDelay: `${Math.min(i, 12) * 35}ms` }}>
                       <div>
                         <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                           <span style={{ fontSize: 14, fontWeight: 650, color: t.text, fontVariantNumeric: 'tabular-nums' }}>{ret.shopifyOrderNumber}</span>
@@ -651,7 +683,7 @@ export default function AdminDevolucionesPage() {
                         <div style={{ fontSize: 11, color: t.faint, marginTop: 1 }}>{ret.items.length} artículo{ret.items.length !== 1 ? 's' : ''}</div>
                       </div>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 11 }}>
-                        <div style={{ width: 32, height: 32, borderRadius: '50%', flexShrink: 0, background: `${AV[i % AV.length]}22`, border: `1px solid ${AV[i % AV.length]}44`, color: AV[i % AV.length], display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11.5, fontWeight: 700 }}>{initials}</div>
+                        <div className="ad-av" style={{ width: 32, height: 32, borderRadius: '50%', flexShrink: 0, background: `${AV[i % AV.length]}22`, border: `1px solid ${AV[i % AV.length]}44`, color: AV[i % AV.length], display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11.5, fontWeight: 700 }}>{initials}</div>
                         <div>
                           <div style={{ fontSize: 13.5, fontWeight: 500, color: t.text }}>{ret.customerName}</div>
                           <div style={{ fontSize: 12, color: t.dim }}>{ret.customerEmail}</div>
@@ -666,7 +698,7 @@ export default function AdminDevolucionesPage() {
                           <span style={{ width: 6, height: 6, borderRadius: '50%', background: s.dot, boxShadow: `0 0 6px ${s.dot}aa` }} />{s.label}
                         </span>
                       </div>
-                      <div style={{ textAlign: 'right', fontSize: 14, fontWeight: 650, color: amountColor, fontVariantNumeric: 'tabular-nums' }}>{amountLabel}</div>
+                      <div className="ad-amt" style={{ textAlign: 'right', fontSize: 14, fontWeight: 650, color: amountColor, fontVariantNumeric: 'tabular-nums' }}>{amountLabel}</div>
                     </div>
                   );
                 })}
@@ -703,7 +735,7 @@ export default function AdminDevolucionesPage() {
                 <textarea style={{ ...inp, minHeight: 90, resize: 'vertical' }} value={configDraft.termsText ?? ''} onChange={e => setDraft({ ...configDraft, termsText: e.target.value || null })} placeholder="Se mostrará al cliente en el portal…" /></label>
               <div style={{ display: 'flex', gap: 10 }}>
                 <button onClick={() => setDraft(config)} style={btnSecondary}>Descartar</button>
-                <button onClick={saveConfig} disabled={savingConfig || JSON.stringify(config) === JSON.stringify(configDraft)} style={{ ...btnPrimary, flex: 1, opacity: (savingConfig || JSON.stringify(config) === JSON.stringify(configDraft)) ? 0.5 : 1 }}>{savingConfig ? 'Guardando…' : 'Guardar cambios'}</button>
+                <button onClick={saveConfig} className="ad-btn-primary" disabled={savingConfig || JSON.stringify(config) === JSON.stringify(configDraft)} style={{ ...btnPrimary, flex: 1, opacity: (savingConfig || JSON.stringify(config) === JSON.stringify(configDraft)) ? 0.5 : 1 }}>{savingConfig ? 'Guardando…' : 'Guardar cambios'}</button>
               </div>
             </div>
           )}
@@ -736,7 +768,7 @@ export default function AdminDevolucionesPage() {
               </div>
               <div style={{ display: 'flex', gap: 10, marginTop: 8 }}>
                 <button onClick={() => setPortalDraft(portalCfg)} style={btnSecondary}>Descartar</button>
-                <button onClick={saveBranding} disabled={savingPortal || JSON.stringify(portalCfg) === JSON.stringify(portalDraft)} style={{ ...btnPrimary, flex: 1, opacity: (savingPortal || JSON.stringify(portalCfg) === JSON.stringify(portalDraft)) ? 0.5 : 1 }}>{savingPortal ? 'Guardando…' : 'Guardar personalización'}</button>
+                <button onClick={saveBranding} className="ad-btn-primary" disabled={savingPortal || JSON.stringify(portalCfg) === JSON.stringify(portalDraft)} style={{ ...btnPrimary, flex: 1, opacity: (savingPortal || JSON.stringify(portalCfg) === JSON.stringify(portalDraft)) ? 0.5 : 1 }}>{savingPortal ? 'Guardando…' : 'Guardar personalización'}</button>
               </div>
             </div>
           )}
@@ -746,7 +778,7 @@ export default function AdminDevolucionesPage() {
             <div style={{ animation: 'fu .4s ease both' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
                 <div style={{ fontSize: 14, color: t.dim }}>{exceptions.length} excepcion{exceptions.length !== 1 ? 'es' : ''}</div>
-                <button onClick={() => setShowNewEx(true)} style={btnPrimary}>+ Nueva excepción</button>
+                <button onClick={() => setShowNewEx(true)} className="ad-btn-primary" style={btnPrimary}>+ Nueva excepción</button>
               </div>
               {exceptions.length === 0 ? (
                 <div style={{ textAlign: 'center', color: t.faint, padding: 80, background: t.card, border: `1px solid ${t.border}`, borderRadius: 16, boxShadow: t.shadow }}>
@@ -808,7 +840,7 @@ export default function AdminDevolucionesPage() {
                     ))}
                     <div style={{ display: 'flex', gap: 10, marginTop: 8 }}>
                       <button onClick={() => setShowNewEx(false)} style={btnSecondary}>Cancelar</button>
-                      <button onClick={createException} style={{ ...btnPrimary, flex: 1 }}>Crear excepción</button>
+                      <button onClick={createException} className="ad-btn-primary" style={{ ...btnPrimary, flex: 1 }}>Crear excepción</button>
                     </div>
                   </div>
                 </div>
