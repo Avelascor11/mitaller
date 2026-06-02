@@ -1,6 +1,7 @@
 import { BadRequestException, ForbiddenException, Injectable, NotFoundException, ServiceUnavailableException } from '@nestjs/common';
 import { ActivityService } from '../activity/activity.service';
 import { KlaviyoService } from '../klaviyo/klaviyo.service';
+import { OrdersService } from '../orders/orders.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { SendcloudAdapter } from '../sendcloud/sendcloud.adapter';
 import { ShopifyAdapter } from '../shopify/shopify.adapter';
@@ -30,7 +31,8 @@ export class ReturnsService {
     private readonly activity: ActivityService,
     private readonly configService: ReturnsConfigService,
     private readonly exceptionsService: ReturnsExceptionsService,
-    private readonly klaviyo: KlaviyoService
+    private readonly klaviyo: KlaviyoService,
+    private readonly ordersService: OrdersService
   ) {}
 
   async lookupOrder(dto: LookupOrderDto) {
@@ -48,10 +50,11 @@ export class ReturnsService {
       throw new ForbiddenException(exceptions.blockedReason ?? 'Este pedido no puede devolverse.');
     }
 
-    const order = await this.prisma.order.findFirst({
+    const emailNorm = dto.email.toLowerCase().trim();
+    const loadOrder = () => this.prisma.order.findFirst({
       where: {
         orderNumber: { in: [raw, withoutHash, withHash] },
-        customerEmail: { equals: dto.email.toLowerCase().trim(), mode: 'insensitive' }
+        customerEmail: { equals: emailNorm, mode: 'insensitive' }
       },
       include: {
         items: true,
@@ -62,6 +65,22 @@ export class ReturnsService {
         }
       }
     });
+
+    let order = await loadOrder();
+
+    // Not in local DB (e.g. old order outside the import window): fetch live from Shopify and persist.
+    if (!order) {
+      try {
+        const fetched = await this.shopify.fetchOrderByName(withoutHash);
+        const fetchedEmail = (fetched?.customerEmail ?? '').toLowerCase().trim();
+        if (fetched && fetchedEmail === emailNorm) {
+          await this.ordersService.upsertImportedOrder(fetched);
+          order = await loadOrder();
+        }
+      } catch (error) {
+        console.error('[ReturnsService] On-demand Shopify order fetch failed:', error);
+      }
+    }
 
     if (!order) {
       throw new NotFoundException('No encontramos ningún pedido con ese número y email. Comprueba los datos e inténtalo de nuevo.');

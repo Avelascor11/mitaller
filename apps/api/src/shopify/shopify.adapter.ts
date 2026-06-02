@@ -255,6 +255,51 @@ export class ShopifyAdapter {
     return data.order ? this.mapGraphqlOrder(data.order) : null;
   }
 
+  /** Fetch a single order from Shopify by its name (e.g. "#6056"), regardless of import window. */
+  async fetchOrderByName(name: string): Promise<ImportedOrder | null> {
+    this.assertConfigured();
+    const clean = name.replace(/^#/, '').trim();
+    if (!clean) return null;
+    const data = await this.graphql<ShopifyOrdersResponse>(`
+      query OrderByName($query: String!) {
+        orders(first: 5, query: $query) {
+          nodes {
+            id
+            name
+            createdAt
+            email
+            displayFinancialStatus
+            displayFulfillmentStatus
+            cancelledAt
+            currentSubtotalPriceSet { shopMoney { amount currencyCode } }
+            currentTotalPriceSet { shopMoney { amount currencyCode } }
+            currentTotalDiscountsSet { shopMoney { amount currencyCode } }
+            currentTotalTaxSet { shopMoney { amount currencyCode } }
+            totalShippingPriceSet { shopMoney { amount currencyCode } }
+            currencyCode
+            customer { displayName email }
+            shippingAddress { name address1 address2 city province zip countryCodeV2 phone }
+            shippingLine { title code }
+            lineItems(first: 100) {
+              nodes {
+                id title quantity currentQuantity sku variantTitle
+                originalUnitPriceSet { shopMoney { amount } }
+                discountedUnitPriceSet { shopMoney { amount } }
+                totalDiscountSet { shopMoney { amount } }
+                product { id productType featuredImage { url } media(first: 2) { nodes { ... on MediaImage { image { url } } } } }
+                variant { id sku title image { url } selectedOptions { name value } }
+              }
+            }
+          }
+        }
+      }
+    `, { query: `name:#${clean}` });
+
+    const node = data.orders.nodes.find((o) => this.orderNumberValue(o.name) === Number(clean))
+      ?? data.orders.nodes[0];
+    return node ? this.mapGraphqlOrder(node) : null;
+  }
+
   assertValidWebhook(rawBody?: Buffer, hmacHeader?: string) {
     const secret = this.config.get<string>('SHOPIFY_WEBHOOK_SECRET');
     if (!secret) return;
