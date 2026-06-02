@@ -268,7 +268,8 @@ export class ReturnsService {
           note: `CAMBIO (sin coste) pedido ${order.orderNumber} — ${dto.items.length} artículo(s)`,
           tags: ['return-portal', 'exchange', 'exchange-free'],
           shippingAddress: this.shippingAddressFromOrder(order.shippingAddressJson, order.customerName),
-          lineItems: replacementsInfo.map((repl) => ({ variantId: repl.variantId, quantity: repl.quantity }))
+          lineItems: replacementsInfo.map((repl) => ({ variantId: repl.variantId, quantity: repl.quantity })),
+          appliedDiscount: { valueType: 'PERCENTAGE', value: 100, title: 'Cambio sin coste', description: `Cambio pedido ${order.orderNumber}` }
         });
         draftOrderId = draft.id;
         const completed = await this.shopify.completeDraftOrder(draft.id);
@@ -521,7 +522,8 @@ export class ReturnsService {
         note: `CAMBIO (manual admin) pedido ${returnRecord.shopifyOrderNumber} — ${lineItems.length} artículo(s)`,
         tags: ['return-portal', 'exchange', 'exchange-manual'],
         shippingAddress: this.shippingAddressFromOrder(returnRecord.order.shippingAddressJson, returnRecord.customerName),
-        lineItems
+        lineItems,
+        appliedDiscount: { valueType: 'PERCENTAGE', value: 100, title: 'Cambio sin coste', description: `Cambio pedido ${returnRecord.shopifyOrderNumber}` }
       });
       draftId = draft.id;
       const completed = await this.shopify.completeDraftOrder(draft.id);

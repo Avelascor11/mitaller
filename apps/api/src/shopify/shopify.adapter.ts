@@ -454,7 +454,13 @@ export class ShopifyAdapter {
         shippingAddress: input.shippingAddress,
         lineItems,
         useCustomerDefaultAddress: false,
-        ...(input.noteAttributes ? { customAttributes: input.noteAttributes } : {})
+        ...(input.noteAttributes ? { customAttributes: input.noteAttributes } : {}),
+        ...(input.appliedDiscount ? { appliedDiscount: {
+          valueType: input.appliedDiscount.valueType,
+          value: input.appliedDiscount.value,
+          title: input.appliedDiscount.title ?? 'Cambio sin coste',
+          ...(input.appliedDiscount.description ? { description: input.appliedDiscount.description } : {})
+        } } : {})
       }
     });
 
@@ -909,5 +915,7 @@ export interface ShopifyDraftOrderInput {
     quantity: number;
   }>;
   noteAttributes?: Array<{ key: string; value: string }>;
+  /** Order-level discount. Use { valueType:'PERCENTAGE', value:100 } for a zero-cost (free) order. */
+  appliedDiscount?: { valueType: 'PERCENTAGE' | 'FIXED_AMOUNT'; value: number; title?: string; description?: string };
 }
 
