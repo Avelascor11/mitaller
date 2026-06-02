@@ -79,7 +79,7 @@ export class SupplierOrderService {
       .map(({ group, entry }) => {
         const article = this.resolveFalkRossArticle(group.garmentType, group.color, entry.size, entry.supplierSku, supplierArticles, articleBySku);
         const supplierSku = article?.supplierSku ?? entry.supplierSku!;
-        const supplierAvailableQuantity = stockBySku.get(supplierSku) ?? entry.supplierAvailableQuantity;
+        const supplierAvailableQuantity = article ? stockBySku.get(supplierSku) ?? null : null;
         const alreadyPending = pendingByStockItemId.get(entry.stockItemId!) ?? 0;
         const requestedQuantity = Math.max(0, entry.recommendedPurchaseQuantity - alreadyPending);
         const quantity = this.orderableQuantity(requestedQuantity, supplierAvailableQuantity);
