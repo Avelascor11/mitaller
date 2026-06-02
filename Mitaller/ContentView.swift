@@ -4149,16 +4149,30 @@ struct SupplierPurchaseOrderCard: View {
                         }
                     }
 
-                    VStack(spacing: 8) {
-                        ForEach(latestOrder.lines.prefix(5)) { line in
-                            SupplierPurchaseLineRow(line: line)
-                        }
-                        if latestOrder.lines.count > 5 {
-                            Text("+\(latestOrder.lines.count - 5) lineas mas")
-                                .font(.caption.weight(.bold))
+                    VStack(alignment: .leading, spacing: 8) {
+                        HStack {
+                            Text("Compra recomendada")
+                                .font(.caption.weight(.black))
                                 .foregroundStyle(AppTheme.muted)
-                                .frame(maxWidth: .infinity, alignment: .leading)
+                            Spacer()
+                            Text("\(latestOrder.lines.count) lineas")
+                                .font(.caption2.weight(.black))
+                                .foregroundStyle(AppTheme.muted)
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 4)
+                                .background(AppTheme.surface)
+                                .clipShape(Capsule())
                         }
+
+                        ScrollView {
+                            LazyVStack(spacing: 8) {
+                                ForEach(latestOrder.lines) { line in
+                                    SupplierPurchaseLineRow(line: line)
+                                }
+                            }
+                        }
+                        .frame(maxHeight: 320)
+                        .scrollIndicators(.visible)
                     }
 
                     if let error = latestOrder.errorMessage, !error.isEmpty {
