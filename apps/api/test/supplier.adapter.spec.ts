@@ -95,4 +95,47 @@ describe('SupplierAdapter', () => {
       create: { supplier: 'FALK_ROSS', supplierSku: '180000002', availableQuantity: 7 }
     }));
   });
+
+  it('importa catalogo CSV Falk & Ross con SKU largo, modelo, color y talla', async () => {
+    const fetchSpy = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      text: async () => [
+        'p_sku;style_code;product_name;color;size;purchase_price',
+        '180000002;TG002;B&C 032.42 T-shirt;White;M;2,73',
+        '290000222;2000;102.09 Heavy T-Shirt;Brown;M;3.10'
+      ].join('\n')
+    });
+    vi.stubGlobal('fetch', fetchSpy);
+    const upsert = vi.fn();
+    const adapter = new SupplierAdapter(
+      { supplierArticle: { upsert } } as never,
+      { get: (key: string) => ({ FALKROSS_ARTICLE_MASTER_URL: 'https://example.test/catalog.csv' })[key] } as never
+    );
+
+    const result = await adapter.importCatalog();
+
+    expect(result.imported).toBe(2);
+    expect(upsert).toHaveBeenCalledWith(expect.objectContaining({
+      where: { supplier_supplierSku: { supplier: 'FALK_ROSS', supplierSku: '180000002' } },
+      create: expect.objectContaining({
+        supplierSku: '180000002',
+        styleCode: 'TG002',
+        productName: 'B&C 032.42 T-shirt',
+        color: 'White',
+        size: 'M',
+        purchasePrice: '2.73'
+      })
+    }));
+    expect(upsert).toHaveBeenCalledWith(expect.objectContaining({
+      where: { supplier_supplierSku: { supplier: 'FALK_ROSS', supplierSku: '290000222' } },
+      create: expect.objectContaining({
+        supplierSku: '290000222',
+        styleCode: '2000',
+        productName: '102.09 Heavy T-Shirt',
+        color: 'Brown',
+        size: 'M'
+      })
+    }));
+  });
 });

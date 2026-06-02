@@ -1,5 +1,7 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { Prisma } from '@prisma/client';
+import { readFile } from 'node:fs/promises';
 import { PrismaService } from '../prisma/prisma.service';
 
 @Injectable()
@@ -23,11 +25,11 @@ export class SupplierAdapter {
     if (!source) {
       throw new BadRequestException('Falk & Ross no esta configurado. Define FALKROSS_ARTICLE_MASTER_URL o pasa un fichero local.');
     }
-    const mode = 'configured-source';
-    const articles = [
-      { supplier: 'FALK_ROSS', supplierSku: 'FR-TS-BLK-L', styleCode: 'TS', brand: 'FalkRoss', productName: 'Camiseta lisa negra', color: 'Negro', size: 'L', purchasePrice: '3.90', rawDataJson: { mode } },
-      { supplier: 'FALK_ROSS', supplierSku: 'FR-HD-BLK-L', styleCode: 'HD', brand: 'FalkRoss', productName: 'Sudadera negra', color: 'Negro', size: 'L', purchasePrice: '12.50', rawDataJson: { mode } }
-    ];
+    const { text, mode } = await this.loadCatalogSource(source);
+    const articles = this.parseCatalogArticles(text, mode);
+    if (!articles.length) {
+      throw new BadRequestException('No se pudo leer ningun articulo del catalogo Falk & Ross. Revisa el formato CSV/XML.');
+    }
     for (const article of articles) {
       await this.prisma.supplierArticle.upsert({
         where: { supplier_supplierSku: { supplier: article.supplier, supplierSku: article.supplierSku } },
@@ -35,7 +37,7 @@ export class SupplierAdapter {
         update: article
       });
     }
-    return { imported: articles.length, mode };
+    return { imported: articles.length, mode, sample: articles.slice(0, 5).map((article) => ({ supplierSku: article.supplierSku, styleCode: article.styleCode, color: article.color, size: article.size })) };
   }
 
   async syncStock() {
@@ -248,6 +250,165 @@ export class SupplierAdapter {
     return this.config.get<string>('FALKROSS_STOCK_CSV_URL') ?? 'https://ws.falk-ross.eu/webservice/R01_000/stockinfo/falkross_de.csv';
   }
 
+  private async loadCatalogSource(source: string) {
+    if (/^https?:\/\//i.test(source)) {
+      const user = this.config.get<string>('FALKROSS_WEBSERVICE_USER') ?? '';
+      const password = this.config.get<string>('FALKROSS_WEBSERVICE_PASSWORD') ?? '';
+      const response = await fetch(source, {
+        headers: user && password ? { Authorization: `Basic ${Buffer.from(`${user}:${password}`).toString('base64')}` } : {}
+      });
+      const text = await response.text();
+      if (!response.ok) {
+        throw new BadRequestException(`Catalogo Falk & Ross ${response.status}: ${text}`);
+      }
+      return { text, mode: source.toLowerCase().includes('.xml') ? 'falkross-xml' : 'falkross-csv' };
+    }
+
+    const buffer = await readFile(source);
+    if (source.toLowerCase().endsWith('.zip')) {
+      throw new BadRequestException('Importa primero el CSV/XML del ZIP. El servidor no descomprime ZIP automaticamente en produccion.');
+    }
+    return { text: buffer.toString('utf8'), mode: source.toLowerCase().endsWith('.xml') ? 'local-xml' : 'local-csv' };
+  }
+
+  private parseCatalogArticles(text: string, mode: string) {
+    const articles = mode.includes('xml')
+      ? this.parseCatalogXml(text, mode)
+      : this.parseCatalogCsv(text, mode);
+    const deduped = new Map<string, CatalogArticleInput>();
+    for (const article of articles) {
+      if (!article.supplierSku) continue;
+      deduped.set(article.supplierSku, article);
+    }
+    return [...deduped.values()];
+  }
+
+  private parseCatalogCsv(text: string, mode: string) {
+    const lines = text.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+    if (!lines.length) return [];
+    const delimiter = this.detectDelimiter(lines[0]);
+    const headers = this.splitCsvLine(lines[0], delimiter).map((cell) => this.normalizeHeader(cell));
+    const hasHeader = headers.some((header) => ['sku', 'psku', 'suppliersku', 'artikelnr', 'artikelnummer', 'productnumber', 'stylecode', 'color', 'colour', 'size'].includes(header));
+    const rows = hasHeader ? lines.slice(1) : lines;
+
+    return rows.map((line) => {
+      const cells = this.splitCsvLine(line, delimiter);
+      const get = (candidates: string[]) => this.pickCatalogCell(cells, headers, candidates, hasHeader);
+      const supplierSku = get(['sku', 'psku', 'p_sku', 'suppliersku', 'article', 'articlenumber', 'article_number', 'artikelnr', 'artikelnummer', 'itemnumber']);
+      const styleCode = get(['style', 'stylecode', 'style_code', 'suppliercode', 'supplier_code', 'productno', 'productnumber', 'product_number', 'model', 'code', 'codigo', 'codigoproveedor']);
+      const productName = get(['name', 'productname', 'product_name', 'description', 'bezeichnung', 'artikelname', 'title']) || cells.join(' ');
+      const color = get(['color', 'colour', 'farbe', 'colorname', 'colourname']);
+      const size = get(['size', 'groesse', 'größe', 'talla']);
+      const ean = get(['ean', 'barcode', 'gtin']);
+      const purchasePrice = this.pickPrice(get(['purchaseprice', 'purchase_price', 'price', 'preis', 'netprice', 'net_price']));
+      const weightGrams = this.pickInteger(get(['weight', 'weightgrams', 'weight_grams', 'gewicht']));
+      const packQuantity = this.pickInteger(get(['packquantity', 'pack_quantity', 'pack', 'packagequantity']));
+      const cartonQuantity = this.pickInteger(get(['cartonquantity', 'carton_quantity', 'carton']));
+      return this.catalogArticle({ supplierSku, styleCode, productName, color, size, ean, purchasePrice, weightGrams, packQuantity, cartonQuantity, rawDataJson: { mode, row: cells } });
+    }).filter((article): article is CatalogArticleInput => Boolean(article?.supplierSku));
+  }
+
+  private parseCatalogXml(text: string, mode: string) {
+    const blocks = [...text.matchAll(/<(?:article|product|item|variant)\b[^>]*>([\s\S]*?)<\/(?:article|product|item|variant)>/gi)].map((match) => match[1]);
+    const rows = blocks.length ? blocks : [text];
+    return rows.map((block) => {
+      const get = (names: string[]) => this.pickXmlValue(block, names);
+      const supplierSku = get(['p_sku', 'sku', 'supplierSku', 'article_number', 'articlenr', 'artikelnummer']);
+      const styleCode = get(['style_code', 'styleCode', 'style', 'product_number', 'productNumber', 'supplier_code', 'model']);
+      const productName = get(['product_name', 'productName', 'name', 'description', 'title']) || this.stripXml(block).slice(0, 160);
+      const color = get(['color', 'colour', 'farbe']);
+      const size = get(['size', 'groesse', 'talla']);
+      const ean = get(['ean', 'barcode', 'gtin']);
+      const purchasePrice = this.pickPrice(get(['purchase_price', 'purchasePrice', 'price', 'net_price']));
+      const weightGrams = this.pickInteger(get(['weight_grams', 'weight', 'gewicht']));
+      const packQuantity = this.pickInteger(get(['pack_quantity', 'packQuantity', 'pack']));
+      const cartonQuantity = this.pickInteger(get(['carton_quantity', 'cartonQuantity', 'carton']));
+      return this.catalogArticle({ supplierSku, styleCode, productName, color, size, ean, purchasePrice, weightGrams, packQuantity, cartonQuantity, rawDataJson: { mode } });
+    }).filter((article): article is CatalogArticleInput => Boolean(article?.supplierSku));
+  }
+
+  private catalogArticle(input: {
+    supplierSku?: string | null;
+    styleCode?: string | null;
+    productName?: string | null;
+    color?: string | null;
+    size?: string | null;
+    ean?: string | null;
+    purchasePrice?: string | null;
+    weightGrams?: number | null;
+    packQuantity?: number | null;
+    cartonQuantity?: number | null;
+    rawDataJson: unknown;
+  }): CatalogArticleInput | null {
+    const supplierSku = input.supplierSku?.trim();
+    if (!supplierSku) return null;
+    return {
+      supplier: 'FALK_ROSS',
+      supplierSku,
+      styleCode: input.styleCode?.trim() || this.inferStyleCode(input.productName ?? ''),
+      brand: this.inferBrand(input.productName ?? ''),
+      productName: input.productName?.trim() || supplierSku,
+      color: input.color?.trim() || null,
+      size: input.size?.trim() || null,
+      ean: input.ean?.trim() || null,
+      purchasePrice: input.purchasePrice ?? null,
+      weightGrams: input.weightGrams ?? null,
+      packQuantity: input.packQuantity ?? null,
+      cartonQuantity: input.cartonQuantity ?? null,
+      rawDataJson: input.rawDataJson as Prisma.InputJsonValue
+    };
+  }
+
+  private pickCatalogCell(cells: string[], headers: string[], candidates: string[], hasHeader: boolean) {
+    if (hasHeader) {
+      const normalizedCandidates = candidates.map((candidate) => this.normalizeHeader(candidate));
+      const index = headers.findIndex((header) => normalizedCandidates.includes(header));
+      return index >= 0 ? cells[index]?.replace(/^"|"$/g, '').trim() || null : null;
+    }
+    const joined = cells.join(' ');
+    if (candidates.some((candidate) => ['sku', 'psku', 'suppliersku', 'article'].includes(this.normalizeHeader(candidate)))) {
+      return cells.find((cell) => /^\d{6,}$/.test(cell.replace(/\D/g, '')))?.trim() ?? null;
+    }
+    if (candidates.some((candidate) => ['style', 'stylecode', 'productnumber', 'suppliercode'].includes(this.normalizeHeader(candidate)))) {
+      return joined.match(/\b(TG002|WG005|2000|032\.?42|102\.?09|237\.?42|240\.?42|290\.?09)\b/i)?.[1] ?? null;
+    }
+    return null;
+  }
+
+  private pickXmlValue(block: string, names: string[]) {
+    for (const name of names) {
+      const pattern = new RegExp(`<${name}[^>]*>\\s*(?:<!\\[CDATA\\[)?([\\s\\S]*?)(?:\\]\\]>)?\\s*<\\/${name}>`, 'i');
+      const value = block.match(pattern)?.[1];
+      if (value?.trim()) return this.stripXml(value).trim();
+    }
+    return null;
+  }
+
+  private stripXml(value: string) {
+    return value.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+  }
+
+  private pickPrice(value: string | null) {
+    if (!value) return null;
+    const parsed = Number(value.replace(/[^\d,.-]/g, '').replace(',', '.'));
+    return Number.isFinite(parsed) ? parsed.toFixed(2) : null;
+  }
+
+  private pickInteger(value: string | null) {
+    if (!value) return null;
+    const parsed = Number(value.replace(/[^\d.-]/g, ''));
+    return Number.isFinite(parsed) ? Math.max(0, Math.round(parsed)) : null;
+  }
+
+  private inferStyleCode(value: string) {
+    return value.match(/\b(TG002|WG005|2000|032\.?42|102\.?09|237\.?42|240\.?42|290\.?09)\b/i)?.[1] ?? null;
+  }
+
+  private inferBrand(value: string) {
+    if (/B&C/i.test(value)) return 'B&C';
+    return 'FalkRoss';
+  }
+
   private parseFalkRossStockCsv(text: string) {
     const lines = text.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
     if (!lines.length) return [];
@@ -367,4 +528,20 @@ export interface SupplierPurchaseOrderResult {
   externalOrderId?: string;
   errorMessage?: string;
   rawResponseJson: unknown;
+}
+
+interface CatalogArticleInput {
+  supplier: string;
+  supplierSku: string;
+  styleCode: string | null;
+  brand: string;
+  productName: string;
+  color: string | null;
+  size: string | null;
+  ean: string | null;
+  purchasePrice: string | null;
+  weightGrams: number | null;
+  packQuantity: number | null;
+  cartonQuantity: number | null;
+  rawDataJson: Prisma.InputJsonValue;
 }

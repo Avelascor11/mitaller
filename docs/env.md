@@ -105,6 +105,8 @@ La tarjeta "Pagos Shopify" usa los endpoints oficiales de Shopify Payments (`/sh
 
 El webservice de Falk & Ross usa Basic Auth y XML UTF-8. No metas usuario/contraseña en URLs. El control final lo tiene el responsable del taller: el cron solo prepara el borrador; el envío real requiere acción manual sobre el pedido revisado.
 
+`FALKROSS_ARTICLE_MASTER_URL` debe apuntar a un CSV/XML de catalogo maestro con columnas equivalentes a SKU largo (`p_sku`, `sku`, `article_number`), modelo (`style_code`, `product_number`), nombre, color y talla. La API guarda esos datos en `SupplierArticle` y usa el SKU largo como `p_sku` al enviar pedidos.
+
 Prendas base configuradas:
 
 - Camisetas normales: B&C `TG002`, numero de producto `032.42`.
