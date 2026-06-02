@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import * as XLSX from 'xlsx';
 import { SupplierAdapter } from '../src/supplier/supplier.adapter';
 
 function adapterWith(config: Record<string, string>) {
@@ -136,42 +137,90 @@ describe('SupplierAdapter', () => {
     const fetchSpy = vi.fn().mockResolvedValue({
       ok: true,
       status: 200,
-      text: async () => [
+      arrayBuffer: async () => Buffer.from([
         'p_sku;style_code;product_name;color;size;purchase_price',
         '180000002;TG002;B&C 032.42 T-shirt;White;M;2,73',
         '290000222;2000;102.09 Heavy T-Shirt;Brown;M;3.10'
-      ].join('\n')
+      ].join('\n'))
     });
     vi.stubGlobal('fetch', fetchSpy);
-    const upsert = vi.fn();
+    const deleteMany = vi.fn();
+    const createMany = vi.fn();
     const adapter = new SupplierAdapter(
-      { supplierArticle: { upsert } } as never,
+      { supplierArticle: { deleteMany, createMany } } as never,
       { get: (key: string) => ({ FALKROSS_ARTICLE_MASTER_URL: 'https://example.test/catalog.csv' })[key] } as never
     );
 
     const result = await adapter.importCatalog();
 
     expect(result.imported).toBe(2);
-    expect(upsert).toHaveBeenCalledWith(expect.objectContaining({
-      where: { supplier_supplierSku: { supplier: 'FALK_ROSS', supplierSku: '180000002' } },
-      create: expect.objectContaining({
+    expect(deleteMany).toHaveBeenCalledWith({ where: { supplier: 'FALK_ROSS' } });
+    expect(createMany).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.arrayContaining([
+        expect.objectContaining({
         supplierSku: '180000002',
         styleCode: 'TG002',
         productName: 'B&C 032.42 T-shirt',
         color: 'White',
         size: 'M',
         purchasePrice: '2.73'
-      })
-    }));
-    expect(upsert).toHaveBeenCalledWith(expect.objectContaining({
-      where: { supplier_supplierSku: { supplier: 'FALK_ROSS', supplierSku: '290000222' } },
-      create: expect.objectContaining({
+        }),
+        expect.objectContaining({
         supplierSku: '290000222',
         styleCode: '2000',
         productName: '102.09 Heavy T-Shirt',
         color: 'Brown',
         size: 'M'
-      })
+        })
+      ]),
+      skipDuplicates: true
+    }));
+  });
+
+  it('importa catalogo XLSX ArticleMasterData de Falk & Ross', async () => {
+    const workbook = XLSX.utils.book_new();
+    const rows = [
+      ['article data list Falk&Ross Group Europe GmbH', null, null, null, 'date from: 7.4.2025'],
+      ['article number short', 'article number long', 'Style', 'supplier_code', 'supplier_name', 'size_code', 'size_name', 'color_code', 'color_name', 'supplier_article_name', 'article_name', 'customer_price /1-2/', 'Pieces_in_Pack'],
+      ['032.42', '032420002', '032', '42', 'B & C', '2', 'M', '000', 'White', 'TG002', 'E150 T-Shirt', '2.73', '10'],
+      ['102.09', '102090003', '102', '09', 'FalkRoss', '3', 'L', '123', 'Brown', '2000', 'Heavy T-Shirt', '3.10', '5']
+    ];
+    XLSX.utils.book_append_sheet(workbook, XLSX.utils.aoa_to_sheet(rows), 'article');
+    const buffer = XLSX.write(workbook, { type: 'buffer', bookType: 'xlsx' }) as Buffer;
+    const fetchSpy = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      arrayBuffer: async () => buffer
+    });
+    vi.stubGlobal('fetch', fetchSpy);
+    const deleteMany = vi.fn();
+    const createMany = vi.fn();
+    const adapter = new SupplierAdapter(
+      { supplierArticle: { deleteMany, createMany } } as never,
+      { get: (key: string) => ({ FALKROSS_ARTICLE_MASTER_URL: 'https://example.test/master.xlsx' })[key] } as never
+    );
+
+    const result = await adapter.importCatalog();
+
+    expect(result.imported).toBe(2);
+    expect(createMany).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.arrayContaining([
+        expect.objectContaining({
+          supplierSku: '032420002',
+          styleCode: '032.42',
+          productName: 'TG002 - E150 T-Shirt',
+          color: 'White',
+          size: 'M',
+          purchasePrice: '2.73',
+          packQuantity: 10
+        }),
+        expect.objectContaining({
+          supplierSku: '102090003',
+          styleCode: '102.09',
+          color: 'Brown',
+          size: 'L'
+        })
+      ])
     }));
   });
 });

@@ -2,6 +2,7 @@ import { BadRequestException, Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Prisma } from '@prisma/client';
 import { readFile } from 'node:fs/promises';
+import * as XLSX from 'xlsx';
 import { PrismaService } from '../prisma/prisma.service';
 
 @Injectable()
@@ -25,16 +26,16 @@ export class SupplierAdapter {
     if (!source) {
       throw new BadRequestException('Falk & Ross no esta configurado. Define FALKROSS_ARTICLE_MASTER_URL o pasa un fichero local.');
     }
-    const { text, mode } = await this.loadCatalogSource(source);
-    const articles = this.parseCatalogArticles(text, mode);
+    const { content, mode } = await this.loadCatalogSource(source);
+    const articles = this.parseCatalogArticles(content, mode);
     if (!articles.length) {
-      throw new BadRequestException('No se pudo leer ningun articulo del catalogo Falk & Ross. Revisa el formato CSV/XML.');
+      throw new BadRequestException('No se pudo leer ningun articulo del catalogo Falk & Ross. Revisa el formato CSV/XML/XLSX.');
     }
-    for (const article of articles) {
-      await this.prisma.supplierArticle.upsert({
-        where: { supplier_supplierSku: { supplier: article.supplier, supplierSku: article.supplierSku } },
-        create: article,
-        update: article
+    await this.prisma.supplierArticle.deleteMany({ where: { supplier: 'FALK_ROSS' } });
+    for (const chunk of this.chunks(articles, 1000)) {
+      await this.prisma.supplierArticle.createMany({
+        data: chunk,
+        skipDuplicates: true
       });
     }
     return { imported: articles.length, mode, sample: articles.slice(0, 5).map((article) => ({ supplierSku: article.supplierSku, styleCode: article.styleCode, color: article.color, size: article.size })) };
@@ -277,30 +278,88 @@ export class SupplierAdapter {
       const response = await fetch(source, {
         headers: user && password ? { Authorization: `Basic ${Buffer.from(`${user}:${password}`).toString('base64')}` } : {}
       });
-      const text = await response.text();
+      const buffer = Buffer.from(await response.arrayBuffer());
       if (!response.ok) {
-        throw new BadRequestException(`Catalogo Falk & Ross ${response.status}: ${text}`);
+        throw new BadRequestException(`Catalogo Falk & Ross ${response.status}: ${buffer.toString('utf8')}`);
       }
-      return { text, mode: source.toLowerCase().includes('.xml') ? 'falkross-xml' : 'falkross-csv' };
+      return { content: this.catalogContent(buffer, source), mode: this.catalogMode(source, 'falkross') };
     }
 
     const buffer = await readFile(source);
     if (source.toLowerCase().endsWith('.zip')) {
-      throw new BadRequestException('Importa primero el CSV/XML del ZIP. El servidor no descomprime ZIP automaticamente en produccion.');
+      throw new BadRequestException('Importa primero el CSV/XML/XLSX del ZIP. El servidor no descomprime ZIP automaticamente en produccion.');
     }
-    return { text: buffer.toString('utf8'), mode: source.toLowerCase().endsWith('.xml') ? 'local-xml' : 'local-csv' };
+    return { content: this.catalogContent(buffer, source), mode: this.catalogMode(source, 'local') };
   }
 
-  private parseCatalogArticles(text: string, mode: string) {
+  private catalogContent(buffer: Buffer, source: string) {
+    return source.toLowerCase().endsWith('.xlsx') ? buffer : buffer.toString('utf8');
+  }
+
+  private catalogMode(source: string, prefix: string) {
+    const lower = source.toLowerCase();
+    if (lower.endsWith('.xlsx')) return `${prefix}-xlsx`;
+    if (lower.endsWith('.xml')) return `${prefix}-xml`;
+    return `${prefix}-csv`;
+  }
+
+  private parseCatalogArticles(content: string | Buffer, mode: string) {
     const articles = mode.includes('xml')
-      ? this.parseCatalogXml(text, mode)
-      : this.parseCatalogCsv(text, mode);
+      ? this.parseCatalogXml(String(content), mode)
+      : mode.includes('xlsx')
+        ? this.parseCatalogXlsx(content, mode)
+        : this.parseCatalogCsv(String(content), mode);
     const deduped = new Map<string, CatalogArticleInput>();
     for (const article of articles) {
       if (!article.supplierSku) continue;
       deduped.set(article.supplierSku, article);
     }
     return [...deduped.values()];
+  }
+
+  private parseCatalogXlsx(content: string | Buffer, mode: string) {
+    const workbook = XLSX.read(content, { type: Buffer.isBuffer(content) ? 'buffer' : 'string', cellDates: false });
+    const sheet = workbook.Sheets.article ?? workbook.Sheets.Article ?? workbook.Sheets[workbook.SheetNames[0]];
+    if (!sheet) return [];
+    const rows = XLSX.utils.sheet_to_json<Array<string | number | null>>(sheet, { header: 1, raw: false, defval: null });
+    const headerIndex = rows.findIndex((row) =>
+      row.some((cell) => this.normalizeHeader(String(cell ?? '')) === 'articlenumberlong') &&
+      row.some((cell) => this.normalizeHeader(String(cell ?? '')) === 'style')
+    );
+    if (headerIndex < 0) return [];
+    const headers = rows[headerIndex].map((cell) => this.normalizeHeader(String(cell ?? '')));
+    return rows.slice(headerIndex + 1).map((row) => {
+      const cells = row.map((cell) => cell == null ? '' : String(cell).trim());
+      const get = (candidates: string[]) => this.pickCatalogCell(cells, headers, candidates, true);
+      const supplierSku = get(['article number long', 'articlenumberlong', 'p_sku', 'sku']);
+      const shortArticleNumber = get(['article number short', 'articlenumbershort']);
+      const style = get(['style']);
+      const supplierCode = get(['supplier_code', 'suppliercode']);
+      const styleCode = shortArticleNumber || [style, supplierCode].filter(Boolean).join('.') || null;
+      const supplierName = get(['supplier_name', 'suppliername']);
+      const supplierArticleName = get(['supplier_article_name', 'supplierarticlename']);
+      const articleName = get(['article_name', 'articlename']);
+      const productName = [supplierArticleName, articleName].filter(Boolean).join(' - ') || articleName || supplierArticleName;
+      const color = get(['color_name', 'colorname', 'color']);
+      const size = get(['size_name', 'sizename', 'size']);
+      const ean = get(['ean', 'barcode', 'gtin']);
+      const purchasePrice = this.pickPrice(get(['customer_price /1-2/', 'customerprice12', 'piece_price', 'pieceprice', 'default_price', 'defaultprice']));
+      const packQuantity = this.pickInteger(get(['Pieces_in_Pack', 'piecesinpack', 'packquantity']));
+      const cartonQuantity = this.pickInteger(get(['Pieces_in_Carton', 'piecesincarton', 'cartonquantity']));
+      return this.catalogArticle({
+        supplierSku,
+        styleCode,
+        productName,
+        color,
+        size,
+        ean,
+        purchasePrice,
+        weightGrams: null,
+        packQuantity,
+        cartonQuantity,
+        rawDataJson: { mode, row: cells, supplierName, style, supplierCode }
+      });
+    }).filter((article): article is CatalogArticleInput => Boolean(article?.supplierSku));
   }
 
   private parseCatalogCsv(text: string, mode: string) {

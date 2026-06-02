@@ -361,7 +361,7 @@ export class SupplierOrderService {
       ['CHARCOAL', /\b(charcoal|darkgrey|darkgray|gris|carbon)\b/],
       ['TANGERINE', /\b(tangerine|orange|naranja)\b/],
       ['AZUL', /\b(azul|blue)\b/],
-      ['MARRON', /\b(marron|brown)\b/],
+      ['MARRON', /\b(marron|brown|maroon|dark chocolate|chocolate|tan)\b/],
       ['ROSA', /\b(rosa|pink)\b/],
       ['NAVY', /\b(navy|marino)\b/]
     ];

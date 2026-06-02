@@ -146,9 +146,9 @@ describe('SupplierOrderService', () => {
         },
         {
           supplierSku: '290000222',
-          styleCode: '2000',
-          productName: '102.09 Brown T-Shirt',
-          color: 'Brown',
+          styleCode: '102.09',
+          productName: '2000 - Ultra Cotton Adult T-Shirt',
+          color: 'Maroon',
           size: 'M',
           purchasePrice: null
         }
@@ -171,7 +171,7 @@ describe('SupplierOrderService', () => {
             rawDataJson: expect.objectContaining({
               stockItemSupplierSku: 'FR-TS-BRN-M',
               resolvedSupplierSku: '290000222',
-              resolvedStyleCode: '2000',
+              resolvedStyleCode: '102.09',
               expectedProductNumber: '102.09'
             })
           })]
