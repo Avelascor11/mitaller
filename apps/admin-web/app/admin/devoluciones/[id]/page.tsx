@@ -50,7 +50,7 @@ interface ReturnRecord {
     customerName: string;
     customerEmail?: string | null;
     customerPhone?: string | null;
-    shippingAddressJson?: string | null;
+    shippingAddressJson?: unknown;
     totalPrice?: number | null;
     createdAt?: string;
   };
@@ -238,12 +238,32 @@ export default function ReturnDetailPage({ params }: { params: Promise<{ id: str
   }
 
   // Address parse helper
-  function parseAddress(json: string | null | undefined): string {
-    if (!json) return '—';
-    try {
-      const a = JSON.parse(json);
-      return [a.address1, a.city, a.zip, a.country].filter(Boolean).join(', ');
-    } catch { return json; }
+  function parseAddress(value: unknown): string {
+    if (!value) return '—';
+
+    let address = value;
+    if (typeof value === 'string') {
+      try {
+        address = JSON.parse(value);
+      } catch {
+        return value;
+      }
+    }
+
+    if (!address || typeof address !== 'object') return String(address);
+
+    const a = address as Record<string, unknown>;
+    return [
+      a.address1,
+      a.address2,
+      a.city,
+      a.province,
+      a.zip,
+      a.country ?? a.countryCodeV2
+    ].filter((part): part is string | number => typeof part === 'string' || typeof part === 'number')
+      .map(String)
+      .filter(Boolean)
+      .join(', ') || '—';
   }
 
   if (!token && !loading) return null;
