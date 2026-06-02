@@ -1,8 +1,12 @@
 'use client';
 
 import { use, useEffect, useRef, useState } from 'react';
+import { AnimatePresence, motion } from 'framer-motion';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001';
+const ACCENT = '#34B27B';
+const ACCENT2 = '#2A9D8F';
+const FONT = "Inter, -apple-system, BlinkMacSystemFont, 'SF Pro Display', sans-serif";
 
 const STATUS_META: Record<string, { label: string; color: string; bg: string; dot: string }> = {
   REQUESTED:     { label: 'En espera',        color: '#92400e', bg: '#fef3c7', dot: '#f59e0b' },
@@ -84,21 +88,64 @@ function useToast() {
   return { toasts, ok: (m: string) => push(m, 'ok'), err: (m: string) => push(m, 'err') };
 }
 
+// Variants
+const EASE: [number, number, number, number] = [0.22, 1, 0.36, 1];
+
+const cardVariants = {
+  initial: { opacity: 0, y: 20 },
+  animate: (i: number) => ({
+    opacity: 1,
+    y: 0,
+    transition: { delay: i * 0.07, duration: 0.32, ease: EASE },
+  }),
+};
+
+const sidebarCardVariants = {
+  initial: { opacity: 0, x: 20 },
+  animate: (i: number) => ({
+    opacity: 1,
+    x: 0,
+    transition: { delay: i * 0.07 + 0.1, duration: 0.32, ease: EASE },
+  }),
+};
+
+const timelineItemVariants = {
+  initial: { opacity: 0, x: -12 },
+  animate: (i: number) => ({
+    opacity: 1,
+    x: 0,
+    transition: { delay: i * 0.1 + 0.3, duration: 0.28, ease: EASE },
+  }),
+};
+
 function StatusPill({ status }: { status: string }) {
   const m = STATUS_META[status] ?? { label: status, color: '#475569', bg: '#f1f5f9', dot: '#94a3b8' };
   return (
-    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 12, fontWeight: 600, padding: '4px 12px', borderRadius: 20, color: m.color, background: m.bg }}>
+    <motion.span
+      key={status}
+      initial={{ scale: 0.85, opacity: 0 }}
+      animate={{ scale: 1, opacity: 1 }}
+      transition={{ type: 'spring', damping: 18, stiffness: 300 }}
+      style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 12, fontWeight: 600, padding: '4px 12px', borderRadius: 20, color: m.color, background: m.bg }}
+    >
       <span style={{ width: 6, height: 6, borderRadius: '50%', background: m.dot }} />
       {m.label}
-    </span>
+    </motion.span>
   );
 }
 
-function Card({ children, style }: { children: React.ReactNode; style?: React.CSSProperties }) {
+function Card({ children, style, index = 0, sidebar = false }: { children: React.ReactNode; style?: React.CSSProperties; index?: number; sidebar?: boolean }) {
   return (
-    <div style={{ background: '#fff', border: '1px solid #e5e7eb', borderRadius: 10, overflow: 'hidden', ...style }}>
+    <motion.div
+      custom={index}
+      variants={sidebar ? sidebarCardVariants : cardVariants}
+      initial="initial"
+      animate="animate"
+      whileHover={{ boxShadow: '0 8px 28px -8px rgba(0,0,0,0.12)', borderColor: `${ACCENT}33` }}
+      style={{ background: '#fff', border: '1px solid #e5e7eb', borderRadius: 12, overflow: 'hidden', transition: 'border-color .2s', ...style }}
+    >
       {children}
-    </div>
+    </motion.div>
   );
 }
 
@@ -152,17 +199,32 @@ function PhotoSection({ returnId, token }: { returnId: string; token: string }) 
   return (
     <div style={{ padding: '12px 16px' }}>
       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: photos.length > 0 ? 10 : 0 }}>
-        {photos.map((src, i) => (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img key={i} src={src} alt={`foto ${i + 1}`} onClick={() => window.open(src, '_blank')}
-            style={{ width: 72, height: 72, objectFit: 'cover', borderRadius: 8, border: '1px solid #e5e7eb', cursor: 'pointer' }} />
-        ))}
+        <AnimatePresence>
+          {photos.map((src, i) => (
+            <motion.img
+              key={i}
+              initial={{ opacity: 0, scale: 0.85 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.8 }}
+              transition={{ type: 'spring', damping: 18, stiffness: 280 }}
+              src={src}
+              alt={`foto ${i + 1}`}
+              onClick={() => window.open(src, '_blank')}
+              whileHover={{ scale: 1.06 }}
+              style={{ width: 72, height: 72, objectFit: 'cover', borderRadius: 8, border: '1px solid #e5e7eb', cursor: 'pointer' }}
+            />
+          ))}
+        </AnimatePresence>
         {photos.length === 0 && <span style={{ fontSize: 13, color: '#9ca3af' }}>Sin fotos adjuntas</span>}
       </div>
-      <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '6px 12px', background: '#f9fafb', border: '1px solid #e5e7eb', borderRadius: 7, cursor: 'pointer', fontSize: 12, fontWeight: 500, color: '#374151', marginTop: 8 }}>
+      <motion.label
+        whileHover={{ scale: 1.02, borderColor: `${ACCENT}66` }}
+        whileTap={{ scale: 0.97 }}
+        style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '6px 12px', background: '#f9fafb', border: '1px solid #e5e7eb', borderRadius: 7, cursor: 'pointer', fontSize: 12, fontWeight: 500, color: '#374151', marginTop: 8 }}
+      >
         <input type="file" accept="image/*" capture="environment" style={{ display: 'none' }} onChange={handleFile} disabled={uploading} />
         {uploading ? '⏳ Subiendo...' : '📷 Añadir foto'}
-      </label>
+      </motion.label>
     </div>
   );
 }
@@ -237,55 +299,57 @@ export default function ReturnDetailPage({ params }: { params: Promise<{ id: str
     finally { setActionLoading(false); }
   }
 
-  // Address parse helper
   function parseAddress(value: unknown): string {
     if (!value) return '—';
-
     let address = value;
     if (typeof value === 'string') {
-      try {
-        address = JSON.parse(value);
-      } catch {
-        return value;
-      }
+      try { address = JSON.parse(value); } catch { return value; }
     }
-
     if (!address || typeof address !== 'object') return String(address);
-
     const a = address as Record<string, unknown>;
-    return [
-      a.address1,
-      a.address2,
-      a.city,
-      a.province,
-      a.zip,
-      a.country ?? a.countryCodeV2
-    ].filter((part): part is string | number => typeof part === 'string' || typeof part === 'number')
-      .map(String)
-      .filter(Boolean)
-      .join(', ') || '—';
+    return [a.address1, a.address2, a.city, a.province, a.zip, a.country ?? a.countryCodeV2]
+      .filter((part): part is string | number => typeof part === 'string' || typeof part === 'number')
+      .map(String).filter(Boolean).join(', ') || '—';
   }
 
   if (!token && !loading) return null;
 
   if (loading) return (
-    <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#f4f5f7' }}>
-      <div style={{ textAlign: 'center' }}>
-        <div style={{ width: 32, height: 32, border: '3px solid #e5e7eb', borderTopColor: '#111827', borderRadius: '50%', animation: 'spin 0.75s linear infinite', margin: '0 auto 12px' }} />
+    <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#f4f5f7', fontFamily: FONT }}>
+      <motion.div
+        initial={{ opacity: 0, scale: 0.9 }}
+        animate={{ opacity: 1, scale: 1 }}
+        transition={{ duration: 0.3 }}
+        style={{ textAlign: 'center' }}
+      >
+        <motion.div
+          animate={{ rotate: 360 }}
+          transition={{ duration: 0.75, repeat: Infinity, ease: 'linear' }}
+          style={{ width: 32, height: 32, border: `3px solid #e5e7eb`, borderTopColor: ACCENT, borderRadius: '50%', margin: '0 auto 12px' }}
+        />
         <div style={{ fontSize: 14, color: '#9ca3af' }}>Cargando devolución…</div>
-      </div>
-      <style>{`@keyframes spin { to { transform: rotate(360deg) } }`}</style>
+      </motion.div>
     </div>
   );
 
   if (notFound) return (
-    <div style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', background: '#f4f5f7', gap: 16 }}>
+    <motion.div
+      initial={{ opacity: 0, y: 20 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.3 }}
+      style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', background: '#f4f5f7', gap: 16, fontFamily: FONT }}
+    >
       <div style={{ fontSize: 48 }}>🔍</div>
       <div style={{ fontSize: 18, fontWeight: 600, color: '#111827' }}>Devolución no encontrada</div>
-      <button onClick={() => window.location.href = '/admin/devoluciones'} style={{ fontSize: 14, color: '#6b7280', background: '#fff', border: '1px solid #e5e7eb', borderRadius: 8, padding: '9px 18px', cursor: 'pointer' }}>
+      <motion.button
+        whileHover={{ scale: 1.03, borderColor: `${ACCENT}66` }}
+        whileTap={{ scale: 0.97 }}
+        onClick={() => window.location.href = '/admin/devoluciones'}
+        style={{ fontSize: 14, color: '#6b7280', background: '#fff', border: '1px solid #e5e7eb', borderRadius: 8, padding: '9px 18px', cursor: 'pointer', fontFamily: FONT }}
+      >
         ← Volver al listado
-      </button>
-    </div>
+      </motion.button>
+    </motion.div>
   );
 
   if (!data) return null;
@@ -294,65 +358,87 @@ export default function ReturnDetailPage({ params }: { params: Promise<{ id: str
   const refundAmount = data.shopifyRefundAmount ?? data.refundAmount ?? data.totalAmount;
 
   return (
-    <div style={{ minHeight: '100vh', background: '#f4f5f7', fontFamily: "-apple-system, 'SF Pro Display', BlinkMacSystemFont, 'Helvetica Neue', sans-serif" }}>
+    <div style={{ minHeight: '100vh', background: '#f4f5f7', fontFamily: FONT }}>
       <style>{`
-        @keyframes spin { to { transform: rotate(360deg) } }
-        @keyframes fadeIn { from { opacity:0; transform:translateY(4px) } to { opacity:1; transform:none } }
-        .action-btn:hover { opacity: 0.85 !important; }
-        .status-btn:hover { filter: brightness(0.95); }
+        input:focus, select:focus, textarea:focus { border-color: ${ACCENT}88 !important; box-shadow: 0 0 0 3px ${ACCENT}1f !important; outline: none; }
       `}</style>
 
-      {/* Toast */}
+      {/* Toasts */}
       <div style={{ position: 'fixed', bottom: 24, right: 24, display: 'flex', flexDirection: 'column', gap: 8, zIndex: 999 }}>
-        {toasts.map(t => (
-          <div key={t.id} style={{ padding: '12px 18px', borderRadius: 10, fontSize: 14, fontWeight: 500, background: t.type === 'ok' ? '#111827' : '#991b1b', color: '#fff', boxShadow: '0 4px 16px rgba(0,0,0,0.18)', animation: 'fadeIn 0.2s ease' }}>{t.msg}</div>
-        ))}
+        <AnimatePresence>
+          {toasts.map(t => (
+            <motion.div
+              key={t.id}
+              initial={{ opacity: 0, x: 40, scale: 0.9 }}
+              animate={{ opacity: 1, x: 0, scale: 1, transition: { type: 'spring', damping: 20, stiffness: 300 } }}
+              exit={{ opacity: 0, x: 40, scale: 0.9, transition: { duration: 0.18 } }}
+              style={{ padding: '12px 18px', borderRadius: 10, fontSize: 14, fontWeight: 500, background: t.type === 'ok' ? `linear-gradient(140deg,${ACCENT},${ACCENT2})` : '#991b1b', color: '#fff', boxShadow: '0 4px 16px rgba(0,0,0,0.18)' }}
+            >{t.msg}</motion.div>
+          ))}
+        </AnimatePresence>
       </div>
 
       {/* Top nav */}
-      <div style={{ background: '#fff', borderBottom: '1px solid #e5e7eb', height: 56, display: 'flex', alignItems: 'center', padding: '0 24px', justifyContent: 'space-between', position: 'sticky', top: 0, zIndex: 50 }}>
+      <motion.div
+        initial={{ opacity: 0, y: -8 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.3, ease: [0.22, 1, 0.36, 1] }}
+        style={{ background: '#fff', borderBottom: '1px solid #e5e7eb', height: 56, display: 'flex', alignItems: 'center', padding: '0 24px', justifyContent: 'space-between', position: 'sticky', top: 0, zIndex: 50 }}
+      >
         <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img src="https://d3k81ch9hvuctc.cloudfront.net/company/Yiztrx/images/2542dbd7-26d2-4c03-89ff-ac50f08da007.png" alt="Logo" style={{ height: 28, objectFit: 'contain' }} />
           <div style={{ width: 1, height: 20, background: '#e5e7eb' }} />
-          <button onClick={() => window.location.href = '/admin/devoluciones'} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, color: '#6b7280', background: 'transparent', border: 'none', cursor: 'pointer', padding: 0 }}>
+          <motion.button
+            whileHover={{ x: -2, color: ACCENT }}
+            onClick={() => window.location.href = '/admin/devoluciones'}
+            style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, color: '#6b7280', background: 'transparent', border: 'none', cursor: 'pointer', padding: 0, fontFamily: FONT, transition: 'color .15s' }}
+          >
             ← Listado de devoluciones
-          </button>
+          </motion.button>
           <div style={{ width: 1, height: 16, background: '#e5e7eb' }} />
           <span style={{ fontSize: 14, fontWeight: 700, color: '#111827' }}>{data.shopifyOrderNumber}</span>
-          <StatusPill status={data.status} />
+          <AnimatePresence mode="wait">
+            <StatusPill key={data.status} status={data.status} />
+          </AnimatePresence>
           <span style={{ fontSize: 12, padding: '3px 8px', borderRadius: 6, background: data.type === 'EXCHANGE' ? '#ede9fe' : '#dbeafe', color: data.type === 'EXCHANGE' ? '#5b21b6' : '#1e40af', fontWeight: 600 }}>
             {data.type === 'EXCHANGE' ? '⇄ Cambio' : '↩ Devolución'}
           </span>
         </div>
 
-        {/* Action buttons */}
         <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
           {data.status !== 'APPROVED' && data.status !== 'REJECTED' && data.status !== 'CANCELLED' && (
-            <button
-              className="action-btn"
+            <motion.button
+              whileHover={{ y: -2, boxShadow: '0 8px 20px -8px rgba(16,185,129,0.6)' }}
+              whileTap={{ scale: 0.96 }}
               disabled={actionLoading}
               onClick={() => updateStatus('APPROVED')}
-              style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '8px 16px', background: '#10b981', color: '#fff', border: 'none', borderRadius: 8, fontSize: 13, fontWeight: 600, cursor: 'pointer', opacity: actionLoading ? 0.6 : 1, transition: 'opacity 0.15s' }}
+              style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '8px 16px', background: '#10b981', color: '#fff', border: 'none', borderRadius: 8, fontSize: 13, fontWeight: 600, cursor: 'pointer', opacity: actionLoading ? 0.6 : 1, fontFamily: FONT }}
             >
               ✓ Aprobar
-            </button>
+            </motion.button>
           )}
           {data.status !== 'REJECTED' && data.status !== 'CANCELLED' && data.status !== 'APPROVED' && (
-            <button
-              className="action-btn"
+            <motion.button
+              whileHover={{ y: -2, boxShadow: '0 8px 20px -8px rgba(239,68,68,0.4)' }}
+              whileTap={{ scale: 0.96 }}
               disabled={actionLoading}
               onClick={() => updateStatus('REJECTED')}
-              style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '8px 16px', background: '#fff', color: '#ef4444', border: '1px solid #fca5a5', borderRadius: 8, fontSize: 13, fontWeight: 600, cursor: 'pointer', opacity: actionLoading ? 0.6 : 1, transition: 'opacity 0.15s' }}
+              style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '8px 16px', background: '#fff', color: '#ef4444', border: '1px solid #fca5a5', borderRadius: 8, fontSize: 13, fontWeight: 600, cursor: 'pointer', opacity: actionLoading ? 0.6 : 1, fontFamily: FONT }}
             >
               ✕ Rechazar
-            </button>
+            </motion.button>
           )}
-          <button onClick={() => loadReturn(token)} style={{ padding: '7px 12px', background: '#f9fafb', border: '1px solid #e5e7eb', borderRadius: 8, fontSize: 12, color: '#6b7280', cursor: 'pointer' }}>
+          <motion.button
+            whileHover={{ rotate: 180 }}
+            transition={{ duration: 0.4 }}
+            onClick={() => loadReturn(token)}
+            style={{ padding: '7px 12px', background: '#f9fafb', border: '1px solid #e5e7eb', borderRadius: 8, fontSize: 12, color: '#6b7280', cursor: 'pointer', fontFamily: FONT }}
+          >
             ↻
-          </button>
+          </motion.button>
         </div>
-      </div>
+      </motion.div>
 
       {/* Main layout */}
       <div style={{ maxWidth: 1200, margin: '0 auto', padding: '24px', display: 'grid', gridTemplateColumns: '1fr 320px', gap: 20, alignItems: 'start' }}>
@@ -361,14 +447,26 @@ export default function ReturnDetailPage({ params }: { params: Promise<{ id: str
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
 
           {/* Products */}
-          <Card>
+          <Card index={0}>
             <CardHeader title="Artículos solicitados" icon="📦" />
             <div style={{ padding: '4px 0' }}>
               {data.items.map((item, i) => (
-                <div key={item.id} style={{ display: 'flex', alignItems: 'flex-start', gap: 14, padding: '14px 16px', borderBottom: i < data.items.length - 1 ? '1px solid #f3f4f6' : 'none' }}>
+                <motion.div
+                  key={item.id}
+                  custom={i}
+                  variants={timelineItemVariants}
+                  initial="initial"
+                  animate="animate"
+                  style={{ display: 'flex', alignItems: 'flex-start', gap: 14, padding: '14px 16px', borderBottom: i < data.items.length - 1 ? '1px solid #f3f4f6' : 'none' }}
+                >
                   {item.orderItem.imageUrl ? (
                     // eslint-disable-next-line @next/next/no-img-element
-                    <img src={item.orderItem.imageUrl} alt="" style={{ width: 56, height: 56, objectFit: 'cover', borderRadius: 8, border: '1px solid #e5e7eb', flexShrink: 0 }} />
+                    <motion.img
+                      whileHover={{ scale: 1.06 }}
+                      src={item.orderItem.imageUrl}
+                      alt=""
+                      style={{ width: 56, height: 56, objectFit: 'cover', borderRadius: 8, border: '1px solid #e5e7eb', flexShrink: 0, cursor: 'pointer' }}
+                    />
                   ) : (
                     <div style={{ width: 56, height: 56, borderRadius: 8, background: '#f3f4f6', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 20 }}>📷</div>
                   )}
@@ -396,7 +494,7 @@ export default function ReturnDetailPage({ params }: { params: Promise<{ id: str
                       <div style={{ fontSize: 12, color: '#9ca3af', marginTop: 2 }}>{item.orderItem.price.toFixed(2)}€</div>
                     )}
                   </div>
-                </div>
+                </motion.div>
               ))}
             </div>
             {data.notes && (
@@ -408,71 +506,97 @@ export default function ReturnDetailPage({ params }: { params: Promise<{ id: str
           </Card>
 
           {/* Verification */}
-          <Card>
+          <Card index={1}>
             <CardHeader title="Verificación del paquete" icon="🔍" />
             <div style={{ padding: '16px' }}>
-              {data.verificationStatus ? (
-                <div>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: data.verificationNotes ? 10 : 0 }}>
-                    <span style={{
-                      fontSize: 13, fontWeight: 700, padding: '5px 14px', borderRadius: 20,
-                      background: data.verificationStatus === 'OK' ? '#d1fae5' : '#fee2e2',
-                      color: data.verificationStatus === 'OK' ? '#065f46' : '#991b1b',
-                    }}>
-                      {data.verificationStatus === 'OK' ? '✅ Todo correcto' : '⚠️ Incidencia detectada'}
-                    </span>
-                    {data.verifiedAt && (
-                      <span style={{ fontSize: 12, color: '#9ca3af' }}>
-                        {new Date(data.verifiedAt).toLocaleString('es-ES', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })}
+              <AnimatePresence mode="wait">
+                {data.verificationStatus ? (
+                  <motion.div
+                    key="verified"
+                    initial={{ opacity: 0, y: 8 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: -8 }}
+                    transition={{ duration: 0.22 }}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: data.verificationNotes ? 10 : 0 }}>
+                      <span style={{
+                        fontSize: 13, fontWeight: 700, padding: '5px 14px', borderRadius: 20,
+                        background: data.verificationStatus === 'OK' ? '#d1fae5' : '#fee2e2',
+                        color: data.verificationStatus === 'OK' ? '#065f46' : '#991b1b',
+                      }}>
+                        {data.verificationStatus === 'OK' ? '✅ Todo correcto' : '⚠️ Incidencia detectada'}
                       </span>
-                    )}
-                  </div>
-                  {data.verificationNotes && (
-                    <div style={{ fontSize: 13, color: '#6b7280', padding: '10px 14px', background: '#f9fafb', borderRadius: 8, marginTop: 10 }}>
-                      {data.verificationNotes}
+                      {data.verifiedAt && (
+                        <span style={{ fontSize: 12, color: '#9ca3af' }}>
+                          {new Date(data.verifiedAt).toLocaleString('es-ES', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })}
+                        </span>
+                      )}
                     </div>
-                  )}
-                </div>
-              ) : data.status === 'RECEIVED' ? (
-                <div>
-                  <p style={{ margin: '0 0 12px', fontSize: 13, color: '#374151' }}>Paquete recibido. ¿El contenido es correcto?</p>
-                  <input
-                    type="text"
-                    placeholder="Notas de verificación (opcional)"
-                    value={verifyNotes}
-                    onChange={e => setVerifyNotes(e.target.value)}
-                    style={{ padding: '9px 12px', borderRadius: 8, border: '1px solid #e5e7eb', fontSize: 13, width: '100%', marginBottom: 10, boxSizing: 'border-box' }}
-                  />
-                  <div style={{ display: 'flex', gap: 8 }}>
-                    <button onClick={() => verifyReturn('OK')} disabled={actionLoading}
-                      style={{ flex: 1, padding: '10px', fontSize: 13, fontWeight: 600, background: '#d1fae5', color: '#065f46', border: '1px solid #a7f3d0', borderRadius: 8, cursor: 'pointer', opacity: actionLoading ? 0.6 : 1 }}>
-                      ✅ Todo correcto
-                    </button>
-                    <button onClick={() => verifyReturn('ISSUE')} disabled={actionLoading}
-                      style={{ flex: 1, padding: '10px', fontSize: 13, fontWeight: 600, background: '#fee2e2', color: '#991b1b', border: '1px solid #fca5a5', borderRadius: 8, cursor: 'pointer', opacity: actionLoading ? 0.6 : 1 }}>
-                      ⚠️ Hay incidencia
-                    </button>
-                  </div>
-                </div>
-              ) : (
-                <div style={{ fontSize: 13, color: '#9ca3af', display: 'flex', alignItems: 'center', gap: 8, padding: '4px 0' }}>
-                  <span style={{ fontSize: 16 }}>⏳</span>
-                  {data.receivedAt
-                    ? `Recibido el ${new Date(data.receivedAt).toLocaleDateString('es-ES', { day: '2-digit', month: 'long', year: 'numeric' })}`
-                    : 'Pendiente de recibir el paquete'}
-                </div>
-              )}
+                    {data.verificationNotes && (
+                      <div style={{ fontSize: 13, color: '#6b7280', padding: '10px 14px', background: '#f9fafb', borderRadius: 8, marginTop: 10 }}>
+                        {data.verificationNotes}
+                      </div>
+                    )}
+                  </motion.div>
+                ) : data.status === 'RECEIVED' ? (
+                  <motion.div
+                    key="verify-form"
+                    initial={{ opacity: 0, y: 8 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: -8 }}
+                    transition={{ duration: 0.22 }}
+                  >
+                    <p style={{ margin: '0 0 12px', fontSize: 13, color: '#374151' }}>Paquete recibido. ¿El contenido es correcto?</p>
+                    <input
+                      type="text"
+                      placeholder="Notas de verificación (opcional)"
+                      value={verifyNotes}
+                      onChange={e => setVerifyNotes(e.target.value)}
+                      style={{ padding: '9px 12px', borderRadius: 8, border: '1px solid #e5e7eb', fontSize: 13, width: '100%', marginBottom: 10, boxSizing: 'border-box', fontFamily: FONT }}
+                    />
+                    <div style={{ display: 'flex', gap: 8 }}>
+                      <motion.button
+                        whileHover={{ y: -2 }}
+                        whileTap={{ scale: 0.97 }}
+                        onClick={() => verifyReturn('OK')}
+                        disabled={actionLoading}
+                        style={{ flex: 1, padding: '10px', fontSize: 13, fontWeight: 600, background: '#d1fae5', color: '#065f46', border: '1px solid #a7f3d0', borderRadius: 8, cursor: 'pointer', opacity: actionLoading ? 0.6 : 1, fontFamily: FONT }}
+                      >✅ Todo correcto</motion.button>
+                      <motion.button
+                        whileHover={{ y: -2 }}
+                        whileTap={{ scale: 0.97 }}
+                        onClick={() => verifyReturn('ISSUE')}
+                        disabled={actionLoading}
+                        style={{ flex: 1, padding: '10px', fontSize: 13, fontWeight: 600, background: '#fee2e2', color: '#991b1b', border: '1px solid #fca5a5', borderRadius: 8, cursor: 'pointer', opacity: actionLoading ? 0.6 : 1, fontFamily: FONT }}
+                      >⚠️ Hay incidencia</motion.button>
+                    </div>
+                  </motion.div>
+                ) : (
+                  <motion.div
+                    key="pending"
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    exit={{ opacity: 0 }}
+                    style={{ fontSize: 13, color: '#9ca3af', display: 'flex', alignItems: 'center', gap: 8, padding: '4px 0' }}
+                  >
+                    <span style={{ fontSize: 16 }}>⏳</span>
+                    {data.receivedAt
+                      ? `Recibido el ${new Date(data.receivedAt).toLocaleDateString('es-ES', { day: '2-digit', month: 'long', year: 'numeric' })}`
+                      : 'Pendiente de recibir el paquete'}
+                  </motion.div>
+                )}
+              </AnimatePresence>
             </div>
           </Card>
 
           {/* Photos */}
-          <Card>
+          <Card index={2}>
             <CardHeader title="Evidencia fotográfica" icon="📸" />
             <PhotoSection returnId={data.id} token={token} />
           </Card>
 
           {/* Timeline */}
-          <Card>
+          <Card index={3}>
             <CardHeader title="Historial de la solicitud" icon="🕐" />
             <div style={{ padding: '12px 16px' }}>
               {[
@@ -481,11 +605,21 @@ export default function ReturnDetailPage({ params }: { params: Promise<{ id: str
                 { date: data.verifiedAt, label: data.verificationStatus === 'ISSUE' ? 'Verificación: incidencia detectada' : 'Verificación correcta', icon: data.verificationStatus === 'ISSUE' ? '⚠️' : '✅', active: !!data.verifiedAt },
                 { date: data.refundedAt, label: `Reembolso procesado${refundAmount ? ` · ${refundAmount.toFixed(2)}€` : ''}`, icon: '💰', active: !!data.refundedAt },
               ].map((ev, i) => (
-                <div key={i} style={{ display: 'flex', gap: 12, marginBottom: i < 3 ? 12 : 0, opacity: ev.active ? 1 : 0.35 }}>
+                <motion.div
+                  key={i}
+                  custom={i}
+                  variants={timelineItemVariants}
+                  initial="initial"
+                  animate="animate"
+                  style={{ display: 'flex', gap: 12, marginBottom: i < 3 ? 12 : 0, opacity: ev.active ? 1 : 0.35 }}
+                >
                   <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
-                    <div style={{ width: 28, height: 28, borderRadius: '50%', background: ev.active ? '#f0fdf4' : '#f9fafb', border: `1px solid ${ev.active ? '#86efac' : '#e5e7eb'}`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, flexShrink: 0 }}>
-                      {ev.icon}
-                    </div>
+                    <motion.div
+                      initial={{ scale: 0.6 }}
+                      animate={{ scale: ev.active ? 1 : 0.85 }}
+                      transition={{ delay: i * 0.1 + 0.4, type: 'spring', damping: 16, stiffness: 280 }}
+                      style={{ width: 28, height: 28, borderRadius: '50%', background: ev.active ? '#f0fdf4' : '#f9fafb', border: `1px solid ${ev.active ? '#86efac' : '#e5e7eb'}`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, flexShrink: 0 }}
+                    >{ev.icon}</motion.div>
                     {i < 3 && <div style={{ width: 1, flex: 1, minHeight: 16, background: ev.active ? '#86efac' : '#e5e7eb', margin: '4px 0' }} />}
                   </div>
                   <div style={{ paddingTop: 4, paddingBottom: i < 3 ? 8 : 0 }}>
@@ -496,7 +630,7 @@ export default function ReturnDetailPage({ params }: { params: Promise<{ id: str
                       </div>
                     )}
                   </div>
-                </div>
+                </motion.div>
               ))}
             </div>
           </Card>
@@ -507,16 +641,22 @@ export default function ReturnDetailPage({ params }: { params: Promise<{ id: str
         <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
 
           {/* Status */}
-          <Card>
+          <Card index={0} sidebar>
             <CardHeader title="Estado" icon="🏷️" />
             <div style={{ padding: '14px 16px' }}>
               <div style={{ marginBottom: 12 }}>
-                <StatusPill status={data.status} />
+                <AnimatePresence mode="wait">
+                  <StatusPill key={data.status} status={data.status} />
+                </AnimatePresence>
               </div>
 
-              {/* Refund banner */}
               {data.status === 'APPROVED' && (
-                <div style={{ padding: '10px 12px', borderRadius: 8, background: data.refundedAt ? '#f0fdf4' : '#fffbeb', border: `1px solid ${data.refundedAt ? '#86efac' : '#fde68a'}`, marginBottom: 12 }}>
+                <motion.div
+                  initial={{ opacity: 0, y: 6 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ duration: 0.25 }}
+                  style={{ padding: '10px 12px', borderRadius: 8, background: data.refundedAt ? '#f0fdf4' : '#fffbeb', border: `1px solid ${data.refundedAt ? '#86efac' : '#fde68a'}`, marginBottom: 12 }}
+                >
                   {data.refundedAt ? (
                     <div style={{ fontSize: 12, fontWeight: 600, color: '#15803d' }}>
                       ✓ Reembolso enviado · {refundAmount?.toFixed(2)}€
@@ -527,10 +667,9 @@ export default function ReturnDetailPage({ params }: { params: Promise<{ id: str
                   ) : (
                     <div style={{ fontSize: 12, fontWeight: 600, color: '#92400e' }}>⏳ Reembolso pendiente en Shopify</div>
                   )}
-                </div>
+                </motion.div>
               )}
 
-              {/* Payment pending */}
               {data.paymentStatus === 'PENDING' && data.checkoutUrl && (
                 <div style={{ padding: '10px 12px', borderRadius: 8, background: '#fff7ed', border: '1px solid #fed7aa', marginBottom: 12 }}>
                   <div style={{ fontSize: 12, fontWeight: 600, color: '#c2410c' }}>💳 Pago de etiqueta pendiente</div>
@@ -541,23 +680,28 @@ export default function ReturnDetailPage({ params }: { params: Promise<{ id: str
                 </div>
               )}
 
-              {/* Status change buttons */}
               <div style={{ fontSize: 11, fontWeight: 600, color: '#9ca3af', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 8 }}>Cambiar estado</div>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
                 {Object.entries(STATUS_META)
                   .filter(([k]) => k !== data.status)
                   .map(([key, meta]) => (
-                    <button key={key} className="status-btn" onClick={() => updateStatus(key)} disabled={actionLoading}
-                      style={{ padding: '7px 12px', fontSize: 12, fontWeight: 600, cursor: 'pointer', color: meta.color, background: meta.bg, border: `1px solid ${meta.dot}44`, borderRadius: 8, textAlign: 'left', opacity: actionLoading ? 0.5 : 1, transition: 'filter 0.15s' }}>
+                    <motion.button
+                      key={key}
+                      whileHover={{ x: 3, filter: 'brightness(0.95)' }}
+                      whileTap={{ scale: 0.97 }}
+                      onClick={() => updateStatus(key)}
+                      disabled={actionLoading}
+                      style={{ padding: '7px 12px', fontSize: 12, fontWeight: 600, cursor: 'pointer', color: meta.color, background: meta.bg, border: `1px solid ${meta.dot}44`, borderRadius: 8, textAlign: 'left', opacity: actionLoading ? 0.5 : 1, fontFamily: FONT }}
+                    >
                       {meta.label}
-                    </button>
+                    </motion.button>
                   ))}
               </div>
             </div>
           </Card>
 
           {/* Customer */}
-          <Card>
+          <Card index={1} sidebar>
             <CardHeader title="Cliente" icon="👤" />
             <div style={{ padding: '12px 16px' }}>
               <InfoRow label="Nombre" value={data.customerName} />
@@ -568,7 +712,7 @@ export default function ReturnDetailPage({ params }: { params: Promise<{ id: str
           </Card>
 
           {/* Original order */}
-          <Card>
+          <Card index={2} sidebar>
             <CardHeader title="Pedido original" icon="🛒" />
             <div style={{ padding: '12px 16px' }}>
               <InfoRow label="Nº pedido" value={<span style={{ fontWeight: 700 }}>{data.shopifyOrderNumber}</span>} />
@@ -579,7 +723,7 @@ export default function ReturnDetailPage({ params }: { params: Promise<{ id: str
           </Card>
 
           {/* Shipping + tracking */}
-          <Card>
+          <Card index={3} sidebar>
             <CardHeader title="Envío y seguimiento" icon="🚚" />
             <div style={{ padding: '12px 16px' }}>
               {data.trackingNumber ? (
@@ -587,23 +731,25 @@ export default function ReturnDetailPage({ params }: { params: Promise<{ id: str
                   <InfoRow label="Nº seguimiento" value={<span style={{ fontWeight: 700, fontFamily: 'monospace', fontSize: 12 }}>{data.trackingNumber}</span>} />
                   {data.carrier && <InfoRow label="Transportista" value={data.carrier} />}
                   {data.labelUrl && (
-                    <a
+                    <motion.a
+                      whileHover={{ y: -2, boxShadow: '0 8px 20px -8px rgba(30,41,59,0.5)' }}
                       href={data.labelUrl.startsWith('http') ? data.labelUrl : `${API_URL}${data.labelUrl}`}
                       target="_blank"
                       rel="noopener noreferrer"
-                      style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, marginTop: 12, padding: '9px', background: '#1e293b', color: '#fff', borderRadius: 8, fontSize: 13, fontWeight: 600, textDecoration: 'none', transition: 'opacity 0.15s' }}
+                      style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, marginTop: 12, padding: '9px', background: '#1e293b', color: '#fff', borderRadius: 8, fontSize: 13, fontWeight: 600, textDecoration: 'none' }}
                     >
                       ⬇ Descargar etiqueta PDF
-                    </a>
+                    </motion.a>
                   )}
-                  <a
+                  <motion.a
+                    whileHover={{ y: -1, borderColor: `${ACCENT}66` }}
                     href={`/devoluciones/estado/${data.id}`}
                     target="_blank"
                     rel="noopener noreferrer"
                     style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, marginTop: 8, padding: '8px', background: '#f9fafb', border: '1px solid #e5e7eb', color: '#374151', borderRadius: 8, fontSize: 12, fontWeight: 500, textDecoration: 'none' }}
                   >
                     📍 Ver estado (vista cliente) ↗
-                  </a>
+                  </motion.a>
                 </>
               ) : (
                 <div>
@@ -611,10 +757,15 @@ export default function ReturnDetailPage({ params }: { params: Promise<{ id: str
                     {data.status === 'REQUESTED' ? 'Etiqueta pendiente de generar' : 'Sin tracking aún'}
                   </div>
                   {data.status === 'REQUESTED' && (
-                    <button onClick={() => updateStatus('LABEL_CREATED')} disabled={actionLoading}
-                      style={{ width: '100%', padding: '9px', background: '#1e293b', color: '#fff', border: 'none', borderRadius: 8, fontSize: 13, fontWeight: 600, cursor: 'pointer', opacity: actionLoading ? 0.6 : 1 }}>
+                    <motion.button
+                      whileHover={{ y: -2, boxShadow: '0 8px 20px -8px rgba(30,41,59,0.5)' }}
+                      whileTap={{ scale: 0.97 }}
+                      onClick={() => updateStatus('LABEL_CREATED')}
+                      disabled={actionLoading}
+                      style={{ width: '100%', padding: '9px', background: '#1e293b', color: '#fff', border: 'none', borderRadius: 8, fontSize: 13, fontWeight: 600, cursor: 'pointer', opacity: actionLoading ? 0.6 : 1, fontFamily: FONT }}
+                    >
                       🏷️ Generar etiqueta
-                    </button>
+                    </motion.button>
                   )}
                 </div>
               )}
@@ -623,7 +774,7 @@ export default function ReturnDetailPage({ params }: { params: Promise<{ id: str
 
           {/* Amounts */}
           {(data.totalAmount != null || refundAmount != null) && (
-            <Card>
+            <Card index={4} sidebar>
               <CardHeader title="Importes" icon="💰" />
               <div style={{ padding: '12px 16px' }}>
                 {data.totalAmount != null && data.totalAmount > 0 && (

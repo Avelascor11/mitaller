@@ -11,6 +11,7 @@
   "dependencies": {
     "@mitaller/shared": "0.1.0",
     "@mitaller/types": "0.1.0",
+    "framer-motion": "^12.40.0",
     "lucide-react": "^0.511.0",
     "next": "^15.3.2",
     "react": "^19.0.0",
