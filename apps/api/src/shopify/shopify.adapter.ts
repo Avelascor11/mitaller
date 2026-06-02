@@ -3,6 +3,8 @@ import { ConfigService } from '@nestjs/config';
 import { createHmac, timingSafeEqual } from 'crypto';
 import type { ImportedOrder } from '../orders/orders.service';
 
+const SHOPIFY_TIMEOUT_MS = 15000;
+
 @Injectable()
 export class ShopifyAdapter {
   constructor(private readonly config: ConfigService) {}
@@ -474,10 +476,14 @@ export class ShopifyAdapter {
           'Content-Type': 'application/json',
           'X-Shopify-Access-Token': this.accessToken
         },
-        body: JSON.stringify({ query, variables })
+        body: JSON.stringify({ query, variables }),
+        signal: AbortSignal.timeout(SHOPIFY_TIMEOUT_MS)
       });
     } catch (error) {
-      throw new BadGatewayException(`No se pudo conectar con Shopify (${this.shopDomain}). Revisa SHOPIFY_SHOP_DOMAIN.`);
+      const timedOut = error instanceof Error && error.name === 'TimeoutError';
+      throw new BadGatewayException(timedOut
+        ? `Shopify tardó demasiado en responder (>${SHOPIFY_TIMEOUT_MS / 1000}s). Inténtalo de nuevo.`
+        : `No se pudo conectar con Shopify (${this.shopDomain}). Revisa SHOPIFY_SHOP_DOMAIN.`);
     }
 
     const json = await response.json() as ShopifyGraphqlResponse<T>;
@@ -496,10 +502,14 @@ export class ShopifyAdapter {
           'Content-Type': 'application/json',
           'X-Shopify-Access-Token': this.accessToken,
           ...init.headers
-        }
+        },
+        signal: init.signal ?? AbortSignal.timeout(SHOPIFY_TIMEOUT_MS)
       });
-    } catch {
-      throw new BadGatewayException(`No se pudo conectar con Shopify (${this.shopDomain}). Revisa SHOPIFY_SHOP_DOMAIN.`);
+    } catch (error) {
+      const timedOut = error instanceof Error && error.name === 'TimeoutError';
+      throw new BadGatewayException(timedOut
+        ? `Shopify tardó demasiado en responder (>${SHOPIFY_TIMEOUT_MS / 1000}s). Inténtalo de nuevo.`
+        : `No se pudo conectar con Shopify (${this.shopDomain}). Revisa SHOPIFY_SHOP_DOMAIN.`);
     }
 
     const json = await response.json().catch(() => ({}));
