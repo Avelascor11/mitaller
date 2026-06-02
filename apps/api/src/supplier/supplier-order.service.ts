@@ -94,8 +94,9 @@ export class SupplierOrderService {
       .filter(({ entry }) => entry.stockItemId && entry.supplierSku && entry.recommendedPurchaseQuantity > 0)
       .map(({ group, entry }) => {
         const article = this.resolveFalkRossArticle(group.garmentType, group.color, entry.size, entry.supplierSku, supplierArticles, articleBySku);
-        const supplierSku = article?.supplierSku ?? entry.supplierSku!;
-        const resolvedStyleKey = this.falkRossStyleKey(article?.styleCode ?? article?.productName ?? this.expectedFalkRossStyles(group.garmentType, group.color)[0]);
+        const expectedStyles = this.expectedFalkRossStyles(group.garmentType, group.color);
+        const supplierSku = article?.supplierSku ?? expectedStyles[0] ?? entry.supplierSku!;
+        const resolvedStyleKey = this.falkRossStyleKey(article?.styleCode ?? article?.productName ?? expectedStyles[0]);
         const supplierAvailableQuantity = article ? stockBySku.get(supplierSku) ?? null : null;
         const alreadyPending = pendingByStockItemId.get(entry.stockItemId!) ?? 0;
         const requestedQuantity = Math.max(0, entry.recommendedPurchaseQuantity - alreadyPending);
@@ -118,8 +119,8 @@ export class SupplierOrderService {
             stockItemSupplierSku: entry.supplierSku,
             resolvedSupplierSku: supplierSku,
             resolvedStyleCode: article?.styleCode,
-            expectedStyleCode: this.expectedFalkRossStyles(group.garmentType, group.color)[0],
-            expectedProductNumber: this.expectedFalkRossStyles(group.garmentType, group.color)[1],
+            expectedStyleCode: expectedStyles[0],
+            expectedProductNumber: expectedStyles[1],
             resolvedProductName: article?.productName,
             demandOrders: entry.demandOrders.map((order) => order.orderNumber)
           }
@@ -277,7 +278,7 @@ export class SupplierOrderService {
   private hasUnresolvedFalkRossSkus(lines: Array<{ supplierSku: string; rawDataJson: Prisma.JsonValue | null }>) {
     return lines.some((line) => {
       const rawData = line.rawDataJson as { resolvedStyleCode?: string | null } | null;
-      return line.supplierSku.startsWith('FR-') && !rawData?.resolvedStyleCode;
+      return !rawData?.resolvedStyleCode;
     });
   }
 
