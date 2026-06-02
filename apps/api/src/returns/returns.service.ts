@@ -276,7 +276,7 @@ export class ReturnsService {
         draftOrderId = draft.id;
         const completed = await this.shopify.completeDraftOrder(draft.id);
         exchangeOrderName = completed.orderName;
-        exchangeOrderUrl = completed.adminUrl;
+        exchangeOrderUrl = (completed as { adminUrl?: string | null }).adminUrl ?? null;
         console.log(`[ReturnsService] Free exchange order created: ${completed.orderName ?? completed.orderId ?? 'unknown'}`);
       } catch (error) {
         console.error('[ReturnsService] Free exchange order creation error:', error);

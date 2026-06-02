@@ -591,6 +591,8 @@ model Return {
   carrier              String?
   deliveredAt          DateTime?
   shopifyDraftOrderId  String?
+  exchangeOrderName    String?
+  exchangeOrderUrl     String?
   checkoutUrl          String?
   refundAmount         Float?
   chargeAmount         Float?
