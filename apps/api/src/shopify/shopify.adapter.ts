@@ -467,6 +467,27 @@ export class ShopifyAdapter {
     return { id: draft.id, invoiceUrl: draft.invoiceUrl, totalPrice: Number(draft.totalPrice) };
   }
 
+  /** Complete a draft order into a real (paid) order — used for $0 exchanges so the warehouse can fulfil it. */
+  async completeDraftOrder(draftOrderId: string): Promise<{ orderId: string | null; orderName: string | null }> {
+    this.assertConfigured();
+    const data = await this.graphql<{ draftOrderComplete: { draftOrder: { id: string; order: { id: string; name: string } | null }; userErrors: Array<{ field: string; message: string }> } }>(`
+      mutation CompleteDraft($id: ID!) {
+        draftOrderComplete(id: $id, paymentPending: false) {
+          draftOrder { id order { id name } }
+          userErrors { field message }
+        }
+      }
+    `, { id: draftOrderId });
+
+    if (data.draftOrderComplete.userErrors.length > 0) {
+      const errs = data.draftOrderComplete.userErrors.map((e) => `${e.field}: ${e.message}`).join('; ');
+      throw new BadGatewayException(`Shopify draftOrderComplete error: ${errs}`);
+    }
+
+    const order = data.draftOrderComplete.draftOrder.order;
+    return { orderId: order?.id ?? null, orderName: order?.name ?? null };
+  }
+
   private async graphql<T>(query: string, variables: Record<string, unknown>): Promise<T> {
     let response: Response;
     try {

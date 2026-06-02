@@ -260,6 +260,24 @@ export class ReturnsService {
     let sendcloudTracking: string | null = null;
     let sendcloudCarrier: string | null = null;
 
+    // === Free/even EXCHANGE: create a real $0 order for the replacement product so the warehouse can fulfil it ===
+    if (totalToPay === 0 && type === 'EXCHANGE' && replacementsInfo.length > 0) {
+      try {
+        const draft = await this.shopify.createDraftOrder({
+          customerEmail: dto.email.toLowerCase().trim(),
+          note: `CAMBIO (sin coste) pedido ${order.orderNumber} — ${dto.items.length} artículo(s)`,
+          tags: ['return-portal', 'exchange', 'exchange-free'],
+          shippingAddress: this.shippingAddressFromOrder(order.shippingAddressJson, order.customerName),
+          lineItems: replacementsInfo.map((repl) => ({ variantId: repl.variantId, quantity: repl.quantity }))
+        });
+        draftOrderId = draft.id;
+        const completed = await this.shopify.completeDraftOrder(draft.id);
+        console.log(`[ReturnsService] Free exchange order created: ${completed.orderName ?? completed.orderId ?? 'unknown'}`);
+      } catch (error) {
+        console.error('[ReturnsService] Free exchange order creation error:', error);
+      }
+    }
+
     if (totalToPay === 0) {
       try {
         const sc = await this.sendcloud.createReturn({
