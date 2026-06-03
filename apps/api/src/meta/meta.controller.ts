@@ -1,4 +1,5 @@
-import { Body, Controller, Get, Param, Post, Query } from '@nestjs/common';
+import { Body, Controller, Get, Headers, Param, Post, Query, Req, UnauthorizedException } from '@nestjs/common';
+import type { Request } from 'express';
 import { CreateCampaignDto, MetaService } from './meta.service';
 
 /** Mobile app routes — no JWT (internal Railway URL), like mobile-returns. */
@@ -25,6 +26,27 @@ export class MetaController {
   @Get('templates')
   templates() {
     return this.meta.campaignTemplates();
+  }
+
+  @Get('webhook')
+  verifyWebhook(
+    @Query('hub.mode') mode?: string,
+    @Query('hub.verify_token') token?: string,
+    @Query('hub.challenge') challenge?: string
+  ) {
+    if (!this.meta.verifyWebhookChallenge(mode, token)) {
+      throw new UnauthorizedException('Meta webhook no autorizado');
+    }
+    return challenge ?? '';
+  }
+
+  @Post('webhook')
+  handleWebhook(
+    @Body() body: unknown,
+    @Headers('x-hub-signature-256') signature: string | undefined,
+    @Req() request: Request & { rawBody?: Buffer }
+  ) {
+    return this.meta.handleInstagramWebhook(body, signature, request.rawBody);
   }
 
   @Post('campaigns')

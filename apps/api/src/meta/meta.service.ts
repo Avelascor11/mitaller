@@ -1,5 +1,6 @@
-import { BadRequestException, Injectable, Logger } from '@nestjs/common';
+import { BadRequestException, Injectable, Logger, UnauthorizedException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { createHmac, timingSafeEqual } from 'crypto';
 import { PrismaService } from '../prisma/prisma.service';
 
 const GRAPH = 'https://graph.facebook.com';
@@ -61,6 +62,8 @@ export class MetaService {
   private get pageId() { return this.config.get<string>('META_PAGE_ID') ?? ''; }
   private get instagramId() { return this.config.get<string>('META_INSTAGRAM_ID') ?? ''; }
   private get version() { return this.config.get<string>('META_API_VERSION') ?? 'v21.0'; }
+  private get webhookVerifyToken() { return this.config.get<string>('META_WEBHOOK_VERIFY_TOKEN') ?? ''; }
+  private get appSecret() { return this.config.get<string>('META_APP_SECRET') ?? ''; }
 
   hasCredentials() { return Boolean(this.token && this.adAccount); }
 
@@ -98,6 +101,130 @@ export class MetaService {
       throw new BadRequestException(json?.error?.message ?? 'Error creando en Meta');
     }
     return json as T;
+  }
+
+  // ---------- Instagram/Messenger webhook ----------
+  verifyWebhookChallenge(mode?: string, token?: string) {
+    return mode === 'subscribe' && Boolean(this.webhookVerifyToken) && token === this.webhookVerifyToken;
+  }
+
+  async handleInstagramWebhook(payload: unknown, signature?: string, rawBody?: Buffer) {
+    this.assertWebhookSignature(signature, rawBody);
+    const events = this.extractMessagingEvents(payload);
+    const processed: Array<{ influencerId: string; igHandle: string; messagePreview: string | null }> = [];
+
+    for (const event of events) {
+      if (!event.senderId) continue;
+      const profile = await this.resolveInstagramProfile(event.senderId);
+      const igHandle = this.normalizeHandle(profile?.username) ?? `ig_${event.senderId}`;
+      const message = event.text ?? event.postbackTitle ?? null;
+      const influencer = await this.upsertInfluencerFromWebhook({
+        senderId: event.senderId,
+        igHandle,
+        fullName: profile?.name ?? null,
+        message,
+        timestamp: event.timestamp
+      });
+      processed.push({
+        influencerId: influencer.id,
+        igHandle: influencer.igHandle,
+        messagePreview: message ? message.slice(0, 120) : null
+      });
+    }
+
+    return { ok: true, received: events.length, processed: processed.length, influencers: processed };
+  }
+
+  private assertWebhookSignature(signature?: string, rawBody?: Buffer) {
+    if (!this.appSecret) return;
+    if (!signature || !rawBody) throw new UnauthorizedException('Firma webhook Meta ausente');
+    const expected = `sha256=${createHmac('sha256', this.appSecret).update(rawBody).digest('hex')}`;
+    const left = Buffer.from(signature);
+    const right = Buffer.from(expected);
+    if (left.length !== right.length || !timingSafeEqual(left, right)) {
+      throw new UnauthorizedException('Firma webhook Meta no valida');
+    }
+  }
+
+  private extractMessagingEvents(payload: unknown) {
+    const body = payload as any;
+    const entries: any[] = Array.isArray(body?.entry) ? body.entry : [];
+    const events: Array<{ senderId: string; text?: string; postbackTitle?: string; timestamp?: Date }> = [];
+
+    for (const entry of entries) {
+      const messaging: any[] = Array.isArray(entry?.messaging) ? entry.messaging : [];
+      for (const item of messaging) {
+        const senderId = item?.sender?.id;
+        if (!senderId) continue;
+        const text = typeof item?.message?.text === 'string' ? item.message.text : undefined;
+        const postbackTitle = typeof item?.postback?.title === 'string' ? item.postback.title : undefined;
+        if (!text && !postbackTitle && item?.message == null && item?.postback == null) continue;
+        events.push({
+          senderId: String(senderId),
+          text,
+          postbackTitle,
+          timestamp: Number.isFinite(Number(item?.timestamp)) ? new Date(Number(item.timestamp)) : undefined
+        });
+      }
+    }
+
+    return events;
+  }
+
+  private async resolveInstagramProfile(senderId: string): Promise<{ username?: string; name?: string } | null> {
+    if (!this.token) return null;
+    try {
+      return await this.graphGet<{ username?: string; name?: string }>(senderId, { fields: 'username,name' });
+    } catch (error) {
+      this.logger.warn(`No se pudo resolver perfil Instagram ${senderId}: ${(error as Error).message}`);
+      return null;
+    }
+  }
+
+  private async upsertInfluencerFromWebhook(input: {
+    senderId: string;
+    igHandle: string;
+    fullName: string | null;
+    message: string | null;
+    timestamp?: Date;
+  }) {
+    const existing = await this.prisma.influencer.findFirst({
+      where: {
+        OR: [
+          { manychatId: input.senderId },
+          { igHandle: input.igHandle }
+        ]
+      }
+    });
+    const stage = existing?.stage && !['PROSPECT', 'CONTACTED'].includes(existing.stage) ? existing.stage : 'CONTACTED';
+    const tags = Array.from(new Set([...(existing?.tags ?? []), 'instagram-webhook']));
+    const data = {
+      manychatId: input.senderId,
+      fullName: input.fullName ?? existing?.fullName ?? undefined,
+      stage,
+      tags,
+      lastMessage: input.message ?? existing?.lastMessage ?? undefined,
+      lastMessageAt: input.timestamp ?? new Date()
+    };
+
+    if (existing) {
+      return this.prisma.influencer.update({
+        where: { id: existing.id },
+        data
+      });
+    }
+
+    return this.prisma.influencer.create({
+      data: {
+        igHandle: input.igHandle,
+        ...data
+      }
+    });
+  }
+
+  private normalizeHandle(value?: string | null) {
+    const cleaned = value?.trim().replace(/^@+/, '').toLowerCase();
+    return cleaned || null;
   }
 
   // ---------- spend ----------

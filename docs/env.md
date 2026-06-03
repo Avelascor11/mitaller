@@ -84,6 +84,23 @@ Estos importes salen de la factura Sendcloud `1-26-ES0024751` del 06-05-2026, su
 
 La tarjeta "Pagos Shopify" usa los endpoints oficiales de Shopify Payments (`/shopify_payments/payouts.json` y `/shopify_payments/balance/transactions.json`). El token de Shopify debe tener el scope `shopify_payments_payouts` o `shopify_payments`; si no, Shopify devolvera error de permisos.
 
+## Meta / Instagram
+
+- `META_ACCESS_TOKEN`: token de Meta con permisos para Ads y, si se usa webhook de mensajes, para leer perfil basico de los remitentes cuando Meta lo permita.
+- `META_AD_ACCOUNT_ID`: cuenta publicitaria.
+- `META_PAGE_ID`: pagina conectada.
+- `META_INSTAGRAM_ID`: cuenta de Instagram profesional conectada.
+- `META_API_VERSION`: version Graph API. Por defecto `v21.0`.
+- `META_WEBHOOK_VERIFY_TOKEN`: texto secreto que Meta pedira al verificar el webhook.
+- `META_APP_SECRET`: app secret de Meta. Si esta definido, la API valida `X-Hub-Signature-256` en cada webhook entrante.
+
+Webhook para detectar influs desde chats de Instagram:
+
+- Callback URL: `https://mitaller-production-4755.up.railway.app/meta/webhook`
+- Verify token: el mismo valor que hayas guardado en `META_WEBHOOK_VERIFY_TOKEN`.
+
+Cuando llega un mensaje entrante, la API crea o actualiza un `Influencer` con estado `CONTACTED`, etiqueta `instagram-webhook`, ultimo mensaje y el identificador de conversacion de Meta. Si Graph devuelve `username`, se guarda como `@usuario`; si no, se guarda temporalmente como `@ig_<id>`.
+
 ## Falk & Ross
 
 - `FALKROSS_STOCK_CSV_URL`
