@@ -6,6 +6,7 @@ function buildService(options: {
   supplierArticles?: unknown[];
   supplierStocks?: unknown[];
   createdOrder?: unknown;
+  existingSupplierOrders?: unknown[];
 }) {
   const createdOrder = options.createdOrder ?? {
     id: 'supplier-order-1',
@@ -17,7 +18,12 @@ function buildService(options: {
   const prisma = {
     supplierPurchaseOrder: {
       findUnique: vi.fn().mockResolvedValue(null),
-      findMany: vi.fn().mockResolvedValue([]),
+      findMany: vi.fn((args?: { where?: { status?: { in?: string[] } } }) => {
+        const orders = options.existingSupplierOrders ?? [];
+        const statuses = args?.where?.status?.in;
+        if (!statuses) return Promise.resolve(orders);
+        return Promise.resolve(orders.filter((order) => statuses.includes((order as { status?: string }).status ?? '')));
+      }),
       create: vi.fn().mockResolvedValue(createdOrder)
     },
     supplierArticle: { findMany: vi.fn().mockResolvedValue(options.supplierArticles ?? []) },
@@ -110,6 +116,56 @@ describe('SupplierOrderService', () => {
               resolvedStyleCode: 'TG002'
             })
           })]
+        })
+      })
+    }));
+  });
+
+  it('no descuenta borradores antiguos al recomendar una nueva compra proveedor', async () => {
+    const { service, prisma } = buildService({
+      matrix: {
+        groups: [{
+          garmentType: 'CAMISETA',
+          color: 'BLANCA',
+          sizes: [{
+            stockItemId: 'stock-1',
+            supplierSku: 'FR-TS-WHT-M',
+            subproductName: 'Camiseta Blanca - M',
+            size: 'M',
+            recommendedPurchaseQuantity: 4,
+            supplierAvailableQuantity: null,
+            pendingOrderNeed: 6,
+            currentInternalStock: 2,
+            minStockTarget: 0,
+            demandOrders: [{ orderNumber: '#9510' }]
+          }]
+        }]
+      },
+      supplierArticles: [{
+        supplierSku: '180000002',
+        styleCode: 'TG002',
+        productName: 'B&C T-shirt 032.42',
+        color: 'White',
+        size: 'M',
+        purchasePrice: null
+      }],
+      supplierStocks: [{ supplierSku: '180000002', availableQuantity: 20 }],
+      existingSupplierOrders: [{
+        id: 'old-draft',
+        status: 'DRAFT',
+        lines: [{ stockItemId: 'stock-1', quantity: 4 }]
+      }]
+    });
+
+    await service.generateDailyFalkRossOrder({ source: 'manual' });
+
+    expect(prisma.supplierPurchaseOrder.findMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: { supplier: 'FALK_ROSS', status: { in: ['SUBMITTED'] } }
+    }));
+    expect(prisma.supplierPurchaseOrder.create).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        rawRequestJson: expect.objectContaining({
+          lines: [expect.objectContaining({ supplierSku: '180000002', quantity: 4 })]
         })
       })
     }));

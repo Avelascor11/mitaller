@@ -7,7 +7,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { PurchaseService } from '../purchasing/purchase.service';
 import { SupplierAdapter, SupplierPurchaseOrderPayload } from './supplier.adapter';
 
-const OPEN_SUPPLIER_ORDER_STATUSES = ['DRAFT', 'SUBMITTED'];
+const OPEN_SUPPLIER_ORDER_STATUSES = ['SUBMITTED'];
 const FALKROSS_PRICE_NOTE = [
   'Camiseta 032.42 -> 2.73 EUR',
   'Sudadera 290.09 -> 7.30 EUR',
