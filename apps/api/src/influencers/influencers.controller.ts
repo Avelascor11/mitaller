@@ -10,6 +10,11 @@ export class InfluencersController {
     return this.influencers.summary();
   }
 
+  @Get('stats')
+  stats() {
+    return this.influencers.summary();
+  }
+
   @Get()
   list(@Query('stage') stage?: string, @Query('q') q?: string) {
     return this.influencers.list({ stage, q });
@@ -90,3 +95,23 @@ export interface CreateSubmissionBody {
 }
 
 export interface UpdateSubmissionBody extends Partial<CreateSubmissionBody> {}
+
+@Controller('infuencers')
+export class InfluencersCompatController {
+  constructor(private readonly influencers: InfluencersService) {}
+
+  @Get('summary')
+  summary() {
+    return this.influencers.summary();
+  }
+
+  @Get('stats')
+  stats() {
+    return this.influencers.summary();
+  }
+
+  @Get()
+  list(@Query('stage') stage?: string, @Query('q') q?: string) {
+    return this.influencers.list({ stage, q });
+  }
+}

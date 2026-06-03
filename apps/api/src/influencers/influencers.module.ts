@@ -1,11 +1,11 @@
 import { Module } from '@nestjs/common';
 import { PrismaModule } from '../prisma/prisma.module';
-import { InfluencersController } from './influencers.controller';
+import { InfluencersCompatController, InfluencersController } from './influencers.controller';
 import { InfluencersService } from './influencers.service';
 
 @Module({
   imports: [PrismaModule],
-  controllers: [InfluencersController],
+  controllers: [InfluencersController, InfluencersCompatController],
   providers: [InfluencersService],
   exports: [InfluencersService]
 })
