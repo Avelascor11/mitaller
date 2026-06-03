@@ -522,6 +522,7 @@ export class ReturnsService {
 
     let draftId: string;
     let orderName: string | null = null;
+    let adminUrl: string | null = null;
     try {
       const draft = await this.shopify.createDraftOrder({
         customerEmail: returnRecord.customerEmail,
@@ -534,11 +535,12 @@ export class ReturnsService {
       draftId = draft.id;
       const completed = await this.shopify.completeDraftOrder(draft.id);
       orderName = completed.orderName;
+      adminUrl = completed.adminUrl;
     } catch (error) {
       throw new BadRequestException(`Error creando pedido en Shopify: ${error instanceof Error ? error.message : 'desconocido'}`);
     }
 
-    await this.prisma.return.update({ where: { id }, data: { shopifyDraftOrderId: draftId } });
+    await this.prisma.return.update({ where: { id }, data: { shopifyDraftOrderId: draftId, exchangeOrderName: orderName, exchangeOrderUrl: adminUrl } });
     await this.activity.log({
       entityType: 'Return',
       entityId: id,
@@ -547,7 +549,7 @@ export class ReturnsService {
       metadataJson: { draftOrderId: draftId, orderName }
     });
 
-    return { success: true, orderName, draftOrderId: draftId };
+    return { success: true, orderName, orderUrl: adminUrl, draftOrderId: draftId };
   }
 
   async getReturnStatus(id: string) {

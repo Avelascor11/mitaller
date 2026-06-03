@@ -474,7 +474,7 @@ export class ShopifyAdapter {
   }
 
   /** Complete a draft order into a real (paid) order — used for $0 exchanges so the warehouse can fulfil it. */
-  async completeDraftOrder(draftOrderId: string): Promise<{ orderId: string | null; orderName: string | null }> {
+  async completeDraftOrder(draftOrderId: string): Promise<{ orderId: string | null; orderName: string | null; adminUrl: string | null }> {
     this.assertConfigured();
     const data = await this.graphql<{ draftOrderComplete: { draftOrder: { id: string; order: { id: string; name: string } | null }; userErrors: Array<{ field: string; message: string }> } }>(`
       mutation CompleteDraft($id: ID!) {
@@ -491,7 +491,9 @@ export class ShopifyAdapter {
     }
 
     const order = data.draftOrderComplete.draftOrder.order;
-    return { orderId: order?.id ?? null, orderName: order?.name ?? null };
+    const numericId = order?.id ? order.id.split('/').pop() : null;
+    const adminUrl = numericId ? `https://${this.shopDomain}/admin/orders/${numericId}` : null;
+    return { orderId: order?.id ?? null, orderName: order?.name ?? null, adminUrl };
   }
 
   private async graphql<T>(query: string, variables: Record<string, unknown>): Promise<T> {

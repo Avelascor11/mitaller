@@ -50,6 +50,7 @@ interface Ret {
   id:string; shopifyOrderNumber:string; customerName:string; customerEmail:string;
   status:string; type:string; paymentStatus:string;
   checkoutUrl?:string|null; labelUrl?:string|null; shopifyDraftOrderId?:string|null;
+  exchangeOrderName?:string|null; exchangeOrderUrl?:string|null;
   trackingNumber?:string|null; carrier?:string|null; notes?:string|null;
   totalAmount?:number|null; refundAmount?:number|null;
   createdAt:string; updatedAt?:string; receivedAt?:string|null;
@@ -696,8 +697,17 @@ export default function Page({params}:{params:Promise<{id:string}>}) {
                 </div>
                 <div style={{padding:'14px 18px'}}>
                   {data.shopifyDraftOrderId?(
-                    <div style={{display:'flex',alignItems:'center',gap:8,fontSize:13,fontWeight:600,color:'#3fb98a'}}>
-                      ✓ Pedido de reemplazo creado en Shopify
+                    <div style={{display:'flex',flexDirection:'column',gap:10}}>
+                      <div style={{display:'flex',alignItems:'center',gap:8,fontSize:13,fontWeight:600,color:'#3fb98a'}}>
+                        ✓ Pedido {data.exchangeOrderName ?? ''} creado en Shopify
+                      </div>
+                      {data.exchangeOrderUrl&&(
+                        <motion.a whileHover={{y:-2,borderColor:G+'66'}}
+                          href={data.exchangeOrderUrl} target="_blank" rel="noopener noreferrer"
+                          style={{display:'flex',alignItems:'center',justifyContent:'center',gap:7,padding:'9px',background:T.head,border:`1px solid ${T.border}`,color:T.tx,borderRadius:9,fontSize:12.5,fontWeight:600,textDecoration:'none'}}>
+                          🛒 Ver pedido en Shopify ↗
+                        </motion.a>
+                      )}
                     </div>
                   ):(
                     <>

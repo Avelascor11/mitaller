@@ -665,6 +665,102 @@ model ReturnItem {
   orderItem             OrderItem    @relation(fields: [orderItemId], references: [id], onDelete: Cascade)
 }
 
+enum InfluencerStage {
+  PROSPECT
+  CONTACTED
+  NEGOTIATING
+  VIDEO_RECEIVED
+  PUBLISHED
+  REJECTED
+}
+
+enum UgcStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  PUBLISHED
+}
+
+enum CollabStatus {
+  OPEN
+  NEGOTIATING
+  PRODUCT_SENT
+  AWAITING_CONTENT
+  CONTENT_RECEIVED
+  PUBLISHED
+  CLOSED
+  CANCELLED
+}
+
+enum CollabType {
+  GIFT
+  PAID
+  AFFILIATE
+}
+
+model Influencer {
+  id            String          @id @default(cuid())
+  igHandle      String          @unique
+  fullName      String?
+  manychatId    String?         @unique
+  followers     Int?
+  email         String?
+  stage         InfluencerStage @default(PROSPECT)
+  tags          String[]
+  notes         String?
+  lastMessage   String?
+  lastMessageAt DateTime?
+  createdAt     DateTime        @default(now())
+  updatedAt     DateTime        @updatedAt
+  submissions   UgcSubmission[]
+  collaborations Collaboration[]
+
+  @@index([stage])
+}
+
+model Collaboration {
+  id             String          @id @default(cuid())
+  influencerId   String
+  title          String
+  status         CollabStatus    @default(OPEN)
+  type           CollabType      @default(GIFT)
+  compensation   Float?
+  productSent    String?
+  deliverables   String?
+  discountCode   String?
+  metaCampaignId String?
+  deadline       DateTime?
+  openedAt       DateTime        @default(now())
+  closedAt       DateTime?
+  notes          String?
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+  influencer     Influencer      @relation(fields: [influencerId], references: [id], onDelete: Cascade)
+  submissions    UgcSubmission[]
+
+  @@index([influencerId])
+  @@index([status])
+}
+
+model UgcSubmission {
+  id              String         @id @default(cuid())
+  influencerId    String
+  collaborationId String?
+  videoUrl        String?
+  thumbnailUrl    String?
+  caption         String?
+  type            String         @default("UGC")
+  status          UgcStatus      @default(PENDING)
+  metaCampaignId  String?
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+  influencer      Influencer     @relation(fields: [influencerId], references: [id], onDelete: Cascade)
+  collaboration   Collaboration? @relation(fields: [collaborationId], references: [id], onDelete: SetNull)
+
+  @@index([influencerId])
+  @@index([status])
+}
+
 model PortalConfig {
   id             String   @id @default("singleton")
   logoUrl        String?
