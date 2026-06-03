@@ -672,6 +672,9 @@ final class WorkshopStore {
     var isSupplierPurchaseActionRunning = false
     var mappingWorkbench: MappingWorkbench?
     var orderPickingLists: [String: OrderPickingList] = [:]
+    var influencers: [InfluencerProfile] = []
+    var influencerSummary: InfluencerSummary?
+    var isInfluencerActionRunning = false
 
     var priorityQueue: [WorkshopTask] {
         tasks
@@ -824,6 +827,54 @@ final class WorkshopStore {
             supplierPurchaseOrders = try await client.supplierPurchaseOrders()
         } catch {
             syncError = "No se pudieron cargar compras proveedor: \(error.localizedDescription)"
+        }
+    }
+
+    func loadInfluencers(stage: String? = nil, query: String? = nil) async {
+        guard let client = apiClient else { return }
+        do {
+            async let summary = client.influencerSummary()
+            async let rows = client.influencers(stage: stage, query: query)
+            influencerSummary = try await summary
+            influencers = try await rows
+            isAPIConnected = true
+            lastSyncText = Date().formatted(.dateTime.hour().minute().second())
+        } catch {
+            syncError = "No se pudieron cargar influs: \(error.localizedDescription)"
+        }
+    }
+
+    func createInfluencer(handle: String, name: String, notes: String) async {
+        guard let client = apiClient else { return }
+        isInfluencerActionRunning = true
+        syncError = nil
+        defer { isInfluencerActionRunning = false }
+        do {
+            _ = try await client.createInfluencer(InfluencerSaveRequest(
+                igHandle: handle,
+                fullName: name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : name,
+                followers: nil,
+                email: nil,
+                stage: "PROSPECT",
+                tags: nil,
+                notes: notes.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : notes
+            ))
+            await loadInfluencers()
+        } catch {
+            syncError = "No se pudo crear influ: \(error.localizedDescription)"
+        }
+    }
+
+    func updateInfluencerStage(_ influencer: InfluencerProfile, stage: String) async {
+        guard let client = apiClient else { return }
+        isInfluencerActionRunning = true
+        syncError = nil
+        defer { isInfluencerActionRunning = false }
+        do {
+            _ = try await client.updateInfluencer(id: influencer.id, body: InfluencerUpdateRequest(stage: stage))
+            await loadInfluencers()
+        } catch {
+            syncError = "No se pudo actualizar influ: \(error.localizedDescription)"
         }
     }
 
@@ -1246,6 +1297,8 @@ struct MainTabView: View {
                 .tabItem { Label("Economía", systemImage: "eurosign.circle.fill") }
             MetaAdsView()
                 .tabItem { Label("Meta Ads", systemImage: "megaphone.fill") }
+            InfluencersView()
+                .tabItem { Label("Influs", systemImage: "person.2.crop.square.stack.fill") }
             CashflowView()
                 .tabItem { Label("Caja", systemImage: "banknote.fill") }
             DevolucionesView()
@@ -6201,6 +6254,420 @@ struct ActiveFilterChip: View {
         .background(AppTheme.blueSoft)
         .overlay(Capsule().stroke(AppTheme.blue.opacity(0.25), lineWidth: 0.8))
         .clipShape(Capsule())
+    }
+}
+
+// MARK: - Influencers
+
+enum InfluencerStageFilter: String, CaseIterable, Identifiable {
+    case all = "ALL"
+    case prospect = "PROSPECT"
+    case contacted = "CONTACTED"
+    case negotiating = "NEGOTIATING"
+    case videoReceived = "VIDEO_RECEIVED"
+    case published = "PUBLISHED"
+    case rejected = "REJECTED"
+
+    var id: String { rawValue }
+
+    var apiValue: String? { self == .all ? nil : rawValue }
+
+    var label: String {
+        switch self {
+        case .all: "Todas"
+        case .prospect: "Prospecto"
+        case .contacted: "Contactada"
+        case .negotiating: "Negociando"
+        case .videoReceived: "Contenido"
+        case .published: "Publicado"
+        case .rejected: "Descartada"
+        }
+    }
+
+    var color: Color {
+        switch self {
+        case .all: AppTheme.purple
+        case .prospect: AppTheme.amber
+        case .contacted: AppTheme.blue
+        case .negotiating: AppTheme.magenta
+        case .videoReceived: AppTheme.teal
+        case .published: AppTheme.green
+        case .rejected: AppTheme.red
+        }
+    }
+
+    static func label(for value: String) -> String {
+        Self.allCases.first { $0.rawValue == value }?.label ?? value.replacingOccurrences(of: "_", with: " ")
+    }
+
+    static func color(for value: String) -> Color {
+        Self.allCases.first { $0.rawValue == value }?.color ?? AppTheme.muted
+    }
+}
+
+struct InfluencersView: View {
+    @Environment(WorkshopStore.self) private var store
+    @State private var query = ""
+    @State private var stage: InfluencerStageFilter = .all
+    @State private var showingCreate = false
+
+    var filteredInfluencers: [InfluencerProfile] {
+        store.influencers.sorted {
+            ($0.updatedAt ?? .distantPast) > ($1.updatedAt ?? .distantPast)
+        }
+    }
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 16) {
+                    SyncStatusView()
+
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("Influs")
+                            .font(.system(size: 42, weight: .black, design: .rounded))
+                            .foregroundStyle(AppTheme.ink)
+                        Text("Prospección, regalos, UGC y publicaciones.")
+                            .font(.subheadline.weight(.medium))
+                            .foregroundStyle(AppTheme.muted)
+                    }
+
+                    InfluencerSummaryGrid(summary: store.influencerSummary)
+
+                    VStack(spacing: 12) {
+                        TextField("Buscar @handle, nombre o tag", text: $query)
+                            .textInputAutocapitalization(.never)
+                            .autocorrectionDisabled()
+                            .padding(14)
+                            .background(AppTheme.surfaceSoft)
+                            .overlay(RoundedRectangle(cornerRadius: 14).stroke(AppTheme.line, lineWidth: 1))
+                            .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                            .foregroundStyle(AppTheme.ink)
+                            .onSubmit { Task { await reload() } }
+
+                        ScrollView(.horizontal, showsIndicators: false) {
+                            HStack(spacing: 8) {
+                                ForEach(InfluencerStageFilter.allCases) { item in
+                                    Button {
+                                        stage = item
+                                        Task { await reload() }
+                                    } label: {
+                                        Text(item.label)
+                                            .font(.caption.weight(.black))
+                                            .foregroundStyle(stage == item ? AppTheme.ink : AppTheme.muted)
+                                            .padding(.horizontal, 12)
+                                            .padding(.vertical, 8)
+                                            .background(stage == item ? item.color.opacity(0.24) : AppTheme.surfaceSoft)
+                                            .overlay(Capsule().stroke(stage == item ? item.color.opacity(0.55) : AppTheme.line, lineWidth: 1))
+                                            .clipShape(Capsule())
+                                    }
+                                }
+                            }
+                            .padding(.vertical, 2)
+                        }
+                    }
+
+                    if filteredInfluencers.isEmpty {
+                        InfluencerEmptyState()
+                    } else {
+                        ForEach(filteredInfluencers) { influencer in
+                            NavigationLink(value: influencer) {
+                                InfluencerCard(influencer: influencer)
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                }
+                .padding()
+            }
+            .screenBackground()
+            .navigationTitle("Influs")
+            .navigationDestination(for: InfluencerProfile.self) { influencer in
+                InfluencerDetailView(influencer: influencer)
+                    .environment(store)
+            }
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button { Task { await reload() } } label: {
+                        Image(systemName: "arrow.clockwise")
+                    }
+                    .disabled(store.isInfluencerActionRunning)
+                }
+                ToolbarItem(placement: .primaryAction) {
+                    Button { showingCreate = true } label: {
+                        Image(systemName: "plus.circle.fill")
+                    }
+                }
+            }
+            .sheet(isPresented: $showingCreate) {
+                CreateInfluencerSheet()
+                    .environment(store)
+            }
+            .task { await reload() }
+            .refreshable { await reload() }
+        }
+    }
+
+    private func reload() async {
+        await store.loadInfluencers(stage: stage.apiValue, query: query)
+    }
+}
+
+struct InfluencerEmptyState: View {
+    var body: some View {
+        VStack(spacing: 12) {
+            Image(systemName: "person.crop.circle.badge.plus")
+                .font(.system(size: 34, weight: .bold))
+                .foregroundStyle(AppTheme.purple)
+            Text("Sin influs todavía")
+                .font(.title3.weight(.black))
+                .foregroundStyle(AppTheme.ink)
+            Text("Crea la primera y empieza a ordenar el pipeline.")
+                .font(.subheadline.weight(.medium))
+                .foregroundStyle(AppTheme.muted)
+                .multilineTextAlignment(.center)
+        }
+        .frame(maxWidth: .infinity)
+        .glassPanel(padding: 20, accent: AppTheme.purple)
+    }
+}
+
+struct InfluencerSummaryGrid: View {
+    let summary: InfluencerSummary?
+
+    var body: some View {
+        LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 10) {
+            InfluencerMetricTile(title: "Influs", value: summary?.influencers ?? 0, icon: "person.2.fill", color: AppTheme.purple)
+            InfluencerMetricTile(title: "Activas", value: summary?.activeCollaborations ?? 0, icon: "flame.fill", color: AppTheme.blue)
+            InfluencerMetricTile(title: "Esperando", value: summary?.awaitingContent ?? 0, icon: "clock.badge.exclamationmark.fill", color: AppTheme.amber)
+            InfluencerMetricTile(title: "UGC pendiente", value: summary?.pendingSubmissions ?? 0, icon: "video.badge.checkmark", color: AppTheme.teal)
+        }
+    }
+}
+
+struct InfluencerMetricTile: View {
+    let title: String
+    let value: Int
+    let icon: String
+    let color: Color
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Image(systemName: icon)
+                .font(.headline.weight(.black))
+                .foregroundStyle(color)
+                .padding(8)
+                .background(color.opacity(0.16))
+                .clipShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
+            Text("\(value)")
+                .font(.system(size: 32, weight: .black, design: .rounded))
+                .foregroundStyle(AppTheme.ink)
+            Text(title.uppercased())
+                .font(.caption2.weight(.black))
+                .foregroundStyle(AppTheme.muted)
+                .tracking(2)
+        }
+        .glassPanel(padding: 14, accent: color)
+    }
+}
+
+struct InfluencerCard: View {
+    let influencer: InfluencerProfile
+
+    private var latestCollaboration: InfluencerCollaboration? {
+        influencer.collaborations.sorted { ($0.updatedAt ?? .distantPast) > ($1.updatedAt ?? .distantPast) }.first
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .top, spacing: 12) {
+                Circle()
+                    .fill(InfluencerStageFilter.color(for: influencer.stage).opacity(0.18))
+                    .overlay(Text(String(influencer.igHandle.prefix(1)).uppercased()).font(.headline.weight(.black)).foregroundStyle(InfluencerStageFilter.color(for: influencer.stage)))
+                    .frame(width: 46, height: 46)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("@\(influencer.igHandle)")
+                        .font(.headline.weight(.black))
+                        .foregroundStyle(AppTheme.ink)
+                    if let fullName = influencer.fullName, !fullName.isEmpty {
+                        Text(fullName)
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(AppTheme.muted)
+                    }
+                }
+                Spacer()
+                InfluencerStageBadge(stage: influencer.stage)
+            }
+
+            HStack(spacing: 8) {
+                Tag(text: influencer.followers.map { "\($0) seg." } ?? "Sin followers", systemImage: "person.line.dotted.person.fill")
+                Tag(text: "\(influencer.collaborations.count) collabs", systemImage: "sparkles")
+                Tag(text: "\(influencer.submissions.count) UGC", systemImage: "play.rectangle.fill")
+            }
+
+            if let latestCollaboration {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(latestCollaboration.title)
+                        .font(.subheadline.weight(.bold))
+                        .foregroundStyle(AppTheme.inkSoft)
+                    Text(statusLabel(latestCollaboration.status))
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(AppTheme.muted)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(12)
+                .background(AppTheme.surfaceSoft)
+                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+            }
+
+            if let lastMessage = influencer.lastMessage, !lastMessage.isEmpty {
+                Text(lastMessage)
+                    .font(.footnote.weight(.medium))
+                    .foregroundStyle(AppTheme.muted)
+                    .lineLimit(2)
+            }
+        }
+        .glassPanel(padding: 14, accent: InfluencerStageFilter.color(for: influencer.stage))
+    }
+
+    private func statusLabel(_ value: String) -> String {
+        value.replacingOccurrences(of: "_", with: " ").capitalized
+    }
+}
+
+struct InfluencerStageBadge: View {
+    let stage: String
+
+    var body: some View {
+        Text(InfluencerStageFilter.label(for: stage).uppercased())
+            .font(.caption2.weight(.black))
+            .foregroundStyle(InfluencerStageFilter.color(for: stage))
+            .padding(.horizontal, 9)
+            .padding(.vertical, 6)
+            .background(InfluencerStageFilter.color(for: stage).opacity(0.16))
+            .clipShape(Capsule())
+    }
+}
+
+struct InfluencerDetailView: View {
+    @Environment(WorkshopStore.self) private var store
+    let influencer: InfluencerProfile
+    @State private var selectedStage: InfluencerStageFilter
+
+    init(influencer: InfluencerProfile) {
+        self.influencer = influencer
+        _selectedStage = State(initialValue: InfluencerStageFilter.allCases.first { $0.rawValue == influencer.stage } ?? .prospect)
+    }
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 16) {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("@\(influencer.igHandle)")
+                        .font(.system(size: 38, weight: .black, design: .rounded))
+                        .foregroundStyle(AppTheme.ink)
+                    if let fullName = influencer.fullName {
+                        Text(fullName)
+                            .font(.title3.weight(.semibold))
+                            .foregroundStyle(AppTheme.muted)
+                    }
+                    InfluencerStageBadge(stage: influencer.stage)
+                }
+                .glassPanel(padding: 16, accent: InfluencerStageFilter.color(for: influencer.stage))
+
+                VStack(alignment: .leading, spacing: 10) {
+                    SectionHeader(title: "Estado", subtitle: "Mueve la influ por el pipeline")
+                    Picker("Estado", selection: $selectedStage) {
+                        ForEach(InfluencerStageFilter.allCases.filter { $0 != .all }) { item in
+                            Text(item.label).tag(item)
+                        }
+                    }
+                    .pickerStyle(.menu)
+                    Button {
+                        Task { await store.updateInfluencerStage(influencer, stage: selectedStage.rawValue) }
+                    } label: {
+                        Label("Guardar estado", systemImage: "checkmark.circle.fill")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(store.isInfluencerActionRunning || selectedStage.rawValue == influencer.stage)
+                }
+                .glassPanel(padding: 16, accent: selectedStage.color)
+
+                if !influencer.collaborations.isEmpty {
+                    SectionHeader(title: "Colaboraciones", subtitle: "\(influencer.collaborations.count) abiertas o históricas")
+                    ForEach(influencer.collaborations) { collab in
+                        VStack(alignment: .leading, spacing: 6) {
+                            HStack {
+                                Text(collab.title)
+                                    .font(.headline.weight(.black))
+                                    .foregroundStyle(AppTheme.ink)
+                                Spacer()
+                                Text(collab.status.replacingOccurrences(of: "_", with: " "))
+                                    .font(.caption.weight(.black))
+                                    .foregroundStyle(AppTheme.blue)
+                            }
+                            if let deliverables = collab.deliverables {
+                                Text(deliverables)
+                                    .font(.footnote)
+                                    .foregroundStyle(AppTheme.muted)
+                            }
+                        }
+                        .glassPanel(padding: 12, accent: AppTheme.blue)
+                    }
+                }
+
+                if let notes = influencer.notes, !notes.isEmpty {
+                    SectionHeader(title: "Notas", subtitle: "Contexto interno")
+                    Text(notes)
+                        .font(.body)
+                        .foregroundStyle(AppTheme.inkSoft)
+                        .glassPanel(padding: 14)
+                }
+            }
+            .padding()
+        }
+        .screenBackground()
+        .navigationTitle("Influ")
+        .refreshable { await store.loadInfluencers() }
+    }
+}
+
+struct CreateInfluencerSheet: View {
+    @Environment(WorkshopStore.self) private var store
+    @Environment(\.dismiss) private var dismiss
+    @State private var handle = ""
+    @State private var name = ""
+    @State private var notes = ""
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("Perfil") {
+                    TextField("@instagram", text: $handle)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                    TextField("Nombre", text: $name)
+                    TextField("Notas", text: $notes, axis: .vertical)
+                        .lineLimit(3...6)
+                }
+            }
+            .navigationTitle("Nueva influ")
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cerrar") { dismiss() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Crear") {
+                        Task {
+                            await store.createInfluencer(handle: handle, name: name, notes: notes)
+                            dismiss()
+                        }
+                    }
+                    .disabled(handle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || store.isInfluencerActionRunning)
+                }
+            }
+        }
     }
 }
 

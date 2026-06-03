@@ -298,6 +298,33 @@ struct APIClient {
         let _: EmptyResponse = try await perform(request)
     }
 
+    // MARK: - Influencers
+    func influencerSummary() async throws -> InfluencerSummary {
+        try await get("/influencers/summary")
+    }
+
+    func influencers(stage: String? = nil, query: String? = nil) async throws -> [InfluencerProfile] {
+        var params: [String] = []
+        if let stage, !stage.isEmpty {
+            params.append("stage=\(Self.queryValue(stage))")
+        }
+        if let query, !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            params.append("q=\(Self.queryValue(query))")
+        }
+        let suffix = params.isEmpty ? "" : "?\(params.joined(separator: "&"))"
+        return try await get("/influencers\(suffix)")
+    }
+
+    func createInfluencer(_ body: InfluencerSaveRequest) async throws -> InfluencerProfile {
+        let request = try jsonRequest(path: "/influencers", method: "POST", body: body)
+        return try await perform(request)
+    }
+
+    func updateInfluencer(id: String, body: InfluencerUpdateRequest) async throws -> InfluencerProfile {
+        let request = try jsonRequest(path: "/influencers/\(Self.pathSegment(id))", method: "PATCH", body: body)
+        return try await perform(request)
+    }
+
     func bankDaily(from: Date, to: Date) async throws -> BankDailySummary {
         let formatter = DateFormatter.apiDay
         return try await get("/bank/daily?from=\(formatter.string(from: from))&to=\(formatter.string(from: to))")
@@ -350,6 +377,10 @@ struct APIClient {
 
     private static func pathSegment(_ value: String) -> String {
         value.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? value
+    }
+
+    private static func queryValue(_ value: String) -> String {
+        value.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? value
     }
 
     private static func errorMessage(from data: Data) -> String? {
@@ -442,6 +473,92 @@ struct MetaCreateCampaignResult: Decodable {
 
 private struct MetaStatusRequest: Encodable {
     let status: String
+}
+
+// MARK: - Influencers models
+struct InfluencerSummary: Decodable {
+    let influencers: Int
+    let activeCollaborations: Int
+    let awaitingContent: Int
+    let pendingSubmissions: Int
+    let byStage: [String: Int]
+    let byCollaborationStatus: [String: Int]
+    let bySubmissionStatus: [String: Int]
+}
+
+struct InfluencerProfile: Decodable, Identifiable, Hashable {
+    let id: String
+    let igHandle: String
+    let fullName: String?
+    let manychatId: String?
+    let followers: Int?
+    let email: String?
+    let stage: String
+    let tags: [String]
+    let notes: String?
+    let lastMessage: String?
+    let lastMessageAt: Date?
+    let createdAt: Date?
+    let updatedAt: Date?
+    let collaborations: [InfluencerCollaboration]
+    let submissions: [InfluencerSubmission]
+}
+
+struct InfluencerCollaboration: Decodable, Identifiable, Hashable {
+    let id: String
+    let influencerId: String
+    let title: String
+    let status: String
+    let type: String
+    let compensation: Double?
+    let productSent: String?
+    let deliverables: String?
+    let discountCode: String?
+    let metaCampaignId: String?
+    let deadline: Date?
+    let openedAt: Date?
+    let closedAt: Date?
+    let notes: String?
+    let createdAt: Date?
+    let updatedAt: Date?
+}
+
+struct InfluencerSubmission: Decodable, Identifiable, Hashable {
+    let id: String
+    let influencerId: String
+    let collaborationId: String?
+    let videoUrl: String?
+    let thumbnailUrl: String?
+    let caption: String?
+    let type: String
+    let status: String
+    let metaCampaignId: String?
+    let createdAt: Date?
+    let updatedAt: Date?
+}
+
+struct InfluencerSaveRequest: Encodable {
+    let igHandle: String
+    let fullName: String?
+    let followers: Int?
+    let email: String?
+    let stage: String?
+    let tags: [String]?
+    let notes: String?
+}
+
+struct InfluencerUpdateRequest: Encodable {
+    let stage: String?
+    let notes: String?
+    let lastMessage: String?
+    let lastMessageAt: String?
+
+    init(stage: String? = nil, notes: String? = nil, lastMessage: String? = nil, lastMessageAt: String? = nil) {
+        self.stage = stage
+        self.notes = notes
+        self.lastMessage = lastMessage
+        self.lastMessageAt = lastMessageAt
+    }
 }
 
 private extension JSONDecoder {
