@@ -8,6 +8,9 @@ import { ShopifyAdapter } from '../shopify/shopify.adapter';
 
 @Injectable()
 export class ShipmentsService {
+  /** Orders currently creating a label. Prevents concurrent double-create (Railway = single instance). */
+  private readonly labelInFlight = new Set<string>();
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly sendcloud: SendcloudAdapter,
@@ -48,11 +51,21 @@ export class ShipmentsService {
       take: 100
     });
 
-    // Deduplicate: one shipment per order (most recent), mark older dupes as printed
+    // Orders that already have a PRINTED label — any LABEL_CREATED dupe for them
+    // must be suppressed (cross-poll duplicate: 1st label printed, 2nd appears later).
+    const ordersWithPrinted = new Set(
+      (await this.prisma.shipment.findMany({
+        where: { provider: 'SENDCLOUD', status: 'PRINTED', orderId: { in: shipments.map((s) => s.orderId) } },
+        select: { orderId: true },
+        distinct: ['orderId']
+      })).map((s) => s.orderId)
+    );
+
+    // Deduplicate: one shipment per order (most recent), mark older/dupe rows as printed
     const seenOrders = new Map<string, typeof shipments[0]>();
     const duplicates: string[] = [];
     for (const shipment of shipments) {
-      if (seenOrders.has(shipment.orderId)) {
+      if (ordersWithPrinted.has(shipment.orderId) || seenOrders.has(shipment.orderId)) {
         duplicates.push(shipment.id);
       } else {
         seenOrders.set(shipment.orderId, shipment);
@@ -65,7 +78,20 @@ export class ShipmentsService {
       ));
     }
 
-    const deduped = [...seenOrders.values()].sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime()).slice(0, 25);
+    const candidates = [...seenOrders.values()].sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime()).slice(0, 25);
+
+    // Atomic claim: flip LABEL_CREATED -> PRINTED per row. Only the poll whose
+    // updateMany affects 1 row owns it. Concurrent polls (duplicate print agents)
+    // get count 0 and skip, so a label can never be handed out twice.
+    const deduped: typeof candidates = [];
+    for (const shipment of candidates) {
+      const claim = await this.prisma.shipment.updateMany({
+        where: { id: shipment.id, status: 'LABEL_CREATED' },
+        data: { status: 'PRINTED' }
+      });
+      if (claim.count === 1) deduped.push(shipment);
+    }
+
     return deduped.map((shipment) => ({
       id: shipment.id,
       orderNumber: shipment.order.orderNumber,
@@ -100,44 +126,71 @@ export class ShipmentsService {
       include: { items: true, shipments: { orderBy: { createdAt: 'desc' } } }
     });
 
-    // Idempotency: return existing label if already created (prevent double print)
-    const existing = order.shipments.find((s) => s.status === 'LABEL_CREATED' && s.labelUrl);
+    // Idempotency: a SENDCLOUD label in any live state means it already exists.
+    // Includes PRINTED — without it, a 2nd request after the 1st label is printed
+    // would create a duplicate physical label.
+    const existing = order.shipments.find(
+      (s) => s.provider === 'SENDCLOUD' && s.labelUrl && ['LABEL_CREATED', 'PRINTED'].includes(s.status)
+    );
     if (existing) return { ...existing, printResult: { skipped: true, reason: 'label already exists' } };
 
-    const label = await this.sendcloud.createShipment(order);
-    const shipment = await this.prisma.shipment.create({
-      data: {
-        orderId: order.id,
-        provider: 'SENDCLOUD',
-        sendcloudParcelId: label.parcelId,
-        trackingNumber: null,
-        carrier: label.carrier,
-        labelUrl: label.labelUrl,
-        cost: label.cost ?? null,
-        costCurrency: label.costCurrency ?? null,
-        status: 'LABEL_CREATED'
-      }
-    });
-    await this.prisma.order.update({ where: { id: order.id }, data: { operationalStatus: 'LABEL_CREATED' } });
-    const printResult = await this.labelPrinter.printLabel(label.labelUrl, order.orderNumber);
-    await this.activity.log({
-      entityType: 'Shipment',
-      entityId: shipment.id,
-      action: 'LABEL_CREATED',
-      message: `Etiqueta creada para ${order.orderNumber}`,
-      metadataJson: { label, printResult }
-    });
-    // If server printed directly, mark printed so print agent doesn't re-print
-    if (printResult && !(printResult as any).skipped) {
+    // Concurrency guard: reject overlapping creates for the same order so two
+    // near-simultaneous taps/retries can't both reach sendcloud.createShipment.
+    if (this.labelInFlight.has(order.id)) {
+      const current = await this.prisma.shipment.findFirst({
+        where: { orderId: order.id, provider: 'SENDCLOUD', status: { in: ['LABEL_CREATED', 'PRINTED'] } },
+        orderBy: { createdAt: 'desc' }
+      });
+      if (current) return { ...current, printResult: { skipped: true, reason: 'label creation in progress' } };
+      throw new BadRequestException('Creación de etiqueta en curso, espera un momento.');
+    }
+    this.labelInFlight.add(order.id);
+
+    try {
+      // Re-check inside the lock — another request may have just finished.
+      const justCreated = await this.prisma.shipment.findFirst({
+        where: { orderId: order.id, provider: 'SENDCLOUD', status: { in: ['LABEL_CREATED', 'PRINTED'] }, labelUrl: { not: null } },
+        orderBy: { createdAt: 'desc' }
+      });
+      if (justCreated) return { ...justCreated, printResult: { skipped: true, reason: 'label already exists' } };
+
+      const label = await this.sendcloud.createShipment(order);
+      const shipment = await this.prisma.shipment.create({
+        data: {
+          orderId: order.id,
+          provider: 'SENDCLOUD',
+          sendcloudParcelId: label.parcelId,
+          trackingNumber: null,
+          carrier: label.carrier,
+          labelUrl: label.labelUrl,
+          cost: label.cost ?? null,
+          costCurrency: label.costCurrency ?? null,
+          status: 'LABEL_CREATED'
+        }
+      });
+      await this.prisma.order.update({ where: { id: order.id }, data: { operationalStatus: 'LABEL_CREATED' } });
+      const printResult = await this.labelPrinter.printLabel(label.labelUrl, order.orderNumber);
       await this.activity.log({
         entityType: 'Shipment',
         entityId: shipment.id,
-        action: 'LABEL_PRINTED',
-        message: `Etiqueta impresa en servidor para ${order.orderNumber}`,
-        metadataJson: { printResult }
+        action: 'LABEL_CREATED',
+        message: `Etiqueta creada para ${order.orderNumber}`,
+        metadataJson: { label, printResult }
       });
+      // If server printed directly, mark printed so print agent doesn't re-print
+      if (printResult && !(printResult as any).skipped) {
+        await this.activity.log({
+          entityType: 'Shipment',
+          entityId: shipment.id,
+          action: 'LABEL_PRINTED',
+          message: `Etiqueta impresa en servidor para ${order.orderNumber}`,
+          metadataJson: { printResult }
+        });
+      }
+      return { ...shipment, printResult };
+    } finally {
+      this.labelInFlight.delete(order.id);
     }
-    return { ...shipment, printResult };
   }
 
   async finalizeWithoutLabel(orderId: string) {
