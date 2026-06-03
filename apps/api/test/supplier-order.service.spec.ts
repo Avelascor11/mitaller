@@ -171,6 +171,55 @@ describe('SupplierOrderService', () => {
     }));
   });
 
+  it('mantiene necesidades en el borrador aunque Falk & Ross marque stock proveedor 0', async () => {
+    const { service, prisma } = buildService({
+      matrix: {
+        groups: [{
+          garmentType: 'CAMISETA',
+          color: 'BLANCA',
+          sizes: [{
+            stockItemId: 'stock-s',
+            supplierSku: 'FR-TS-WHT-S',
+            subproductName: 'Camiseta Blanca - S',
+            size: 'S',
+            recommendedPurchaseQuantity: 2,
+            supplierAvailableQuantity: null,
+            pendingOrderNeed: 3,
+            currentInternalStock: 1,
+            minStockTarget: 0,
+            demandOrders: [{ orderNumber: '#9510' }]
+          }]
+        }]
+      },
+      supplierArticles: [{
+        supplierSku: '180000001',
+        styleCode: 'TG002',
+        productName: 'B&C T-shirt 032.42',
+        color: 'White',
+        size: 'S',
+        purchasePrice: null
+      }],
+      supplierStocks: [{ supplierSku: '180000001', availableQuantity: 0 }]
+    });
+
+    await service.generateDailyFalkRossOrder({ source: 'manual' });
+
+    expect(prisma.supplierPurchaseOrder.create).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        rawRequestJson: expect.objectContaining({
+          lines: [expect.objectContaining({ supplierSku: '180000001', quantity: 2 })]
+        }),
+        lines: expect.objectContaining({
+          create: [expect.objectContaining({
+            supplierSku: '180000001',
+            quantity: 2,
+            supplierAvailableQuantity: 0
+          })]
+        })
+      })
+    }));
+  });
+
   it('resuelve camiseta marron con Falk & Ross 2000 / 102.09 en lugar de B&C TG002', async () => {
     const { service, prisma } = buildService({
       matrix: {

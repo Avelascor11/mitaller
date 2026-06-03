@@ -280,6 +280,7 @@ export class SupplierOrderService {
   private orderableQuantity(requestedQuantity: number, supplierAvailableQuantity: number | null) {
     if (requestedQuantity <= 0) return 0;
     if (this.config.get<string>('FALKROSS_ALLOW_BACKORDER') === 'true') return requestedQuantity;
+    if (this.config.get<string>('FALKROSS_STRICT_SUPPLIER_STOCK') !== 'true') return requestedQuantity;
     if (supplierAvailableQuantity == null) return requestedQuantity;
     return Math.min(requestedQuantity, Math.max(0, supplierAvailableQuantity));
   }
