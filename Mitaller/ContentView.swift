@@ -4106,9 +4106,21 @@ struct SupplierPurchaseOrderCard: View {
     @Environment(WorkshopStore.self) private var store
     @State private var orderPendingSubmit: SupplierPurchaseOrder?
     @State private var showSubmitConfirmation = false
+    @State private var selectedSummaryDate = Date()
 
     private var latestOrder: SupplierPurchaseOrder? {
         store.supplierPurchaseOrders.first
+    }
+
+    private var ordersForSelectedDay: [SupplierPurchaseOrder] {
+        store.supplierPurchaseOrders.filter { order in
+            guard let date = order.submittedAt ?? order.createdAt ?? order.orderDate else { return false }
+            return Calendar.current.isDate(date, inSameDayAs: selectedSummaryDate)
+        }
+    }
+
+    private var submittedOrdersForSelectedDay: [SupplierPurchaseOrder] {
+        ordersForSelectedDay.filter { $0.status.uppercased() == "SUBMITTED" }
     }
 
     var body: some View {
@@ -4123,7 +4135,7 @@ struct SupplierPurchaseOrderCard: View {
                     Text("Compras proveedor")
                         .font(.headline.weight(.black))
                         .foregroundStyle(AppTheme.ink)
-                    Text("Borrador Falk & Ross para revisar y enviar manualmente.")
+                    Text("Revisa, envia a Falk & Ross y consulta el historico diario.")
                         .font(.caption.weight(.medium))
                         .foregroundStyle(AppTheme.muted)
                 }
@@ -4245,6 +4257,12 @@ struct SupplierPurchaseOrderCard: View {
                 .tint(AppTheme.blue)
                 .disabled(store.isSupplierPurchaseActionRunning || latestOrder == nil || latestOrder?.status == "SUBMITTED")
             }
+
+            SupplierPurchaseDailySummary(
+                selectedDate: $selectedSummaryDate,
+                orders: ordersForSelectedDay,
+                submittedOrders: submittedOrdersForSelectedDay
+            )
         }
         .glassPanel(padding: 16, accent: AppTheme.blue)
         .confirmationDialog("Enviar pedido a Falk & Ross", isPresented: $showSubmitConfirmation, titleVisibility: .visible) {
@@ -4257,6 +4275,131 @@ struct SupplierPurchaseOrderCard: View {
         } message: {
             Text(orderPendingSubmit?.orderNote ?? "Revisa cantidades y SKUs antes de confirmar. Esta accion envia el pedido al proveedor si la API esta activada.")
         }
+    }
+}
+
+struct SupplierPurchaseDailySummary: View {
+    @Binding var selectedDate: Date
+    let orders: [SupplierPurchaseOrder]
+    let submittedOrders: [SupplierPurchaseOrder]
+
+    private var draftCount: Int {
+        orders.filter { $0.status.uppercased() != "SUBMITTED" }.count
+    }
+
+    private var submittedUnits: Int {
+        submittedOrders.reduce(0) { $0 + $1.totalQuantity }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .center, spacing: 10) {
+                Label("Resumen finalizados", systemImage: "calendar.badge.checkmark")
+                    .font(.headline.weight(.black))
+                    .foregroundStyle(AppTheme.ink)
+                Spacer()
+                DatePicker("", selection: $selectedDate, displayedComponents: .date)
+                    .labelsHidden()
+                    .datePickerStyle(.compact)
+            }
+
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 94), spacing: 8)], spacing: 8) {
+                SupplierPurchaseSummaryTile(title: "Enviados", value: submittedOrders.count, color: AppTheme.green, icon: "paperplane.fill")
+                SupplierPurchaseSummaryTile(title: "Borradores", value: draftCount, color: AppTheme.amber, icon: "doc.text.fill")
+                SupplierPurchaseSummaryTile(title: "Prendas", value: submittedUnits, color: AppTheme.blue, icon: "shippingbox.fill")
+            }
+
+            if submittedOrders.isEmpty {
+                Text("No hay compras finalizadas en este dia.")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(AppTheme.muted)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(12)
+                    .background(AppTheme.surface)
+                    .clipShape(RoundedRectangle(cornerRadius: 12))
+            } else {
+                VStack(spacing: 8) {
+                    ForEach(submittedOrders) { order in
+                        SupplierPurchaseHistoryRow(order: order)
+                    }
+                }
+            }
+        }
+        .padding(12)
+        .background(AppTheme.surfaceSoft)
+        .clipShape(RoundedRectangle(cornerRadius: 14))
+    }
+}
+
+struct SupplierPurchaseSummaryTile: View {
+    let title: String
+    let value: Int
+    let color: Color
+    let icon: String
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(systemName: icon)
+                .font(.caption.weight(.black))
+                .foregroundStyle(color)
+                .frame(width: 24, height: 24)
+                .background(color.opacity(0.14))
+                .clipShape(RoundedRectangle(cornerRadius: 8))
+            VStack(alignment: .leading, spacing: 0) {
+                Text("\(value)")
+                    .font(.headline.weight(.black))
+                    .foregroundStyle(AppTheme.ink)
+                Text(title)
+                    .font(.caption2.weight(.bold))
+                    .foregroundStyle(AppTheme.muted)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(10)
+        .background(AppTheme.surface)
+        .clipShape(RoundedRectangle(cornerRadius: 12))
+    }
+}
+
+struct SupplierPurchaseHistoryRow: View {
+    let order: SupplierPurchaseOrder
+
+    var body: some View {
+        HStack(spacing: 10) {
+            VStack(alignment: .leading, spacing: 3) {
+                HStack(spacing: 6) {
+                    Text(order.orderNumber)
+                        .font(.subheadline.weight(.black))
+                        .foregroundStyle(AppTheme.ink)
+                    if let externalOrderId = order.externalOrderId, !externalOrderId.isEmpty {
+                        Text(externalOrderId)
+                            .font(.caption2.weight(.bold))
+                            .foregroundStyle(AppTheme.green)
+                    }
+                }
+                Text(historySubtitle)
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(AppTheme.muted)
+            }
+            Spacer()
+            VStack(alignment: .trailing, spacing: 3) {
+                Text("\(order.totalQuantity)")
+                    .font(.headline.weight(.black))
+                    .foregroundStyle(AppTheme.blue)
+                Text("prendas")
+                    .font(.caption2.weight(.bold))
+                    .foregroundStyle(AppTheme.muted)
+            }
+        }
+        .padding(10)
+        .background(AppTheme.surface)
+        .clipShape(RoundedRectangle(cornerRadius: 12))
+    }
+
+    private var historySubtitle: String {
+        let date = order.submittedAt ?? order.createdAt ?? order.orderDate
+        let time = date?.formatted(.dateTime.hour().minute()) ?? "sin hora"
+        return "\(order.lines.count) lineas · enviado \(time)"
     }
 }
 
