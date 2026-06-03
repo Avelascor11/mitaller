@@ -166,7 +166,7 @@ export default function AdminDevolucionesPage() {
   const [savingPortal, setSavingPortal] = useState(false);
   const [exceptions, setExceptions] = useState<any[]>([]);
   const [showNewEx, setShowNewEx] = useState(false);
-  const [newEx, setNewEx] = useState({ orderNumber: '', customerEmail: '', type: 'EXTEND_WINDOW', extraDays: 7, notes: '', expiresAt: '' });
+  const [newEx, setNewEx] = useState<{ orderNumber: string; customerEmail: string; extraDays: number; notes: string; expiresAt: string; opts: Record<string, boolean> }>({ orderNumber: '', customerEmail: '', extraDays: 7, notes: '', expiresAt: '', opts: { EXTEND_WINDOW: false, FREE_LABEL: true, ACCEPT_EXPIRED: false, BLOCK: false } });
 
   const t = makeTheme(dark);
 
@@ -207,26 +207,57 @@ export default function AdminDevolucionesPage() {
     try { const r = await fetch(`${API}/portal-config`, { method: 'PUT', headers: { 'Content-Type': 'application/json', ...auth(token) }, body: JSON.stringify(portalDraft) }); if (r.ok) { const c = await r.json(); setPortalCfg(c); setPortalDraft(c); ok('Guardado ✓'); } else err('Error guardando'); } catch { err('Error'); } finally { setSavingPortal(false); }
   }
 
-  async function createException() {
-    if (!newEx.orderNumber && !newEx.customerEmail) { err('Indica pedido o email'); return; }
-    const body: Record<string, unknown> = { type: newEx.type };
-    if (newEx.orderNumber) body.orderNumber = newEx.orderNumber;
-    if (newEx.customerEmail) body.customerEmail = newEx.customerEmail;
-    if (newEx.type === 'EXTEND_WINDOW') body.extraDays = newEx.extraDays;
-    if (newEx.notes) body.notes = newEx.notes;
-    if (newEx.expiresAt) body.expiresAt = newEx.expiresAt;
-    try { const r = await fetch(`${API}/returns/admin/exceptions`, { method: 'POST', headers: { 'Content-Type': 'application/json', ...auth(token) }, body: JSON.stringify(body) }); if (r.ok) { ok('Excepción creada ✓'); setShowNewEx(false); setNewEx({ orderNumber: '', customerEmail: '', type: 'EXTEND_WINDOW', extraDays: 7, notes: '', expiresAt: '' }); loadAll(token, 'exceptions'); } else err('Error'); } catch { err('Error'); }
+  async function postRule(body: Record<string, unknown>) {
+    const r = await fetch(`${API}/returns/admin/exceptions`, { method: 'POST', headers: { 'Content-Type': 'application/json', ...auth(token) }, body: JSON.stringify(body) });
+    return r.ok;
   }
 
-  async function toggleException(id: string, active: boolean) {
-    await fetch(`${API}/returns/admin/exceptions/${id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json', ...auth(token) }, body: JSON.stringify({ active }) });
+  // Create a group: one row per selected option
+  async function createException() {
+    if (!newEx.orderNumber && !newEx.customerEmail) { err('Indica pedido o email'); return; }
+    const selected = Object.entries(newEx.opts).filter(([, v]) => v).map(([k]) => k);
+    if (selected.length === 0) { err('Selecciona al menos una opción'); return; }
+    const base: Record<string, unknown> = {};
+    if (newEx.orderNumber) base.orderNumber = newEx.orderNumber;
+    if (newEx.customerEmail) base.customerEmail = newEx.customerEmail;
+    if (newEx.notes) base.notes = newEx.notes;
+    if (newEx.expiresAt) base.expiresAt = newEx.expiresAt;
+    try {
+      let okAll = true;
+      for (const type of selected) {
+        const body = { ...base, type, ...(type === 'EXTEND_WINDOW' ? { extraDays: newEx.extraDays } : {}) };
+        if (!(await postRule(body))) okAll = false;
+      }
+      if (okAll) ok('Excepción creada ✓'); else err('Algunas opciones fallaron');
+      setShowNewEx(false);
+      setNewEx({ orderNumber: '', customerEmail: '', extraDays: 7, notes: '', expiresAt: '', opts: { EXTEND_WINDOW: false, FREE_LABEL: true, ACCEPT_EXPIRED: false, BLOCK: false } });
+      loadAll(token, 'exceptions');
+    } catch { err('Error'); }
+  }
+
+  // Add or remove a single option within an existing group
+  async function addRuleToGroup(group: { orderNumber?: string | null; customerEmail?: string | null }, type: string) {
+    const body: Record<string, unknown> = { type };
+    if (group.orderNumber) body.orderNumber = group.orderNumber;
+    if (group.customerEmail) body.customerEmail = group.customerEmail;
+    if (type === 'EXTEND_WINDOW') body.extraDays = 7;
+    if (await postRule(body)) { ok('Opción añadida ✓'); loadAll(token, 'exceptions'); } else err('Error');
+  }
+
+  async function removeRule(id: string) {
+    await fetch(`${API}/returns/admin/exceptions/${id}`, { method: 'DELETE', headers: auth(token) });
     loadAll(token, 'exceptions');
   }
 
-  async function deleteException(id: string) {
-    if (!confirm('¿Borrar excepción?')) return;
-    await fetch(`${API}/returns/admin/exceptions/${id}`, { method: 'DELETE', headers: auth(token) });
-    ok('Eliminada'); loadAll(token, 'exceptions');
+  async function setRuleDays(id: string, extraDays: number) {
+    await fetch(`${API}/returns/admin/exceptions/${id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json', ...auth(token) }, body: JSON.stringify({ extraDays }) });
+    loadAll(token, 'exceptions');
+  }
+
+  async function deleteGroup(ids: string[]) {
+    if (!confirm('¿Borrar todas las opciones de este pedido?')) return;
+    await Promise.all(ids.map((id) => fetch(`${API}/returns/admin/exceptions/${id}`, { method: 'DELETE', headers: auth(token) })));
+    ok('Excepción eliminada'); loadAll(token, 'exceptions');
   }
 
   const now30 = Date.now() - 30 * 24 * 60 * 60 * 1000;
@@ -250,6 +281,21 @@ export default function AdminDevolucionesPage() {
     const entries = Object.entries(map).sort((a, b) => b[1] - a[1]);
     return { entries, total: entries.reduce((s, [, v]) => s + v, 0) };
   }, [returns]);
+
+  // Group exception rows by target (order number, else email) → one card per order/cliente
+  const exceptionGroups = useMemo(() => {
+    const map = new Map<string, { key: string; orderNumber?: string | null; customerEmail?: string | null; rules: Record<string, any>; ids: string[] }>();
+    for (const ex of exceptions) {
+      const key = (ex.orderNumber || ex.customerEmail || ex.id) as string;
+      if (!map.has(key)) map.set(key, { key, orderNumber: ex.orderNumber, customerEmail: ex.customerEmail, rules: {}, ids: [] });
+      const g = map.get(key)!;
+      g.rules[ex.type] = ex;
+      g.ids.push(ex.id);
+      if (ex.orderNumber) g.orderNumber = ex.orderNumber;
+      if (ex.customerEmail) g.customerEmail = ex.customerEmail;
+    }
+    return [...map.values()];
+  }, [exceptions]);
 
   const stats = [
     { label: 'En espera',   value: String(kpis.espera),  accent: '#f0b429', spark: daily.slice(-7) },
@@ -717,7 +763,7 @@ export default function AdminDevolucionesPage() {
             {tab === 'exceptions' && !loading && (
               <motion.div key="exceptions" variants={tabVariants} initial="initial" animate="animate" exit="exit">
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 18 }}>
-                  <div><div style={{ fontSize: 15, fontWeight: 650, color: t.text }}>Excepciones activas</div><div style={{ fontSize: 12.5, color: t.dim, marginTop: 2 }}>{exceptions.length} regla{exceptions.length !== 1 ? 's' : ''}</div></div>
+                  <div><div style={{ fontSize: 15, fontWeight: 650, color: t.text }}>Excepciones activas</div><div style={{ fontSize: 12.5, color: t.dim, marginTop: 2 }}>{exceptionGroups.length} pedido{exceptionGroups.length !== 1 ? 's' : ''} con reglas</div></div>
                   <motion.button
                     whileHover={{ y: -2, boxShadow: `0 16px 30px -10px ${ACCENT}cc` }}
                     whileTap={{ scale: 0.97 }}
@@ -726,28 +772,13 @@ export default function AdminDevolucionesPage() {
                     style={btnP}
                   >+ Nueva excepción</motion.button>
                 </div>
-                {exceptions.length === 0 && (
-                  <motion.div
-                    variants={staggerContainer}
-                    initial="initial"
-                    animate="animate"
-                    style={{ display: 'grid', gridTemplateColumns: 'repeat(2,1fr)', gap: 12 }}
-                  >
-                    {Object.entries(EXCEPTION_LABELS).map(([key, meta]) => (
-                      <motion.button
-                        key={key}
-                        variants={cardItem}
-                        whileHover={{ y: -3, borderColor: meta.color + '66', background: meta.color + '0a' }}
-                        onClick={() => { setNewEx(p => ({ ...p, type: key })); setShowNewEx(true); }}
-                        style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '16px 18px', borderRadius: 14, background: t.card, border: `1px dashed ${t.border}`, cursor: 'pointer', fontFamily: FONT, textAlign: 'left' }}
-                      >
-                        <span style={{ width: 36, height: 36, borderRadius: 10, background: meta.color + '18', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 18 }}>{key === 'EXTEND_WINDOW' ? '📅' : key === 'FREE_LABEL' ? '🏷️' : key === 'ACCEPT_EXPIRED' ? '✅' : '🚫'}</span>
-                        <div><div style={{ fontSize: 13.5, fontWeight: 600, color: meta.color }}>{meta.label}</div><div style={{ fontSize: 12, color: t.dim, marginTop: 2 }}>{key === 'EXTEND_WINDOW' ? 'Amplía el plazo' : key === 'FREE_LABEL' ? 'Sin coste de etiqueta' : key === 'ACCEPT_EXPIRED' ? 'Fuera de plazo' : 'Bloquea devoluciones'}</div></div>
-                      </motion.button>
-                    ))}
+                {exceptionGroups.length === 0 && (
+                  <motion.div variants={cardItem} initial="initial" animate="animate"
+                    style={{ padding: '40px 20px', borderRadius: 16, background: t.card, border: `1px dashed ${t.border}`, textAlign: 'center', color: t.dim, fontSize: 13.5 }}>
+                    Sin excepciones. Crea una para un pedido y añade dentro las opciones que necesites.
                   </motion.div>
                 )}
-                {exceptions.length > 0 && (
+                {exceptionGroups.length > 0 && (
                   <motion.div
                     variants={staggerContainer}
                     initial="initial"
@@ -755,43 +786,62 @@ export default function AdminDevolucionesPage() {
                     style={{ display: 'grid', gridTemplateColumns: 'repeat(2,1fr)', gap: 12 }}
                   >
                     <AnimatePresence>
-                      {exceptions.map((ex) => {
-                        const meta = EXCEPTION_LABELS[ex.type] ?? { label: ex.type, color: t.dim };
-                        const emoji = ex.type === 'EXTEND_WINDOW' ? '📅' : ex.type === 'FREE_LABEL' ? '🏷️' : ex.type === 'ACCEPT_EXPIRED' ? '✅' : '🚫';
+                      {exceptionGroups.map((g) => {
+                        const OPTS: Array<{ key: string; emoji: string; desc: string }> = [
+                          { key: 'EXTEND_WINDOW',  emoji: '📅', desc: 'Amplía el plazo' },
+                          { key: 'FREE_LABEL',     emoji: '🏷️', desc: 'Sin coste de etiqueta' },
+                          { key: 'ACCEPT_EXPIRED', emoji: '✅', desc: 'Aceptar fuera de plazo' },
+                          { key: 'BLOCK',          emoji: '🚫', desc: 'Bloquea devoluciones' },
+                        ];
                         return (
                           <motion.div
-                            key={ex.id}
+                            key={g.key}
                             variants={cardItem}
                             exit={{ opacity: 0, scale: 0.94, y: -8, transition: { duration: 0.2 } }}
-                            whileHover={{ y: -4, boxShadow: '0 22px 46px -18px rgba(0,0,0,.55)' }}
                             className="ad-lift"
-                            style={{ padding: '18px 20px', borderRadius: 16, background: t.card, border: `1px solid ${ex.active ? meta.color + '33' : t.border}`, boxShadow: t.shadow, backdropFilter: 'blur(14px)', opacity: ex.active ? 1 : 0.6, position: 'relative', overflow: 'hidden' }}
+                            style={{ padding: '18px 20px', borderRadius: 16, background: t.card, border: `1px solid ${ACCENT}33`, boxShadow: t.shadow, backdropFilter: 'blur(14px)', position: 'relative', overflow: 'hidden' }}
                           >
-                            {ex.active && <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 2, background: `linear-gradient(90deg,${meta.color},transparent)` }} />}
-                            <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 12 }}>
-                              <div style={{ display: 'flex', alignItems: 'center', gap: 11 }}>
-                                <span style={{ width: 36, height: 36, borderRadius: 10, background: meta.color + '18', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 18 }}>{emoji}</span>
-                                <div><div style={{ fontSize: 13.5, fontWeight: 650, color: meta.color }}>{meta.label}</div>{ex.type === 'EXTEND_WINDOW' && <div style={{ fontSize: 12, color: t.dim }}>+{ex.extraDays} días</div>}</div>
-                              </div>
-                              <div onClick={() => toggleException(ex.id, !ex.active)} style={{ cursor: 'pointer' }}>
-                                <div style={{ width: 38, height: 22, borderRadius: 100, background: ex.active ? ACCENT : t.head, border: `1px solid ${ex.active ? ACCENT : t.border}`, position: 'relative', transition: 'background .2s' }}>
-                                  <motion.div
-                                    layout
-                                    transition={{ type: 'spring', damping: 20, stiffness: 400 }}
-                                    style={{ position: 'absolute', top: 2, left: ex.active ? 18 : 2, width: 16, height: 16, borderRadius: '50%', background: '#fff', boxShadow: '0 1px 3px rgba(0,0,0,0.2)' }}
-                                  />
-                                </div>
-                              </div>
+                            <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 2, background: `linear-gradient(90deg,${ACCENT},transparent)` }} />
+                            {/* Header: target */}
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: 4, marginBottom: 14 }}>
+                              {g.orderNumber && <div style={{ display: 'flex', gap: 8, alignItems: 'baseline' }}><span style={{ fontSize: 11, fontWeight: 600, color: t.faint, width: 52 }}>PEDIDO</span><span style={{ fontSize: 15, fontWeight: 700, color: t.text }}>{g.orderNumber}</span></div>}
+                              {g.customerEmail && <div style={{ display: 'flex', gap: 8 }}><span style={{ fontSize: 11, fontWeight: 600, color: t.faint, width: 52 }}>EMAIL</span><span style={{ fontSize: 12.5, color: t.text2 }}>{g.customerEmail}</span></div>}
                             </div>
-                            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                              {ex.orderNumber && <div style={{ display: 'flex', gap: 8 }}><span style={{ fontSize: 11, fontWeight: 600, color: t.faint, width: 52 }}>PEDIDO</span><span style={{ fontSize: 13, fontWeight: 650, color: t.text }}>{ex.orderNumber}</span></div>}
-                              {ex.customerEmail && <div style={{ display: 'flex', gap: 8 }}><span style={{ fontSize: 11, fontWeight: 600, color: t.faint, width: 52 }}>EMAIL</span><span style={{ fontSize: 13, color: t.text2 }}>{ex.customerEmail}</span></div>}
-                              {ex.notes && <div style={{ fontSize: 12, color: t.dim, padding: '8px 10px', borderRadius: 8, background: t.head }}>{ex.notes}</div>}
+                            {/* Option rows */}
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                              {OPTS.map((o) => {
+                                const rule = g.rules[o.key];
+                                const on = !!rule;
+                                const meta = EXCEPTION_LABELS[o.key];
+                                return (
+                                  <div key={o.key} style={{ display: 'flex', alignItems: 'center', gap: 11, padding: '8px 10px', borderRadius: 10, background: on ? meta.color + '12' : t.head, border: `1px solid ${on ? meta.color + '33' : t.border}`, transition: 'all .2s' }}>
+                                    <span style={{ fontSize: 16 }}>{o.emoji}</span>
+                                    <div style={{ flex: 1 }}>
+                                      <div style={{ fontSize: 13, fontWeight: 600, color: on ? meta.color : t.dim }}>{meta.label}</div>
+                                      {on && o.key === 'EXTEND_WINDOW'
+                                        ? <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 4 }}>
+                                            <span style={{ fontSize: 11.5, color: t.dim }}>+</span>
+                                            <input type="number" min={1} max={365} value={rule.extraDays ?? 7}
+                                              onChange={e => setRuleDays(rule.id, Number(e.target.value))}
+                                              style={{ width: 56, padding: '3px 7px', borderRadius: 7, border: `1px solid ${t.border}`, background: t.inputBg, color: t.text, fontSize: 12, fontFamily: FONT }} />
+                                            <span style={{ fontSize: 11.5, color: t.dim }}>días</span>
+                                          </div>
+                                        : <div style={{ fontSize: 11.5, color: t.faint, marginTop: 1 }}>{o.desc}</div>}
+                                    </div>
+                                    <div onClick={() => on ? removeRule(rule.id) : addRuleToGroup(g, o.key)} style={{ cursor: 'pointer', flexShrink: 0 }}>
+                                      <div style={{ width: 38, height: 22, borderRadius: 100, background: on ? meta.color : t.head, border: `1px solid ${on ? meta.color : t.border}`, position: 'relative', transition: 'background .2s' }}>
+                                        <motion.div layout transition={{ type: 'spring', damping: 20, stiffness: 400 }}
+                                          style={{ position: 'absolute', top: 2, left: on ? 18 : 2, width: 16, height: 16, borderRadius: '50%', background: '#fff', boxShadow: '0 1px 3px rgba(0,0,0,0.2)' }} />
+                                      </div>
+                                    </div>
+                                  </div>
+                                );
+                              })}
                             </div>
                             <motion.button
                               whileHover={{ borderColor: '#e06a6a66', color: '#e06a6a' }}
                               whileTap={{ scale: 0.97 }}
-                              onClick={() => deleteException(ex.id)}
+                              onClick={() => deleteGroup(g.ids)}
                               style={{ marginTop: 14, width: '100%', padding: '8px', fontSize: 12.5, fontWeight: 500, background: 'transparent', border: `1px solid ${t.border}`, color: t.dim, borderRadius: 9, cursor: 'pointer', fontFamily: FONT }}
                             >Eliminar excepción</motion.button>
                           </motion.div>
@@ -825,15 +875,29 @@ export default function AdminDevolucionesPage() {
                         <h3 style={{ margin: '0 0 6px', fontSize: 18, fontWeight: 700, color: t.text }}>Nueva excepción</h3>
                         <p style={{ margin: '0 0 22px', fontSize: 13, color: t.dim }}>Regla especial para un pedido o cliente</p>
                         <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-                          <label style={cl}><span>Tipo</span>
-                            <select style={inp} value={newEx.type} onChange={e => setNewEx({ ...newEx, type: e.target.value })}>
-                              <option value="EXTEND_WINDOW">📅 Ampliar plazo</option><option value="FREE_LABEL">🏷️ Etiqueta gratis</option><option value="ACCEPT_EXPIRED">✅ Aceptar fuera de plazo</option><option value="BLOCK">🚫 Bloquear devolución</option>
-                            </select></label>
                           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
                             <label style={cl}><span>Nº pedido</span><input type="text" style={inp} placeholder="#12345" value={newEx.orderNumber} onChange={e => setNewEx({ ...newEx, orderNumber: e.target.value })} /></label>
                             <label style={cl}><span>Email</span><input type="email" style={inp} placeholder="cliente@email.com" value={newEx.customerEmail} onChange={e => setNewEx({ ...newEx, customerEmail: e.target.value })} /></label>
                           </div>
-                          {newEx.type === 'EXTEND_WINDOW' && <label style={cl}><span>Días extra</span><input type="number" min={1} max={365} style={inp} value={newEx.extraDays} onChange={e => setNewEx({ ...newEx, extraDays: Number(e.target.value) })} /></label>}
+                          <div style={cl}><span>Opciones</span>
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 2 }}>
+                              {([['EXTEND_WINDOW','📅 Ampliar plazo'],['FREE_LABEL','🏷️ Etiqueta gratis'],['ACCEPT_EXPIRED','✅ Aceptar fuera de plazo'],['BLOCK','🚫 Bloquear devolución']] as [string,string][]).map(([key,label]) => {
+                                const on = newEx.opts[key];
+                                const meta = EXCEPTION_LABELS[key];
+                                return (
+                                  <div key={key} onClick={() => setNewEx(p => ({ ...p, opts: { ...p.opts, [key]: !p.opts[key] } }))}
+                                    style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '9px 11px', borderRadius: 10, cursor: 'pointer', background: on ? meta.color + '12' : t.head, border: `1px solid ${on ? meta.color + '44' : t.border}` }}>
+                                    <div style={{ width: 18, height: 18, borderRadius: 6, border: `1.5px solid ${on ? meta.color : t.border}`, background: on ? meta.color : 'transparent', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, fontSize: 11, color: '#fff', fontWeight: 800 }}>{on ? '✓' : ''}</div>
+                                    <span style={{ flex: 1, fontSize: 13, fontWeight: 500, color: on ? meta.color : t.text2 }}>{label}</span>
+                                    {key === 'EXTEND_WINDOW' && on && (
+                                      <input type="number" min={1} max={365} value={newEx.extraDays} onClick={e => e.stopPropagation()} onChange={e => setNewEx(p => ({ ...p, extraDays: Number(e.target.value) }))}
+                                        style={{ width: 64, padding: '4px 8px', borderRadius: 7, border: `1px solid ${t.border}`, background: t.inputBg, color: t.text, fontSize: 12, fontFamily: FONT }} />
+                                    )}
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          </div>
                           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
                             <label style={cl}><span>Notas</span><input type="text" style={inp} placeholder="Cliente VIP…" value={newEx.notes} onChange={e => setNewEx({ ...newEx, notes: e.target.value })} /></label>
                             <label style={cl}><span>Expira</span><input type="date" style={inp} value={newEx.expiresAt} onChange={e => setNewEx({ ...newEx, expiresAt: e.target.value })} /></label>
