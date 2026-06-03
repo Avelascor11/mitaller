@@ -844,6 +844,21 @@ final class WorkshopStore {
         }
     }
 
+    func importInfluencerConversations() async throws -> InfluencerImportResult {
+        guard let client = apiClient else { throw APIClientError.invalidURL }
+        isInfluencerActionRunning = true
+        syncError = nil
+        defer { isInfluencerActionRunning = false }
+        do {
+            let result = try await client.importInfluencerConversations(limit: 50)
+            await loadInfluencers()
+            return result
+        } catch {
+            syncError = "No se pudieron buscar DMs: \(error.localizedDescription)"
+            throw error
+        }
+    }
+
     func createInfluencer(handle: String, name: String, notes: String) async {
         guard let client = apiClient else { return }
         isInfluencerActionRunning = true
@@ -6310,6 +6325,7 @@ struct InfluencersView: View {
     @State private var query = ""
     @State private var stage: InfluencerStageFilter = .all
     @State private var showingCreate = false
+    @State private var importMessage: String?
 
     var filteredInfluencers: [InfluencerProfile] {
         store.influencers.sorted {
@@ -6330,6 +6346,35 @@ struct InfluencersView: View {
                         Text("Prospección, regalos, UGC y publicaciones.")
                             .font(.subheadline.weight(.medium))
                             .foregroundStyle(AppTheme.muted)
+                    }
+
+                    Button {
+                        Task { await importConversations() }
+                    } label: {
+                        HStack(spacing: 12) {
+                            Image(systemName: store.isInfluencerActionRunning ? "hourglass" : "magnifyingglass.circle.fill")
+                                .font(.title3.weight(.black))
+                                .foregroundStyle(AppTheme.purple)
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text(store.isInfluencerActionRunning ? "Buscando conversaciones..." : "Buscar DMs de Instagram")
+                                    .font(.headline.weight(.black))
+                                    .foregroundStyle(AppTheme.ink)
+                                Text("Revisa conversaciones abiertas y añade posibles colaboraciones.")
+                                    .font(.caption.weight(.semibold))
+                                    .foregroundStyle(AppTheme.muted)
+                            }
+                            Spacer()
+                        }
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(store.isInfluencerActionRunning)
+                    .glassPanel(padding: 14, accent: AppTheme.purple)
+
+                    if let importMessage {
+                        Text(importMessage)
+                            .font(.footnote.weight(.semibold))
+                            .foregroundStyle(AppTheme.green)
+                            .glassPanel(padding: 10, accent: AppTheme.green)
                     }
 
                     InfluencerSummaryGrid(summary: store.influencerSummary)
@@ -6410,6 +6455,19 @@ struct InfluencersView: View {
 
     private func reload() async {
         await store.loadInfluencers(stage: stage.apiValue, query: query)
+    }
+
+    private func importConversations() async {
+        importMessage = nil
+        do {
+            let result = try await store.importInfluencerConversations()
+            importMessage = result.imported == 0
+                ? "Revisadas \(result.checked) conversaciones. No he encontrado nuevas colaboraciones claras."
+                : "Añadidas \(result.imported) influs tras revisar \(result.checked) conversaciones."
+            await reload()
+        } catch {
+            importMessage = nil
+        }
     }
 }
 

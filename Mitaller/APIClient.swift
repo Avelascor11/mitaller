@@ -315,6 +315,11 @@ struct APIClient {
         return try await get("/influencers\(suffix)")
     }
 
+    func importInfluencerConversations(limit: Int = 50) async throws -> InfluencerImportResult {
+        let request = try jsonRequest(path: "/meta/influencers/import-conversations", method: "POST", body: InfluencerImportRequest(limit: limit))
+        return try await perform(request)
+    }
+
     func createInfluencer(_ body: InfluencerSaveRequest) async throws -> InfluencerProfile {
         let request = try jsonRequest(path: "/influencers", method: "POST", body: body)
         return try await perform(request)
@@ -588,6 +593,17 @@ struct InfluencerSubmission: Decodable, Identifiable, Hashable {
     let metaCampaignId: String?
     let createdAt: Date?
     let updatedAt: Date?
+}
+
+struct InfluencerImportRequest: Encodable {
+    let limit: Int
+}
+
+struct InfluencerImportResult: Decodable {
+    let ok: Bool
+    let checked: Int
+    let imported: Int
+    let ignored: Int
 }
 
 struct InfluencerSaveRequest: Encodable {

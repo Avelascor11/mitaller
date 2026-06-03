@@ -52,6 +52,13 @@ interface InfluencerDetection {
   tags: string[];
 }
 
+interface ImportedConversationMessage {
+  text: string;
+  senderId?: string;
+  senderName?: string;
+  createdAt?: Date;
+}
+
 @Injectable()
 export class MetaService {
   private readonly logger = new Logger(MetaService.name);
@@ -150,6 +157,97 @@ export class MetaService {
     }
 
     return { ok: true, received: events.length, processed: processed.length, ignored, influencers: processed };
+  }
+
+  async importInfluencerConversations(limit = 50) {
+    if (!this.token || !this.pageId) {
+      throw new BadRequestException('Meta no configurado para leer DMs (faltan META_ACCESS_TOKEN o META_PAGE_ID)');
+    }
+
+    const cappedLimit = Math.max(1, Math.min(Number(limit) || 50, 100));
+    const conversations = await this.fetchInstagramConversations(cappedLimit);
+    const imported: Array<{ influencerId: string; igHandle: string; score: number; reason: string; messagePreview: string | null }> = [];
+    let ignored = 0;
+
+    for (const conversation of conversations) {
+      const messages = this.extractConversationMessages(conversation);
+      const text = messages.map((message) => message.text).filter(Boolean).join('\n');
+      const detection = this.detectInfluencerIntent(text);
+      if (!detection.isCandidate) {
+        ignored += 1;
+        continue;
+      }
+
+      const senderId = this.externalConversationSenderId(conversation, messages);
+      if (!senderId) {
+        ignored += 1;
+        continue;
+      }
+
+      const profile = await this.resolveInstagramProfile(senderId);
+      const participantName = this.externalConversationParticipantName(conversation, senderId);
+      const igHandle = this.normalizeHandle(profile?.username)
+        ?? this.normalizeHandle(participantName)
+        ?? `ig_${senderId}`;
+      const latestMessage = messages.find((message) => message.senderId === senderId)?.text ?? messages[0]?.text ?? null;
+      const influencer = await this.upsertInfluencerFromWebhook({
+        senderId,
+        igHandle,
+        fullName: profile?.name ?? participantName ?? null,
+        message: latestMessage,
+        timestamp: messages[0]?.createdAt,
+        detection
+      });
+      if (!influencer) {
+        ignored += 1;
+        continue;
+      }
+
+      imported.push({
+        influencerId: influencer.id,
+        igHandle: influencer.igHandle,
+        score: influencer.detectionScore,
+        reason: influencer.detectionReason ?? detection.reason,
+        messagePreview: latestMessage ? latestMessage.slice(0, 120) : null
+      });
+    }
+
+    return { ok: true, checked: conversations.length, imported: imported.length, ignored, influencers: imported };
+  }
+
+  private async fetchInstagramConversations(limit: number) {
+    const response = await this.graphGet<{ data?: any[] }>(`${this.pageId}/conversations`, {
+      platform: 'instagram',
+      limit: String(limit),
+      fields: 'participants,messages.limit(10){message,from,created_time}'
+    });
+    return Array.isArray(response.data) ? response.data : [];
+  }
+
+  private extractConversationMessages(conversation: any): ImportedConversationMessage[] {
+    const rawMessages = Array.isArray(conversation?.messages?.data) ? conversation.messages.data : [];
+    return rawMessages
+      .map((message: any) => ({
+        text: typeof message?.message === 'string' ? message.message : '',
+        senderId: message?.from?.id ? String(message.from.id) : undefined,
+        senderName: typeof message?.from?.name === 'string' ? message.from.name : undefined,
+        createdAt: message?.created_time ? new Date(message.created_time) : undefined
+      }))
+      .filter((message: ImportedConversationMessage) => message.text || message.senderId);
+  }
+
+  private externalConversationSenderId(conversation: any, messages: ImportedConversationMessage[]) {
+    const ownIds = new Set([this.pageId, this.instagramId].filter(Boolean));
+    const fromMessage = messages.find((message) => message.senderId && !ownIds.has(message.senderId))?.senderId;
+    if (fromMessage) return fromMessage;
+    const participants = Array.isArray(conversation?.participants?.data) ? conversation.participants.data : [];
+    return participants.map((item: any) => String(item?.id ?? '')).find((id: string) => id && !ownIds.has(id)) ?? null;
+  }
+
+  private externalConversationParticipantName(conversation: any, senderId: string) {
+    const participants = Array.isArray(conversation?.participants?.data) ? conversation.participants.data : [];
+    const participant = participants.find((item: any) => String(item?.id ?? '') === senderId);
+    return typeof participant?.name === 'string' ? participant.name : null;
   }
 
   private assertWebhookSignature(signature?: string, rawBody?: Buffer) {
