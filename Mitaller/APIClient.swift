@@ -484,6 +484,22 @@ struct InfluencerSummary: Decodable {
     let byStage: [String: Int]
     let byCollaborationStatus: [String: Int]
     let bySubmissionStatus: [String: Int]
+
+    enum CodingKeys: String, CodingKey {
+        case influencers, activeCollaborations, awaitingContent, pendingSubmissions
+        case byStage, byCollaborationStatus, bySubmissionStatus
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        influencers = try container.decodeIfPresent(Int.self, forKey: .influencers) ?? 0
+        activeCollaborations = try container.decodeIfPresent(Int.self, forKey: .activeCollaborations) ?? 0
+        awaitingContent = try container.decodeIfPresent(Int.self, forKey: .awaitingContent) ?? 0
+        pendingSubmissions = try container.decodeIfPresent(Int.self, forKey: .pendingSubmissions) ?? 0
+        byStage = try container.decodeIfPresent([String: Int].self, forKey: .byStage) ?? [:]
+        byCollaborationStatus = try container.decodeIfPresent([String: Int].self, forKey: .byCollaborationStatus) ?? [:]
+        bySubmissionStatus = try container.decodeIfPresent([String: Int].self, forKey: .bySubmissionStatus) ?? [:]
+    }
 }
 
 struct InfluencerProfile: Decodable, Identifiable, Hashable {
@@ -502,6 +518,29 @@ struct InfluencerProfile: Decodable, Identifiable, Hashable {
     let updatedAt: Date?
     let collaborations: [InfluencerCollaboration]
     let submissions: [InfluencerSubmission]
+
+    enum CodingKeys: String, CodingKey {
+        case id, igHandle, fullName, manychatId, followers, email, stage, tags, notes, lastMessage, lastMessageAt, createdAt, updatedAt, collaborations, submissions
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(String.self, forKey: .id)
+        igHandle = try container.decodeIfPresent(String.self, forKey: .igHandle) ?? "sin_usuario"
+        fullName = try container.decodeIfPresent(String.self, forKey: .fullName)
+        manychatId = try container.decodeIfPresent(String.self, forKey: .manychatId)
+        followers = try container.decodeIfPresent(Int.self, forKey: .followers)
+        email = try container.decodeIfPresent(String.self, forKey: .email)
+        stage = try container.decodeIfPresent(String.self, forKey: .stage) ?? "PROSPECT"
+        tags = try container.decodeIfPresent([String].self, forKey: .tags) ?? []
+        notes = try container.decodeIfPresent(String.self, forKey: .notes)
+        lastMessage = try container.decodeIfPresent(String.self, forKey: .lastMessage)
+        lastMessageAt = try container.decodeIfPresent(Date.self, forKey: .lastMessageAt)
+        createdAt = try container.decodeIfPresent(Date.self, forKey: .createdAt)
+        updatedAt = try container.decodeIfPresent(Date.self, forKey: .updatedAt)
+        collaborations = try container.decodeIfPresent([InfluencerCollaboration].self, forKey: .collaborations) ?? []
+        submissions = try container.decodeIfPresent([InfluencerSubmission].self, forKey: .submissions) ?? []
+    }
 }
 
 struct InfluencerCollaboration: Decodable, Identifiable, Hashable {
