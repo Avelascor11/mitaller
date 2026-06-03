@@ -4162,6 +4162,22 @@ struct SupplierPurchaseOrderCard: View {
                         }
                     }
 
+                    if let orderNote = latestOrder.orderNote, !orderNote.isEmpty {
+                        VStack(alignment: .leading, spacing: 6) {
+                            Label("Comentario para Falk & Ross", systemImage: "text.quote")
+                                .font(.caption.weight(.black))
+                                .foregroundStyle(AppTheme.amber)
+                            Text(orderNote)
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(AppTheme.ink)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                        .padding(12)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(AppTheme.amber.opacity(0.12))
+                        .clipShape(RoundedRectangle(cornerRadius: 12))
+                    }
+
                     VStack(alignment: .leading, spacing: 8) {
                         HStack {
                             Text("Compra recomendada")
@@ -4239,7 +4255,7 @@ struct SupplierPurchaseOrderCard: View {
             }
             Button("Cancelar", role: .cancel) {}
         } message: {
-            Text("Revisa cantidades y SKUs antes de confirmar. Esta accion envia el pedido al proveedor si la API esta activada.")
+            Text(orderPendingSubmit?.orderNote ?? "Revisa cantidades y SKUs antes de confirmar. Esta accion envia el pedido al proveedor si la API esta activada.")
         }
     }
 }

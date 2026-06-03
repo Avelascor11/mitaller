@@ -40,14 +40,15 @@ export class SupplierOrderService {
       include: { lines: { include: { stockItem: true } } },
       orderBy: { createdAt: 'desc' },
       take: 100
-    });
+    }).then((orders) => orders.map((order) => this.withOrderNote(order)));
   }
 
-  getPurchaseOrder(id: string) {
-    return this.prisma.supplierPurchaseOrder.findUniqueOrThrow({
+  async getPurchaseOrder(id: string) {
+    const order = await this.prisma.supplierPurchaseOrder.findUniqueOrThrow({
       where: { id },
       include: { lines: { include: { stockItem: true } } }
     });
+    return this.withOrderNote(order);
   }
 
   @Cron('0 20 * * *', { timeZone: 'Europe/Madrid' })
@@ -72,7 +73,7 @@ export class SupplierOrderService {
       include: { lines: true }
     });
     if (existing?.status === 'SUBMITTED') {
-      return { status: 'already_exists', order: existing, lines: existing.lines };
+      return { status: 'already_exists', order: this.withOrderNote(existing), lines: existing.lines };
     }
     if (existing?.status === 'DRAFT') {
       await this.prisma.supplierPurchaseOrder.delete({ where: { id: existing.id } });
@@ -185,7 +186,7 @@ export class SupplierOrderService {
       return this.submitPurchaseOrder(created.id);
     }
 
-    return { status: 'created', order: created, lines: created.lines };
+    return { status: 'created', order: this.withOrderNote(created), lines: created.lines };
   }
 
   async submitPurchaseOrder(id: string) {
@@ -195,7 +196,7 @@ export class SupplierOrderService {
     });
     if (!order) throw new BadRequestException('Pedido a proveedor no encontrado');
     if (!order.lines.length) throw new BadRequestException('El pedido a proveedor no tiene lineas');
-    if (order.status === 'SUBMITTED') return { status: 'already_submitted', order, lines: order.lines };
+    if (order.status === 'SUBMITTED') return { status: 'already_submitted', order: this.withOrderNote(order), lines: order.lines };
     if (this.hasUnresolvedFalkRossSkus(order.lines)) {
       throw new BadRequestException('Falta importar el catalogo real de Falk & Ross antes de enviar el pedido al proveedor');
     }
@@ -240,7 +241,15 @@ export class SupplierOrderService {
       metadataJson: result.rawResponseJson
     });
 
-    return { status: result.submitted ? 'submitted' : 'draft', order: updated, lines: updated.lines, result };
+    return { status: result.submitted ? 'submitted' : 'draft', order: this.withOrderNote(updated), lines: updated.lines, result };
+  }
+
+  private withOrderNote<T extends { rawRequestJson: Prisma.JsonValue | null }>(order: T) {
+    const rawRequest = order.rawRequestJson as SupplierPurchaseOrderPayload | null;
+    return {
+      ...order,
+      orderNote: rawRequest?.orderNote ?? this.falkRossOrderNote()
+    };
   }
 
   private async pendingSupplierOrderQuantityByStockItemId() {

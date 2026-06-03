@@ -607,6 +607,7 @@ struct SupplierPurchaseOrder: Decodable, Identifiable {
     let orderDate: Date?
     let submittedAt: Date?
     let errorMessage: String?
+    let orderNote: String?
     let createdAt: Date?
     let lines: [SupplierPurchaseOrderLine]
 
