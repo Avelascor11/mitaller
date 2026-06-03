@@ -60,11 +60,17 @@ export interface CreateInfluencerBody {
   stage?: string;
   tags?: string[];
   notes?: string;
+  source?: string;
+  detectionScore?: number;
+  detectionReason?: string;
+  suggestedAction?: string;
 }
 
 export interface UpdateInfluencerBody extends Partial<CreateInfluencerBody> {
   lastMessage?: string;
   lastMessageAt?: string;
+  firstDetectedAt?: string;
+  lastInboundAt?: string;
 }
 
 export interface CreateCollaborationBody {

@@ -44,6 +44,14 @@ export interface CreateCampaignDto {
   startTime?: string; // ISO; default now
 }
 
+interface InfluencerDetection {
+  isCandidate: boolean;
+  score: number;
+  reason: string;
+  suggestedAction: string;
+  tags: string[];
+}
+
 @Injectable()
 export class MetaService {
   private readonly logger = new Logger(MetaService.name);
@@ -111,28 +119,37 @@ export class MetaService {
   async handleInstagramWebhook(payload: unknown, signature?: string, rawBody?: Buffer) {
     this.assertWebhookSignature(signature, rawBody);
     const events = this.extractMessagingEvents(payload);
-    const processed: Array<{ influencerId: string; igHandle: string; messagePreview: string | null }> = [];
+    const processed: Array<{ influencerId: string; igHandle: string; score: number; reason: string; messagePreview: string | null }> = [];
+    let ignored = 0;
 
     for (const event of events) {
       if (!event.senderId) continue;
       const profile = await this.resolveInstagramProfile(event.senderId);
       const igHandle = this.normalizeHandle(profile?.username) ?? `ig_${event.senderId}`;
       const message = event.text ?? event.postbackTitle ?? null;
+      const detection = this.detectInfluencerIntent(message);
       const influencer = await this.upsertInfluencerFromWebhook({
         senderId: event.senderId,
         igHandle,
         fullName: profile?.name ?? null,
         message,
-        timestamp: event.timestamp
+        timestamp: event.timestamp,
+        detection
       });
+      if (!influencer) {
+        ignored += 1;
+        continue;
+      }
       processed.push({
         influencerId: influencer.id,
         igHandle: influencer.igHandle,
+        score: influencer.detectionScore,
+        reason: influencer.detectionReason ?? detection.reason,
         messagePreview: message ? message.slice(0, 120) : null
       });
     }
 
-    return { ok: true, received: events.length, processed: processed.length, influencers: processed };
+    return { ok: true, received: events.length, processed: processed.length, ignored, influencers: processed };
   }
 
   private assertWebhookSignature(signature?: string, rawBody?: Buffer) {
@@ -187,6 +204,7 @@ export class MetaService {
     fullName: string | null;
     message: string | null;
     timestamp?: Date;
+    detection: InfluencerDetection;
   }) {
     const existing = await this.prisma.influencer.findFirst({
       where: {
@@ -196,15 +214,23 @@ export class MetaService {
         ]
       }
     });
+    if (!existing && !input.detection.isCandidate) return null;
     const stage = existing?.stage && !['PROSPECT', 'CONTACTED'].includes(existing.stage) ? existing.stage : 'CONTACTED';
-    const tags = Array.from(new Set([...(existing?.tags ?? []), 'instagram-webhook']));
+    const tags = Array.from(new Set([...(existing?.tags ?? []), 'instagram-webhook', ...input.detection.tags]));
+    const firstDetectedAt = existing?.firstDetectedAt ?? (input.detection.isCandidate ? input.timestamp ?? new Date() : undefined);
     const data = {
       manychatId: input.senderId,
       fullName: input.fullName ?? existing?.fullName ?? undefined,
       stage,
       tags,
       lastMessage: input.message ?? existing?.lastMessage ?? undefined,
-      lastMessageAt: input.timestamp ?? new Date()
+      lastMessageAt: input.timestamp ?? new Date(),
+      source: existing?.source ?? 'instagram_dm',
+      detectionScore: Math.max(existing?.detectionScore ?? 0, input.detection.score),
+      detectionReason: input.detection.reason || existing?.detectionReason || undefined,
+      suggestedAction: input.detection.suggestedAction || existing?.suggestedAction || undefined,
+      firstDetectedAt,
+      lastInboundAt: input.timestamp ?? new Date()
     };
 
     if (existing) {
@@ -220,6 +246,105 @@ export class MetaService {
         ...data
       }
     });
+  }
+
+  private detectInfluencerIntent(message?: string | null): InfluencerDetection {
+    const text = (message ?? '').toLowerCase().normalize('NFD').replace(/\p{Diacritic}/gu, '');
+    if (!text.trim()) {
+      return { isCandidate: false, score: 0, reason: '', suggestedAction: '', tags: [] };
+    }
+
+    const strong = [
+      ['colaboracion', 'menciona colaboracion'],
+      ['colaborar', 'pide colaborar'],
+      ['collab', 'menciona collab'],
+      ['influencer', 'se identifica como influencer'],
+      ['creador', 'se identifica como creador'],
+      ['creadora', 'se identifica como creadora'],
+      ['ugc', 'menciona UGC'],
+      ['media kit', 'menciona media kit'],
+      ['embajador', 'menciona embajador'],
+      ['embajadora', 'menciona embajadora'],
+      ['afiliado', 'menciona afiliado'],
+      ['affiliate', 'menciona afiliado'],
+      ['canje', 'pide canje'],
+      ['gifted', 'pide producto gifted']
+    ];
+    const medium = [
+      ['reel', 'propone reel'],
+      ['reels', 'propone reels'],
+      ['tiktok', 'menciona TikTok'],
+      ['video', 'menciona video'],
+      ['contenido', 'menciona contenido'],
+      ['seguidores', 'menciona seguidores'],
+      ['audiencia', 'menciona audiencia'],
+      ['promocion', 'menciona promocion'],
+      ['promocionar', 'propone promocionar'],
+      ['unboxing', 'propone unboxing'],
+      ['review', 'propone review'],
+      ['resena', 'propone resena']
+    ];
+    const productAsk = [
+      ['me mandais ropa', 'pide producto para contenido'],
+      ['me mandas ropa', 'pide producto para contenido'],
+      ['enviarme ropa', 'pide producto para contenido'],
+      ['mandarme ropa', 'pide producto para contenido'],
+      ['me enviais', 'pide envio de producto'],
+      ['me envias', 'pide envio de producto']
+    ];
+    const customerSupport = ['pedido', 'envio', 'seguimiento', 'devolucion', 'cambio de talla', 'talla', 'no me llega', 'compra'];
+
+    let score = 0;
+    const reasons: string[] = [];
+    const tags = new Set<string>();
+    for (const [keyword, reason] of strong) {
+      if (text.includes(keyword)) {
+        score += 35;
+        reasons.push(reason);
+        tags.add('collab');
+      }
+    }
+    for (const [keyword, reason] of medium) {
+      if (text.includes(keyword)) {
+        score += 18;
+        reasons.push(reason);
+        tags.add('contenido');
+      }
+    }
+    for (const [keyword, reason] of productAsk) {
+      if (text.includes(keyword)) {
+        score += 22;
+        reasons.push(reason);
+        tags.add('producto');
+      }
+    }
+    const followerMatch = text.match(/(\d{2,6})\s*(k|mil)?\s*(seguidores|followers|subs)/);
+    if (followerMatch) {
+      score += followerMatch[2] ? 28 : 16;
+      reasons.push('menciona tamano de audiencia');
+      tags.add('audiencia');
+    }
+    if (customerSupport.some((keyword) => text.includes(keyword)) && score < 45) {
+      score -= 18;
+      reasons.push('parece soporte/cliente normal');
+    }
+    score = Math.max(0, Math.min(100, score));
+
+    const isCandidate = score >= 40;
+    return {
+      isCandidate,
+      score,
+      reason: reasons.slice(0, 4).join(' · '),
+      suggestedAction: isCandidate ? this.suggestInfluencerAction(score, tags) : '',
+      tags: [...tags]
+    };
+  }
+
+  private suggestInfluencerAction(score: number, tags: Set<string>) {
+    if (score >= 75) return 'Revisar perfil y responder hoy con propuesta de colaboracion';
+    if (tags.has('producto')) return 'Pedir metricas/perfil antes de enviar producto';
+    if (tags.has('contenido')) return 'Pedir ejemplos de contenido y condiciones';
+    return 'Revisar conversacion y decidir si interesa';
   }
 
   private normalizeHandle(value?: string | null) {

@@ -41,6 +41,8 @@ export class InfluencersService {
         { igHandle: { contains: q, mode: 'insensitive' } },
         { fullName: { contains: q, mode: 'insensitive' } },
         { email: { contains: q, mode: 'insensitive' } },
+        { detectionReason: { contains: q, mode: 'insensitive' } },
+        { lastMessage: { contains: q, mode: 'insensitive' } },
         { tags: { has: q } }
       ];
     }
@@ -164,7 +166,11 @@ export class InfluencersService {
       email: this.clean(input.email),
       stage: input.stage ? this.enumValue(InfluencerStage, input.stage, 'stage') : undefined,
       tags: input.tags?.map((tag) => tag.trim()).filter(Boolean) ?? [],
-      notes: this.clean(input.notes)
+      notes: this.clean(input.notes),
+      source: this.clean(input.source),
+      detectionScore: this.optionalNumber(input.detectionScore) ?? 0,
+      detectionReason: this.clean(input.detectionReason),
+      suggestedAction: this.clean(input.suggestedAction)
     };
   }
 
@@ -176,10 +182,16 @@ export class InfluencersService {
       email: this.clean(input.email),
       stage: input.stage ? this.enumValue(InfluencerStage, input.stage, 'stage') : undefined,
       tags: input.tags?.map((tag) => tag.trim()).filter(Boolean),
-      notes: this.clean(input.notes)
+      notes: this.clean(input.notes),
+      source: this.clean(input.source),
+      detectionScore: this.optionalNumber(input.detectionScore),
+      detectionReason: this.clean(input.detectionReason),
+      suggestedAction: this.clean(input.suggestedAction)
     };
     if ('lastMessage' in input) data.lastMessage = this.clean(input.lastMessage);
     if ('lastMessageAt' in input) data.lastMessageAt = this.optionalDate(input.lastMessageAt);
+    if ('firstDetectedAt' in input) data.firstDetectedAt = this.optionalDate(input.firstDetectedAt);
+    if ('lastInboundAt' in input) data.lastInboundAt = this.optionalDate(input.lastInboundAt);
     return data;
   }
 

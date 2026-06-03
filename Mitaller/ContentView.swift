@@ -6505,6 +6505,32 @@ struct InfluencerCard: View {
                 Tag(text: "\(influencer.submissions.count) UGC", systemImage: "play.rectangle.fill")
             }
 
+            if influencer.detectionScore > 0 {
+                HStack(alignment: .top, spacing: 10) {
+                    Image(systemName: "wand.and.stars")
+                        .font(.caption.weight(.black))
+                        .foregroundStyle(AppTheme.teal)
+                        .padding(7)
+                        .background(AppTheme.tealSoft)
+                        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("Detectada por DM · \(influencer.detectionScore)%")
+                            .font(.caption.weight(.black))
+                            .foregroundStyle(AppTheme.inkSoft)
+                        if let reason = influencer.detectionReason, !reason.isEmpty {
+                            Text(reason)
+                                .font(.caption.weight(.medium))
+                                .foregroundStyle(AppTheme.muted)
+                                .lineLimit(2)
+                        }
+                    }
+                    Spacer()
+                }
+                .padding(10)
+                .background(AppTheme.tealSoft)
+                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+            }
+
             if let latestCollaboration {
                 VStack(alignment: .leading, spacing: 4) {
                     Text(latestCollaboration.title)
@@ -6593,6 +6619,29 @@ struct InfluencerDetailView: View {
                     .disabled(store.isInfluencerActionRunning || selectedStage.rawValue == influencer.stage)
                 }
                 .glassPanel(padding: 16, accent: selectedStage.color)
+
+                if influencer.detectionScore > 0 {
+                    VStack(alignment: .leading, spacing: 10) {
+                        SectionHeader(title: "Detección automática", subtitle: "Por qué apareció desde Instagram")
+                        HStack(alignment: .top, spacing: 14) {
+                            Text("\(influencer.detectionScore)%")
+                                .font(.system(size: 34, weight: .black, design: .rounded))
+                                .foregroundStyle(AppTheme.teal)
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(influencer.detectionReason ?? "Detectada desde DM")
+                                    .font(.subheadline.weight(.bold))
+                                    .foregroundStyle(AppTheme.inkSoft)
+                                if let suggestedAction = influencer.suggestedAction, !suggestedAction.isEmpty {
+                                    Text(suggestedAction)
+                                        .font(.footnote.weight(.medium))
+                                        .foregroundStyle(AppTheme.muted)
+                                }
+                            }
+                            Spacer()
+                        }
+                    }
+                    .glassPanel(padding: 16, accent: AppTheme.teal)
+                }
 
                 if !influencer.collaborations.isEmpty {
                     SectionHeader(title: "Colaboraciones", subtitle: "\(influencer.collaborations.count) abiertas o históricas")

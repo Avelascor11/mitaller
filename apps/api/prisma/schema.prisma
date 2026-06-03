@@ -716,12 +716,19 @@ model Influencer {
   notes         String?
   lastMessage   String?
   lastMessageAt DateTime?
+  source        String?
+  detectionScore Int           @default(0)
+  detectionReason String?
+  suggestedAction String?
+  firstDetectedAt DateTime?
+  lastInboundAt DateTime?
   createdAt     DateTime        @default(now())
   updatedAt     DateTime        @updatedAt
   submissions   UgcSubmission[]
   collaborations Collaboration[]
 
   @@index([stage])
+  @@index([detectionScore])
 }
 
 model Collaboration {

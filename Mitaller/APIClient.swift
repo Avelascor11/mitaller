@@ -514,13 +514,21 @@ struct InfluencerProfile: Decodable, Identifiable, Hashable {
     let notes: String?
     let lastMessage: String?
     let lastMessageAt: Date?
+    let source: String?
+    let detectionScore: Int
+    let detectionReason: String?
+    let suggestedAction: String?
+    let firstDetectedAt: Date?
+    let lastInboundAt: Date?
     let createdAt: Date?
     let updatedAt: Date?
     let collaborations: [InfluencerCollaboration]
     let submissions: [InfluencerSubmission]
 
     enum CodingKeys: String, CodingKey {
-        case id, igHandle, fullName, manychatId, followers, email, stage, tags, notes, lastMessage, lastMessageAt, createdAt, updatedAt, collaborations, submissions
+        case id, igHandle, fullName, manychatId, followers, email, stage, tags, notes, lastMessage, lastMessageAt
+        case source, detectionScore, detectionReason, suggestedAction, firstDetectedAt, lastInboundAt
+        case createdAt, updatedAt, collaborations, submissions
     }
 
     init(from decoder: Decoder) throws {
@@ -536,6 +544,12 @@ struct InfluencerProfile: Decodable, Identifiable, Hashable {
         notes = try container.decodeIfPresent(String.self, forKey: .notes)
         lastMessage = try container.decodeIfPresent(String.self, forKey: .lastMessage)
         lastMessageAt = try container.decodeIfPresent(Date.self, forKey: .lastMessageAt)
+        source = try container.decodeIfPresent(String.self, forKey: .source)
+        detectionScore = try container.decodeIfPresent(Int.self, forKey: .detectionScore) ?? 0
+        detectionReason = try container.decodeIfPresent(String.self, forKey: .detectionReason)
+        suggestedAction = try container.decodeIfPresent(String.self, forKey: .suggestedAction)
+        firstDetectedAt = try container.decodeIfPresent(Date.self, forKey: .firstDetectedAt)
+        lastInboundAt = try container.decodeIfPresent(Date.self, forKey: .lastInboundAt)
         createdAt = try container.decodeIfPresent(Date.self, forKey: .createdAt)
         updatedAt = try container.decodeIfPresent(Date.self, forKey: .updatedAt)
         collaborations = try container.decodeIfPresent([InfluencerCollaboration].self, forKey: .collaborations) ?? []
