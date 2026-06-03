@@ -106,7 +106,7 @@ export class SupplierOrderService {
         return {
           stockItemId: entry.stockItemId!,
           supplierSku,
-          name: entry.subproductName,
+          name: this.falkRossLineName(group.garmentType, group.color, entry.size, entry.subproductName),
           color: group.color,
           size: entry.size,
           quantity,
@@ -351,7 +351,21 @@ export class SupplierOrderService {
     const expectedColor = this.normalizedColor(color);
     const articleColor = article.color ?? article.productName;
     if (expectedColor === 'AZUL') return this.normalizedToken(articleColor).includes('royal blue');
+    if (expectedColor === 'SAND') return this.normalizedToken(articleColor).includes('mastic');
     return this.normalizedColor(articleColor) === expectedColor;
+  }
+
+  private falkRossLineName(garmentType: string, color: string, size: string, fallback: string) {
+    const colorLabel = this.falkRossColorLabel(color);
+    if (!colorLabel) return fallback;
+    return `${garmentType === 'SUDADERA' ? 'Sudadera' : 'Camiseta'} ${colorLabel} - ${size}`;
+  }
+
+  private falkRossColorLabel(color: string) {
+    const normalized = this.normalizedColor(color);
+    if (normalized === 'AZUL') return 'Royal Blue';
+    if (normalized === 'SAND') return 'Mastic';
+    return null;
   }
 
   private articleMatchesStyle(article: { styleCode: string | null; productName: string }, expectedStyles: string[]) {

@@ -300,6 +300,69 @@ describe('SupplierOrderService', () => {
     }));
   });
 
+  it('resuelve camiseta sand como Falk & Ross Mastic y la muestra como Mastic', async () => {
+    const { service, prisma } = buildService({
+      matrix: {
+        groups: [{
+          garmentType: 'CAMISETA',
+          color: 'SAND',
+          sizes: [{
+            stockItemId: 'stock-mastic-shirt',
+            supplierSku: 'FR-TS-SAND-M',
+            subproductName: 'Camiseta Sand - M',
+            size: 'M',
+            recommendedPurchaseQuantity: 2,
+            supplierAvailableQuantity: null,
+            pendingOrderNeed: 3,
+            currentInternalStock: 1,
+            minStockTarget: 0,
+            demandOrders: [{ orderNumber: '#9567' }]
+          }]
+        }]
+      },
+      supplierArticles: [{
+        supplierSku: '032427113',
+        styleCode: '032.42',
+        productName: 'TG002 - #E220 T-Shirt',
+        color: 'Mastic',
+        size: 'M',
+        purchasePrice: null
+      }],
+      supplierStocks: [{
+        supplierSku: '032427113',
+        availableQuantity: 934,
+        stockSpain24h: 429,
+        stockCentral3To5Days: 505,
+        stockSupplier5To20Days: 500
+      }]
+    });
+
+    await service.generateDailyFalkRossOrder({ source: 'manual' });
+
+    expect(prisma.supplierPurchaseOrder.create).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        rawRequestJson: expect.objectContaining({
+          lines: [expect.objectContaining({
+            supplierSku: '032427113',
+            name: 'Camiseta Mastic - M',
+            quantity: 2
+          })]
+        }),
+        lines: expect.objectContaining({
+          create: [expect.objectContaining({
+            supplierSku: '032427113',
+            name: 'Camiseta Mastic - M',
+            supplierAvailableQuantity: 934,
+            rawDataJson: expect.objectContaining({
+              resolvedSupplierSku: '032427113',
+              resolvedStyleCode: '032.42'
+            })
+          })]
+        })
+      })
+    }));
+  });
+
   it('resuelve camiseta marron con Falk & Ross 2000 / 102.09 en lugar de B&C TG002', async () => {
     const { service, prisma } = buildService({
       matrix: {
