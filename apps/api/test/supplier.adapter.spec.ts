@@ -102,7 +102,7 @@ describe('SupplierAdapter', () => {
     }));
   });
 
-  it('sincroniza stock R03 sin cabecera usando la primera cantidad disponible', async () => {
+  it('sincroniza stock R03 sin cabecera separando Espana, Alemania y proveedor', async () => {
     const fetchSpy = vi.fn().mockResolvedValue({
       ok: true,
       status: 200,
@@ -127,8 +127,20 @@ describe('SupplierAdapter', () => {
     expect(result.synced).toBe(2);
     expect(createMany).toHaveBeenCalledWith(expect.objectContaining({
       data: expect.arrayContaining([
-        expect.objectContaining({ supplierSku: '110331217', availableQuantity: 4 }),
-        expect.objectContaining({ supplierSku: '765542007', availableQuantity: 0 })
+        expect.objectContaining({
+          supplierSku: '110331217',
+          availableQuantity: 39,
+          stockSpain24h: 4,
+          stockCentral3To5Days: 35,
+          stockSupplier5To20Days: 250
+        }),
+        expect.objectContaining({
+          supplierSku: '765542007',
+          availableQuantity: 9,
+          stockSpain24h: 0,
+          stockCentral3To5Days: 9,
+          stockSupplier5To20Days: 40
+        })
       ])
     }));
   });

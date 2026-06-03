@@ -498,20 +498,28 @@ export class SupplierAdapter {
     const rows = hasHeader ? lines.slice(1) : lines;
     const skuIndex = this.findHeaderIndex(headers, ['sku', 'artikelnr', 'artikelnummer', 'article', 'article_number', 'p_sku']);
     const stockIndex = this.findHeaderIndex(headers, ['stock', 'bestand', 'available', 'availablequantity', 'quantity', 'qty', 'lagerbestand']);
-    const stocks = new Map<string, number>();
+    const spainIndex = this.findHeaderIndex(headers, ['stockspain24h', 'stockespana24h', 'espana24h', 'spain24h', 'stockes', 'stock_es']);
+    const centralIndex = this.findHeaderIndex(headers, ['stockcentral3_5days', 'stockcentral35days', 'stockcentralalemania35dias', 'alemania35dias', 'germany35days', 'centralstock']);
+    const supplierIndex = this.findHeaderIndex(headers, ['stocksupplier520days', 'stockproveedor520dias', 'proveedor520dias', 'supplier520days', 'supplierstock']);
+    const stocks = new Map<string, {
+      availableQuantity: number;
+      stockSpain24h: number;
+      stockCentral3To5Days: number;
+      stockSupplier5To20Days: number;
+    }>();
 
     for (const line of rows) {
       const cells = this.splitCsvLine(line, delimiter);
       const supplierSku = this.pickSupplierSku(cells, skuIndex);
-      const availableQuantity = this.pickStockQuantity(cells, stockIndex, hasHeader);
-      if (!supplierSku || availableQuantity == null) continue;
-      stocks.set(supplierSku, availableQuantity);
+      const splitStock = this.pickFalkRossStockQuantities(cells, { hasHeader, stockIndex, spainIndex, centralIndex, supplierIndex });
+      if (!supplierSku || !splitStock) continue;
+      stocks.set(supplierSku, splitStock);
     }
 
-    return [...stocks].map(([supplierSku, availableQuantity]) => ({
+    return [...stocks].map(([supplierSku, stock]) => ({
       supplier: 'FALK_ROSS',
       supplierSku,
-      availableQuantity
+      ...stock
     }));
   }
 
@@ -569,6 +577,44 @@ export class SupplierAdapter {
       : hasHeader
         ? [...cells].reverse().find((cell) => /^-?\d+$/.test(cell.replace(/\s/g, '')))
         : cells[1];
+    if (value == null) return null;
+    const quantity = Number(value.replace(/\s/g, '').replace(',', '.'));
+    return Number.isFinite(quantity) ? Math.max(0, Math.floor(quantity)) : null;
+  }
+
+  private pickFalkRossStockQuantities(
+    cells: string[],
+    indexes: { hasHeader: boolean; stockIndex: number; spainIndex: number; centralIndex: number; supplierIndex: number }
+  ) {
+    const pickAt = (index: number) => index >= 0 ? this.pickIntegerCell(cells[index]) : null;
+
+    if (!indexes.hasHeader && cells.length >= 4) {
+      const stockSpain24h = this.pickIntegerCell(cells[1]) ?? 0;
+      const stockCentral3To5Days = this.pickIntegerCell(cells[2]) ?? 0;
+      const stockSupplier5To20Days = this.pickIntegerCell(cells[3]) ?? 0;
+      return {
+        availableQuantity: stockSpain24h + stockCentral3To5Days,
+        stockSpain24h,
+        stockCentral3To5Days,
+        stockSupplier5To20Days
+      };
+    }
+
+    const stockSpain24h = pickAt(indexes.spainIndex) ?? 0;
+    const stockCentral3To5Days = pickAt(indexes.centralIndex) ?? 0;
+    const stockSupplier5To20Days = pickAt(indexes.supplierIndex) ?? 0;
+    const genericAvailable = this.pickStockQuantity(cells, indexes.stockIndex, indexes.hasHeader);
+    if (genericAvailable == null && !stockSpain24h && !stockCentral3To5Days && !stockSupplier5To20Days) return null;
+
+    return {
+      availableQuantity: genericAvailable ?? stockSpain24h + stockCentral3To5Days,
+      stockSpain24h,
+      stockCentral3To5Days,
+      stockSupplier5To20Days
+    };
+  }
+
+  private pickIntegerCell(value: string | undefined) {
     if (value == null) return null;
     const quantity = Number(value.replace(/\s/g, '').replace(',', '.'));
     return Number.isFinite(quantity) ? Math.max(0, Math.floor(quantity)) : null;

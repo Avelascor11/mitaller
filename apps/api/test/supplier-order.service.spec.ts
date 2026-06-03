@@ -96,7 +96,13 @@ describe('SupplierOrderService', () => {
         size: 'M',
         purchasePrice: null
       }],
-      supplierStocks: [{ supplierSku: '180000002', availableQuantity: 7 }]
+      supplierStocks: [{
+        supplierSku: '180000002',
+        availableQuantity: 7,
+        stockSpain24h: 3,
+        stockCentral3To5Days: 4,
+        stockSupplier5To20Days: 12
+      }]
     });
 
     await service.generateDailyFalkRossOrder({ source: 'manual' });
@@ -110,10 +116,16 @@ describe('SupplierOrderService', () => {
           create: [expect.objectContaining({
             supplierSku: '180000002',
             supplierAvailableQuantity: 7,
+            supplierStockSpain24h: 3,
+            supplierStockCentral3To5Days: 4,
+            supplierStockSupplier5To20Days: 12,
             rawDataJson: expect.objectContaining({
               stockItemSupplierSku: 'FR-TS-WHT-M',
               resolvedSupplierSku: '180000002',
-              resolvedStyleCode: 'TG002'
+              resolvedStyleCode: 'TG002',
+              supplierStockSpain24h: 3,
+              supplierStockCentral3To5Days: 4,
+              supplierStockSupplier5To20Days: 12
             })
           })]
         })

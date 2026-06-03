@@ -624,6 +624,9 @@ struct SupplierPurchaseOrderLine: Decodable, Identifiable {
     let size: String?
     let quantity: Int
     let supplierAvailableQuantity: Int?
+    let supplierStockSpain24h: Int?
+    let supplierStockCentral3To5Days: Int?
+    let supplierStockSupplier5To20Days: Int?
 }
 
 struct ManualPrintResponse: Decodable {

@@ -87,7 +87,7 @@ export class SupplierOrderService {
       this.prisma.supplierStock.findMany({ where: { supplier: 'FALK_ROSS' } })
     ]);
     const articleBySku = new Map(supplierArticles.map((article) => [article.supplierSku, article]));
-    const stockBySku = new Map(supplierStocks.map((stock) => [stock.supplierSku, stock.availableQuantity]));
+    const stockBySku = new Map(supplierStocks.map((stock) => [stock.supplierSku, stock]));
 
     const lines = matrix.groups
       .filter((group) => ['CAMISETA', 'SUDADERA'].includes(group.garmentType))
@@ -98,7 +98,8 @@ export class SupplierOrderService {
         const expectedStyles = this.expectedFalkRossStyles(group.garmentType, group.color);
         const supplierSku = article?.supplierSku ?? expectedStyles[0] ?? entry.supplierSku!;
         const resolvedStyleKey = this.falkRossStyleKey(article?.styleCode ?? article?.productName ?? expectedStyles[0]);
-        const supplierAvailableQuantity = article ? stockBySku.get(supplierSku) ?? null : null;
+        const supplierStock = article ? stockBySku.get(supplierSku) : null;
+        const supplierAvailableQuantity = supplierStock?.availableQuantity ?? null;
         const alreadyPending = pendingByStockItemId.get(entry.stockItemId!) ?? 0;
         const requestedQuantity = Math.max(0, entry.recommendedPurchaseQuantity - alreadyPending);
         const quantity = this.orderableQuantity(requestedQuantity, supplierAvailableQuantity);
@@ -110,6 +111,9 @@ export class SupplierOrderService {
           size: entry.size,
           quantity,
           supplierAvailableQuantity,
+          supplierStockSpain24h: supplierStock?.stockSpain24h ?? null,
+          supplierStockCentral3To5Days: supplierStock?.stockCentral3To5Days ?? null,
+          supplierStockSupplier5To20Days: supplierStock?.stockSupplier5To20Days ?? null,
           purchasePrice: article?.purchasePrice ?? FALKROSS_STYLE_PRICES[resolvedStyleKey] ?? null,
           rawDataJson: {
             pendingOrderNeed: entry.pendingOrderNeed,
@@ -123,6 +127,9 @@ export class SupplierOrderService {
             expectedStyleCode: expectedStyles[0],
             expectedProductNumber: expectedStyles[1],
             resolvedProductName: article?.productName,
+            supplierStockSpain24h: supplierStock?.stockSpain24h ?? null,
+            supplierStockCentral3To5Days: supplierStock?.stockCentral3To5Days ?? null,
+            supplierStockSupplier5To20Days: supplierStock?.stockSupplier5To20Days ?? null,
             demandOrders: entry.demandOrders.map((order) => order.orderNumber)
           }
         };
@@ -166,6 +173,9 @@ export class SupplierOrderService {
             size: line.size,
             quantity: line.quantity,
             supplierAvailableQuantity: line.supplierAvailableQuantity,
+            supplierStockSpain24h: line.supplierStockSpain24h,
+            supplierStockCentral3To5Days: line.supplierStockCentral3To5Days,
+            supplierStockSupplier5To20Days: line.supplierStockSupplier5To20Days,
             purchasePrice: line.purchasePrice,
             rawDataJson: line.rawDataJson as Prisma.InputJsonValue
           }))

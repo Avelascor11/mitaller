@@ -399,11 +399,14 @@ model SupplierArticle {
 }
 
 model SupplierStock {
-  id                 String   @id @default(cuid())
-  supplier           String
-  supplierSku        String
-  availableQuantity  Int
-  lastSyncedAt       DateTime @default(now())
+  id                          String   @id @default(cuid())
+  supplier                    String
+  supplierSku                 String
+  availableQuantity           Int
+  stockSpain24h               Int      @default(0)
+  stockCentral3To5Days        Int      @default(0)
+  stockSupplier5To20Days      Int      @default(0)
+  lastSyncedAt                DateTime @default(now())
 
   @@unique([supplier, supplierSku])
 }
@@ -444,20 +447,23 @@ model SupplierPurchaseOrder {
 }
 
 model SupplierPurchaseOrderLine {
-  id                        String                @id @default(cuid())
-  orderId                   String
-  stockItemId               String
-  supplierSku               String
-  name                      String
-  color                     String?
-  size                      String?
-  quantity                  Int
-  supplierAvailableQuantity Int?
-  purchasePrice             Decimal?              @db.Decimal(10, 2)
-  rawDataJson               Json?
-  createdAt                 DateTime              @default(now())
-  order                     SupplierPurchaseOrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
-  stockItem                 StockItem             @relation(fields: [stockItemId], references: [id], onDelete: Cascade)
+  id                             String                @id @default(cuid())
+  orderId                        String
+  stockItemId                    String
+  supplierSku                    String
+  name                           String
+  color                          String?
+  size                           String?
+  quantity                       Int
+  supplierAvailableQuantity      Int?
+  supplierStockSpain24h          Int?
+  supplierStockCentral3To5Days   Int?
+  supplierStockSupplier5To20Days Int?
+  purchasePrice                  Decimal?              @db.Decimal(10, 2)
+  rawDataJson                    Json?
+  createdAt                      DateTime              @default(now())
+  order                          SupplierPurchaseOrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  stockItem                      StockItem             @relation(fields: [stockItemId], references: [id], onDelete: Cascade)
 
   @@index([supplierSku])
 }

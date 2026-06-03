@@ -4297,19 +4297,30 @@ struct SupplierPurchaseLineRow: View {
                     .foregroundStyle(AppTheme.muted)
             }
             Spacer()
-            if let available = line.supplierAvailableQuantity {
-                Text("prov \(available)")
+            VStack(alignment: .trailing, spacing: 4) {
+                Text("x\(line.quantity)")
+                    .font(.headline.weight(.black))
+                    .foregroundStyle(AppTheme.magenta)
+                    .frame(minWidth: 42, alignment: .trailing)
+                supplierStockText
                     .font(.caption2.weight(.bold))
-                    .foregroundStyle(available >= line.quantity ? AppTheme.green : AppTheme.red)
+                    .foregroundStyle((line.supplierAvailableQuantity ?? 0) >= line.quantity ? AppTheme.green : AppTheme.red)
+                    .multilineTextAlignment(.trailing)
             }
-            Text("x\(line.quantity)")
-                .font(.headline.weight(.black))
-                .foregroundStyle(AppTheme.magenta)
-                .frame(minWidth: 42, alignment: .trailing)
         }
         .padding(10)
         .background(AppTheme.surface)
         .clipShape(RoundedRectangle(cornerRadius: 12))
+    }
+
+    private var supplierStockText: Text {
+        if line.supplierStockSpain24h != nil || line.supplierStockCentral3To5Days != nil || line.supplierStockSupplier5To20Days != nil {
+            return Text("ES \(line.supplierStockSpain24h ?? 0) · DE \(line.supplierStockCentral3To5Days ?? 0) · 5-20d \(line.supplierStockSupplier5To20Days ?? 0)")
+        }
+        if let available = line.supplierAvailableQuantity {
+            return Text("prov \(available)")
+        }
+        return Text("prov -")
     }
 }
 
