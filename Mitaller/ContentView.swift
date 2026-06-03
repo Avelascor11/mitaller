@@ -7136,7 +7136,6 @@ struct EconomicsView: View {
     @State private var today: EconomicsSummary?
     @State private var month: EconomicsSummary?
     @State private var custom: EconomicsSummary?
-    @State private var payouts: ShopifyPayoutsSummary?
     @State private var products: [ProductMarginRow] = []
     @State private var loading = false
     @State private var error: String?
@@ -7195,10 +7194,6 @@ struct EconomicsView: View {
                         AllocationPlanCard(summary: summary)
                         ShippingReserveCard(summary: summary)
                         EconomicsSummaryCard(summary: summary)
-                        if let payouts {
-                            ShopifyPayoutsCard(summary: payouts)
-                        }
-                        OrdersBreakdownSection(summary: summary)
                     }
 
                     if !products.isEmpty {
@@ -7241,12 +7236,10 @@ struct EconomicsView: View {
             async let m = client.economicsMonth()
             async let c = client.economicsRange(from: customFrom, to: customTo)
             async let p = client.economicsProducts()
-            async let pay = client.economicsPayouts()
             today = try await t
             month = try await m
             custom = try await c
             products = try await p
-            payouts = try await pay
         } catch let err {
             error = err.localizedDescription
         }
