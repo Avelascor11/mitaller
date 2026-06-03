@@ -330,7 +330,7 @@ export class SupplierOrderService {
     const expectedStyles = this.expectedFalkRossStyles(garmentType, color);
     return articles.find((article) =>
       this.articleMatchesStyle(article, expectedStyles) &&
-      this.normalizedColor(article.color ?? article.productName) === this.normalizedColor(color) &&
+      this.articleMatchesFalkRossColor(article, color) &&
       this.normalizedSize(article.size ?? article.productName) === this.normalizedSize(size)
     );
   }
@@ -343,8 +343,15 @@ export class SupplierOrderService {
   ) {
     const expectedStyles = this.expectedFalkRossStyles(garmentType, color);
     return this.articleMatchesStyle(article, expectedStyles) &&
-      this.normalizedColor(article.color ?? article.productName) === this.normalizedColor(color) &&
+      this.articleMatchesFalkRossColor(article, color) &&
       this.normalizedSize(article.size ?? article.productName) === this.normalizedSize(size);
+  }
+
+  private articleMatchesFalkRossColor(article: { color: string | null; productName: string }, color: string) {
+    const expectedColor = this.normalizedColor(color);
+    const articleColor = article.color ?? article.productName;
+    if (expectedColor === 'AZUL') return this.normalizedToken(articleColor).includes('royal blue');
+    return this.normalizedColor(articleColor) === expectedColor;
   }
 
   private articleMatchesStyle(article: { styleCode: string | null; productName: string }, expectedStyles: string[]) {

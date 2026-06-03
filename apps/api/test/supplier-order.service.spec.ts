@@ -232,6 +232,74 @@ describe('SupplierOrderService', () => {
     }));
   });
 
+  it('resuelve sudadera azul como Royal Blue y no como Nordic Blue', async () => {
+    const { service, prisma } = buildService({
+      matrix: {
+        groups: [{
+          garmentType: 'SUDADERA',
+          color: 'AZUL',
+          sizes: [{
+            stockItemId: 'stock-blue-hoodie',
+            supplierSku: 'FR-HD-BLU-S',
+            subproductName: 'Sudadera Azul - S',
+            size: 'S',
+            recommendedPurchaseQuantity: 1,
+            supplierAvailableQuantity: null,
+            pendingOrderNeed: 1,
+            currentInternalStock: 0,
+            minStockTarget: 0,
+            demandOrders: [{ orderNumber: '#9577' }]
+          }]
+        }]
+      },
+      supplierArticles: [
+        {
+          supplierSku: '237422142',
+          styleCode: '237.42',
+          productName: 'WG005 - ID.333 Hoodie',
+          color: 'Nordic Blue',
+          size: 'S',
+          purchasePrice: null
+        },
+        {
+          supplierSku: '237423002',
+          styleCode: '237.42',
+          productName: 'WG005 - ID.333 Hoodie',
+          color: 'Royal Blue',
+          size: 'S',
+          purchasePrice: null
+        }
+      ],
+      supplierStocks: [
+        { supplierSku: '237422142', availableQuantity: 0, stockSpain24h: 0, stockCentral3To5Days: 0, stockSupplier5To20Days: 0 },
+        { supplierSku: '237423002', availableQuantity: 134, stockSpain24h: 36, stockCentral3To5Days: 98, stockSupplier5To20Days: 1500 }
+      ]
+    });
+
+    await service.generateDailyFalkRossOrder({ source: 'manual' });
+
+    expect(prisma.supplierPurchaseOrder.create).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        rawRequestJson: expect.objectContaining({
+          lines: [expect.objectContaining({ supplierSku: '237423002', quantity: 1 })]
+        }),
+        lines: expect.objectContaining({
+          create: [expect.objectContaining({
+            supplierSku: '237423002',
+            supplierAvailableQuantity: 134,
+            supplierStockSpain24h: 36,
+            supplierStockCentral3To5Days: 98,
+            supplierStockSupplier5To20Days: 1500,
+            rawDataJson: expect.objectContaining({
+              resolvedSupplierSku: '237423002',
+              resolvedStyleCode: '237.42'
+            })
+          })]
+        })
+      })
+    }));
+  });
+
   it('resuelve camiseta marron con Falk & Ross 2000 / 102.09 en lugar de B&C TG002', async () => {
     const { service, prisma } = buildService({
       matrix: {
