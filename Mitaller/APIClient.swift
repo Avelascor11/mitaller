@@ -310,6 +310,17 @@ struct APIClient {
         let request = try jsonRequest(path: "/meta/recommendations/apply", method: "POST", body: body)
         return try await perform(request)
     }
+    func metaPreviewRecommendation(_ body: MetaApplyRecommendationRequest) async throws -> MetaRecommendationPreview {
+        let request = try jsonRequest(path: "/meta/recommendations/preview", method: "POST", body: body)
+        return try await perform(request)
+    }
+    func metaRecommendationHistory(limit: Int = 30) async throws -> [MetaRecommendationActionHistory] {
+        try await get("/meta/recommendations/history?limit=\(limit)")
+    }
+    func metaLearning(from: Date, to: Date) async throws -> MetaLearningSummary {
+        let f = DateFormatter.apiDay
+        return try await get("/meta/learning?from=\(f.string(from: from))&to=\(f.string(from: to))")
+    }
 
     // MARK: - Influencers
     func influencerSummary() async throws -> InfluencerSummary {
@@ -547,6 +558,37 @@ struct MetaApplyRecommendationResult: Decodable {
     let action: String?
     let suggestedDailyBudget: Double?
     let message: String
+}
+
+struct MetaRecommendationPreview: Decodable {
+    let canApply: Bool
+    let targetType: String
+    let targetId: String
+    let severity: String
+    let currentDailyBudget: Double?
+    let suggestedDailyBudget: Double?
+    let currentStatus: String?
+    let nextStatus: String?
+    let impact: String
+    let warnings: [String]
+}
+
+struct MetaRecommendationActionHistory: Decodable, Identifiable {
+    let id: String
+    let recommendationId: String?
+    let targetType: String
+    let targetId: String
+    let severity: String
+    let action: String
+    let message: String
+    let createdAt: Date
+}
+
+struct MetaLearningSummary: Decodable {
+    let headline: String
+    let bullets: [String]
+    let nextAction: String
+    let recommendationCount: Int
 }
 
 struct MetaCampaignDetail: Decodable {

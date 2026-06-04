@@ -71,6 +71,19 @@ export interface MetaRecommendation {
   suggestedDailyBudget: number | null;
 }
 
+export interface MetaRecommendationPreview {
+  canApply: boolean;
+  targetType: 'CAMPAIGN' | 'ADSET' | 'AD';
+  targetId: string;
+  severity: 'SCALE' | 'PAUSE' | 'FIX';
+  currentDailyBudget: number | null;
+  suggestedDailyBudget: number | null;
+  currentStatus: string | null;
+  nextStatus: string | null;
+  impact: string;
+  warnings: string[];
+}
+
 export interface ApplyMetaRecommendationDto {
   targetType: 'CAMPAIGN' | 'ADSET' | 'AD';
   targetId: string;
@@ -1115,10 +1128,12 @@ export class MetaService {
     if (!dto.targetId || !['CAMPAIGN', 'ADSET', 'AD'].includes(dto.targetType)) {
       throw new BadRequestException('Recomendacion sin objetivo aplicable');
     }
+    await this.assertRecommendationSafety(dto);
+    const preview = await this.previewRecommendation(dto);
 
     if (dto.severity === 'PAUSE') {
       await this.graphPost(dto.targetId, { status: 'PAUSED' });
-      return {
+      const response = {
         ok: true,
         applied: true,
         targetType: dto.targetType,
@@ -1126,6 +1141,8 @@ export class MetaService {
         action: 'PAUSED',
         message: 'Se ha pausado en Meta Ads.'
       };
+      await this.recordRecommendationAction(dto, response, preview);
+      return response;
     }
 
     if (dto.severity === 'SCALE') {
@@ -1141,7 +1158,7 @@ export class MetaService {
           budget = +(current / 100 * 1.15).toFixed(2);
         }
         await this.graphPost(dto.targetId, { daily_budget: Math.round(budget * 100) });
-        return {
+        const response = {
           ok: true,
           applied: true,
           targetType: dto.targetType,
@@ -1150,6 +1167,8 @@ export class MetaService {
           suggestedDailyBudget: +budget.toFixed(2),
           message: `Presupuesto diario subido a ${budget.toFixed(2)} €.`
         };
+        await this.recordRecommendationAction(dto, response, preview);
+        return response;
       }
 
       // CAMPAIGN: resolve where the budget lives and bump +15%.
@@ -1159,11 +1178,13 @@ export class MetaService {
         if (campBudget > 0) {
           const next = +(campBudget / 100 * 1.15).toFixed(2);
           await this.graphPost(dto.targetId, { daily_budget: Math.round(next * 100) });
-          return {
+          const response = {
             ok: true, applied: true, targetType: 'CAMPAIGN', targetId: dto.targetId,
             action: 'BUDGET_UPDATED', suggestedDailyBudget: next,
             message: `Presupuesto de campaña subido a ${next.toFixed(2)} €/día.`
           };
+          await this.recordRecommendationAction(dto, response, preview);
+          return response;
         }
         // No CBO → budget lives on adsets. Bump each active adset with a daily budget.
         const adsets = await this.graphGet<{ data: Array<{ id: string; daily_budget?: string; status?: string }> }>(
@@ -1180,11 +1201,13 @@ export class MetaService {
           await this.graphPost(a.id, { daily_budget: Math.round(next * 100) });
           total += next;
         }
-        return {
+        const response = {
           ok: true, applied: true, targetType: 'CAMPAIGN', targetId: dto.targetId,
           action: 'BUDGET_UPDATED', suggestedDailyBudget: +total.toFixed(2),
           message: `Subido +15% en ${targets.length} grupo(s). Nuevo total ${total.toFixed(2)} €/día.`
         };
+        await this.recordRecommendationAction(dto, response, preview);
+        return response;
       }
 
       // AD: budget lives on its parent ad set. Bump that ad set +15%.
@@ -1200,7 +1223,7 @@ export class MetaService {
         }
         const next = +(adsetBudget / 100 * 1.15).toFixed(2);
         await this.graphPost(ad.adset_id, { daily_budget: Math.round(next * 100) });
-        return {
+        const response = {
           ok: true,
           applied: true,
           targetType: 'AD',
@@ -1209,6 +1232,8 @@ export class MetaService {
           suggestedDailyBudget: next,
           message: `Anuncio ganador: presupuesto del grupo "${adset.name ?? ad.adset_id}" subido a ${next.toFixed(2)} €/día.`
         };
+        await this.recordRecommendationAction(dto, response, preview);
+        return response;
       }
 
       throw new BadRequestException('Solo puedo subir presupuesto en campañas o grupos de anuncios.');
@@ -1217,7 +1242,7 @@ export class MetaService {
     if (dto.severity === 'FIX') {
       if (dto.targetType === 'AD') {
         await this.graphPost(dto.targetId, { status: 'PAUSED' });
-        return {
+        const response = {
           ok: true,
           applied: true,
           targetType: dto.targetType,
@@ -1225,10 +1250,12 @@ export class MetaService {
           action: 'AD_PAUSED_FOR_FIX',
           message: 'Anuncio pausado en Meta Ads para cortar gasto mientras revisas creatividad/oferta.'
         };
+        await this.recordRecommendationAction(dto, response, preview);
+        return response;
       }
 
       const result = await this.adjustDailyBudget(dto.targetType, dto.targetId, 0.8);
-      return {
+      const response = {
         ok: true,
         applied: true,
         targetType: dto.targetType,
@@ -1237,15 +1264,121 @@ export class MetaService {
         suggestedDailyBudget: result.total,
         message: result.message
       };
+      await this.recordRecommendationAction(dto, response, preview);
+      return response;
     }
 
-    return {
+    const response = {
       ok: true,
       applied: false,
       targetType: dto.targetType,
       targetId: dto.targetId,
       action: 'NO_AUTOMATIC_ACTION',
       message: 'Esta recomendacion requiere revision manual.'
+    };
+    await this.recordRecommendationAction(dto, response, preview);
+    return response;
+  }
+
+  async previewRecommendation(dto: ApplyMetaRecommendationDto): Promise<MetaRecommendationPreview> {
+    this.assert();
+    if (!dto.targetId || !['CAMPAIGN', 'ADSET', 'AD'].includes(dto.targetType)) {
+      throw new BadRequestException('Recomendacion sin objetivo aplicable');
+    }
+    if (!['SCALE', 'PAUSE', 'FIX'].includes(dto.severity)) {
+      throw new BadRequestException('Esta recomendacion no tiene preview aplicable.');
+    }
+
+    const warnings = await this.recommendationSafetyWarnings(dto);
+    let currentDailyBudget: number | null = null;
+    let suggestedDailyBudget: number | null = null;
+    let currentStatus: string | null = null;
+    let nextStatus: string | null = null;
+    let impact = 'Se aplicara el cambio en Meta Ads.';
+
+    if (dto.severity === 'PAUSE' || (dto.severity === 'FIX' && dto.targetType === 'AD')) {
+      const current = await this.graphGet<{ status?: string; effective_status?: string; name?: string }>(dto.targetId, {
+        fields: 'status,effective_status,name'
+      });
+      currentStatus = current.status ?? current.effective_status ?? null;
+      nextStatus = 'PAUSED';
+      impact = dto.severity === 'FIX'
+        ? `Pausara el anuncio "${current.name ?? dto.targetId}" para cortar gasto mientras revisas la creatividad.`
+        : `Pausara "${current.name ?? dto.targetId}" y dejara de gastar.`;
+    } else {
+      const budgetInfo = await this.resolveEditableDailyBudget(dto);
+      currentDailyBudget = budgetInfo.current;
+      suggestedDailyBudget = dto.severity === 'FIX'
+        ? +(budgetInfo.current * 0.8).toFixed(2)
+        : +(Number(dto.suggestedDailyBudget ?? budgetInfo.current * 1.15)).toFixed(2);
+      const currentBudget = currentDailyBudget;
+      const nextBudget = suggestedDailyBudget;
+      impact = dto.severity === 'FIX'
+        ? `Bajara presupuesto de ${currentBudget.toFixed(2)} € a ${nextBudget.toFixed(2)} €/dia.`
+        : `Subira presupuesto de ${currentBudget.toFixed(2)} € a ${nextBudget.toFixed(2)} €/dia.`;
+    }
+
+    return {
+      canApply: warnings.length === 0,
+      targetType: dto.targetType,
+      targetId: dto.targetId,
+      severity: dto.severity as 'SCALE' | 'PAUSE' | 'FIX',
+      currentDailyBudget,
+      suggestedDailyBudget,
+      currentStatus,
+      nextStatus,
+      impact,
+      warnings
+    };
+  }
+
+  async recommendationHistory(limit = 30) {
+    await this.ensureMetaRecommendationActionTable();
+    const rows = await this.prisma.$queryRawUnsafe<Array<{
+      id: string;
+      recommendation_id: string | null;
+      target_type: string;
+      target_id: string;
+      severity: string;
+      action: string;
+      message: string;
+      before_json: unknown;
+      after_json: unknown;
+      created_at: Date;
+    }>>(
+      `select * from meta_recommendation_actions order by created_at desc limit ${Math.max(1, Math.min(100, Number(limit) || 30))}`
+    );
+    return rows.map((row) => ({
+      id: row.id,
+      recommendationId: row.recommendation_id,
+      targetType: row.target_type,
+      targetId: row.target_id,
+      severity: row.severity,
+      action: row.action,
+      message: row.message,
+      before: row.before_json,
+      after: row.after_json,
+      createdAt: row.created_at
+    }));
+  }
+
+  async learning(from?: string, to?: string) {
+    const summary = await this.summary(from, to);
+    const recs = summary.recommendations ?? [];
+    const active = summary.campaigns.filter((c) => c.status === 'ACTIVE');
+    const winners = active.filter((c) => c.purchases > 0 && (c.roas ?? 0) >= 2.2).sort((a, b) => (b.roas ?? 0) - (a.roas ?? 0));
+    const losers = active.filter((c) => c.spend >= 12 && ((c.purchases === 0) || ((c.roas ?? 0) < 1.1))).sort((a, b) => b.spend - a.spend);
+    const top = summary.bestSellers?.[0];
+    return {
+      headline: winners.length ? `Escalaria con cuidado: ${winners[0].name}` : losers.length ? `Hoy protegeria gasto: ${losers[0].name}` : 'Hoy toca observar sin forzar cambios',
+      bullets: [
+        winners.length ? `${winners.length} campaña(s) con señal buena para escalar poco a poco.` : 'No veo ganadores claros para escalar fuerte.',
+        losers.length ? `${losers.length} campaña(s) gastando con señal floja.` : 'No veo campañas activas claramente peligrosas.',
+        top ? `Producto con mejor señal: ${top.title} (${top.quantity} uds).` : 'Aun no hay producto ganador claro en este rango.',
+        recs.some((r) => r.severity === 'FIX') ? 'Hay arreglos recomendados antes de subir mas presupuesto.' : 'No hay arreglos urgentes detectados.'
+      ],
+      nextAction: recs[0]?.title ?? 'Revisar datos de nuevo manana.',
+      recommendationCount: recs.length
     };
   }
 
@@ -1286,4 +1419,111 @@ export class MetaService {
 
     throw new BadRequestException('No puedo ajustar presupuesto directamente en este objetivo.');
   }
+
+  private async resolveEditableDailyBudget(dto: ApplyMetaRecommendationDto): Promise<{ current: number; targetCount: number }> {
+    if (dto.targetType === 'AD') {
+      const ad = await this.graphGet<{ adset_id?: string }>(dto.targetId, { fields: 'adset_id' });
+      if (!ad.adset_id) throw new BadRequestException('No encuentro el grupo de anuncios asociado.');
+      return this.resolveEditableDailyBudget({ ...dto, targetType: 'ADSET', targetId: ad.adset_id });
+    }
+
+    const current = await this.graphGet<{ daily_budget?: string; name?: string }>(dto.targetId, { fields: 'daily_budget,name' });
+    const ownBudget = Number(current.daily_budget ?? 0);
+    if (ownBudget > 0) return { current: +(ownBudget / 100).toFixed(2), targetCount: 1 };
+
+    if (dto.targetType === 'CAMPAIGN') {
+      const adsets = await this.graphGet<{ data: Array<{ id: string; daily_budget?: string }> }>(
+        `${dto.targetId}/adsets`,
+        { fields: 'daily_budget', limit: '50' }
+      );
+      const budgets = (adsets.data ?? []).map((a) => Number(a.daily_budget ?? 0)).filter((value) => value > 0);
+      if (budgets.length) {
+        return { current: +(budgets.reduce((sum, value) => sum + value, 0) / 100).toFixed(2), targetCount: budgets.length };
+      }
+    }
+
+    throw new BadRequestException('No encuentro presupuesto diario editable para esta recomendacion.');
+  }
+
+  private async assertRecommendationSafety(dto: ApplyMetaRecommendationDto) {
+    const warnings = await this.recommendationSafetyWarnings(dto);
+    if (warnings.length) throw new BadRequestException(warnings.join(' '));
+  }
+
+  private async recommendationSafetyWarnings(dto: ApplyMetaRecommendationDto) {
+    await this.ensureMetaRecommendationActionTable();
+    const since = new Date(Date.now() - 24 * 60 * 60 * 1000);
+    const rows = await this.prisma.$queryRawUnsafe<Array<{ count: string }>>(
+      `select count(*)::text as count from meta_recommendation_actions where target_id = $1 and severity = $2 and created_at >= $3`,
+      dto.targetId,
+      dto.severity,
+      since
+    );
+    const count = Number(rows[0]?.count ?? 0);
+    const warnings: string[] = [];
+    if (dto.severity === 'SCALE' && count >= 2) {
+      warnings.push('Seguridad: esta campaña/grupo/anuncio ya se ha escalado 2 veces en las ultimas 24h.');
+    }
+    if (dto.severity === 'FIX' && count >= 2) {
+      warnings.push('Seguridad: este objetivo ya se ha arreglado 2 veces en las ultimas 24h.');
+    }
+    if (dto.severity === 'PAUSE' && count >= 1) {
+      warnings.push('Seguridad: este objetivo ya fue pausado desde la app en las ultimas 24h.');
+    }
+    return warnings;
+  }
+
+  private async recordRecommendationAction(
+    dto: ApplyMetaRecommendationDto,
+    response: { action?: string | null; message: string; suggestedDailyBudget?: number | null },
+    preview: MetaRecommendationPreview
+  ) {
+    await this.ensureMetaRecommendationActionTable();
+    await this.prisma.$executeRawUnsafe(
+      `insert into meta_recommendation_actions
+       (id, recommendation_id, target_type, target_id, severity, action, message, before_json, after_json, created_at)
+       values ($1,$2,$3,$4,$5,$6,$7,$8::jsonb,$9::jsonb,now())`,
+      cryptoRandomId(),
+      `${dto.targetType}:${dto.targetId}:${dto.severity}`.toLowerCase(),
+      dto.targetType,
+      dto.targetId,
+      dto.severity,
+      response.action ?? 'APPLIED',
+      response.message,
+      JSON.stringify({
+        dailyBudget: preview.currentDailyBudget,
+        status: preview.currentStatus
+      }),
+      JSON.stringify({
+        dailyBudget: response.suggestedDailyBudget ?? preview.suggestedDailyBudget,
+        status: preview.nextStatus,
+        impact: preview.impact
+      })
+    );
+  }
+
+  private async ensureMetaRecommendationActionTable() {
+    await this.prisma.$executeRawUnsafe(`
+      create table if not exists meta_recommendation_actions (
+        id text primary key,
+        recommendation_id text,
+        target_type text not null,
+        target_id text not null,
+        severity text not null,
+        action text not null,
+        message text not null,
+        before_json jsonb,
+        after_json jsonb,
+        created_at timestamptz not null default now()
+      )
+    `);
+    await this.prisma.$executeRawUnsafe(`
+      create index if not exists meta_recommendation_actions_target_created_idx
+      on meta_recommendation_actions (target_id, severity, created_at desc)
+    `);
+  }
+}
+
+function cryptoRandomId() {
+  return `mra_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`;
 }

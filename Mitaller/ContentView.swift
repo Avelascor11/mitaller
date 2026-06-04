@@ -6784,6 +6784,7 @@ struct MetaAdsView: View {
     @Environment(WorkshopStore.self) private var store
     @State private var summary: MetaSummary?
     @State private var health: AdsHealth?
+    @State private var learning: MetaLearningSummary?
     @State private var loading = false
     @State private var error: String?
     @State private var range: MetaRange = .today
@@ -6912,6 +6913,7 @@ struct MetaAdsView: View {
                         }
                         if let health { AdsHealthCard(health: health) }
                         MetaKpiCard(summary: summary)
+                        if let learning { MetaLearningCard(learning: learning) }
                         MetaRecommendationsCard(
                             title: "Recomendaciones",
                             subtitle: "Lectura experta del rendimiento actual",
@@ -7008,8 +7010,10 @@ struct MetaAdsView: View {
             let r = dateRange
             async let s = client.metaSummary(from: r.from, to: r.to)
             async let h = client.adsHealth(from: r.from, to: r.to)
+            async let l = client.metaLearning(from: r.from, to: r.to)
             summary = try await s
             health = try? await h
+            learning = try? await l
         } catch {
             self.error = error.localizedDescription
         }
@@ -7077,6 +7081,45 @@ struct AdsHealthCard: View {
             }
         }
         .glassPanel(padding: 16, accent: color(health.status))
+    }
+}
+
+struct MetaLearningCard: View {
+    let learning: MetaLearningSummary
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 10) {
+                Image(systemName: "brain.head.profile.fill")
+                    .font(.title2)
+                    .foregroundStyle(AppTheme.purple)
+                    .frame(width: 30)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Aprendizaje")
+                        .font(.caption.weight(.black))
+                        .foregroundStyle(AppTheme.purple)
+                    Text(learning.headline)
+                        .font(.subheadline.weight(.heavy))
+                        .foregroundStyle(AppTheme.ink)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                Spacer()
+            }
+            VStack(alignment: .leading, spacing: 7) {
+                ForEach(Array(learning.bullets.enumerated()), id: \.offset) { _, bullet in
+                    Label(bullet, systemImage: "sparkle")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(AppTheme.muted)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            Divider().background(AppTheme.line)
+            Label(learning.nextAction, systemImage: "arrow.turn.down.right")
+                .font(.caption.weight(.heavy))
+                .foregroundStyle(AppTheme.ink)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .glassPanel(padding: 16, accent: AppTheme.purple)
     }
 }
 
@@ -7255,6 +7298,9 @@ struct MetaRecommendationsCard: View {
             }
         }
         .glassPanel(padding: 14, accent: AppTheme.amber)
+        .task {
+            await loadRemoteHistory()
+        }
         .task(id: autoApplyTaskKey) {
             await autoApplyPendingIfNeeded()
         }
@@ -7284,6 +7330,7 @@ struct MetaRecommendationsCard: View {
             let prefix = source == "auto" ? "Auto " : ""
             let decision = recommendation.severity == "PAUSE" ? "pausada" : recommendation.severity == "FIX" ? "arreglada" : "aplicada"
             record(recommendation, decision: prefix + decision, message: result.message)
+            await loadRemoteHistory()
             if reloadAfterApply { onApplied() }
         } catch {
             errorMessage = error.localizedDescription
@@ -7317,6 +7364,25 @@ struct MetaRecommendationsCard: View {
         record(recommendation, decision: "Revision manual", message: recommendation.action)
     }
 
+    private func loadRemoteHistory() async {
+        guard let client = store.apiClient else { return }
+        guard let remote = try? await client.metaRecommendationHistory(limit: 12), !remote.isEmpty else { return }
+        let mapped = remote.map {
+            MetaRecommendationDecision(
+                id: $0.id,
+                recommendationId: $0.recommendationId ?? $0.id,
+                targetName: "\($0.targetType) · \($0.targetId)",
+                title: $0.action,
+                severity: $0.severity,
+                decision: $0.action.lowercased().contains("pause") ? "pausada" : $0.action.lowercased().contains("fix") || $0.action.lowercased().contains("reduced") ? "arreglada" : "aplicada",
+                message: $0.message,
+                createdAt: $0.createdAt
+            )
+        }
+        let existing = Set(history.map(\.id))
+        history = MetaRecommendationDecisionStore.save(mapped.filter { !existing.contains($0.id) } + history)
+    }
+
     private func record(_ recommendation: MetaRecommendation, decision: String, message: String) {
         let entry = MetaRecommendationDecision(
             id: UUID().uuidString,
@@ -7333,14 +7399,22 @@ struct MetaRecommendationsCard: View {
 }
 
 struct MetaRecommendationRow: View {
+    @Environment(WorkshopStore.self) private var store
     let recommendation: MetaRecommendation
     let applying: Bool
     let decision: MetaRecommendationDecision?
     let onApply: () -> Void
     let onManualReview: () -> Void
     @State private var confirming = false
+    @State private var previewing = false
+    @State private var preview: MetaRecommendationPreview?
+    @State private var previewError: String?
 
     private var confirmSummary: String {
+        if let preview {
+            let warnings = preview.warnings.isEmpty ? "" : "\n\nAviso: \(preview.warnings.joined(separator: " "))"
+            return preview.impact + warnings
+        }
         switch recommendation.severity {
         case "SCALE":
             if recommendation.targetType == "CAMPAIGN" {
@@ -7528,6 +7602,37 @@ struct MetaRecommendationRow: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .background((recommendation.isAutomaticallyApplicable ? color : AppTheme.muted).opacity(0.12), in: RoundedRectangle(cornerRadius: 10))
 
+            if let preview {
+                VStack(alignment: .leading, spacing: 4) {
+                    Label("Vista previa del cambio", systemImage: "eye.fill")
+                        .font(.caption.weight(.black))
+                        .foregroundStyle(AppTheme.blue)
+                    Text(preview.impact)
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(AppTheme.ink)
+                        .fixedSize(horizontal: false, vertical: true)
+                    ForEach(preview.warnings, id: \.self) { warning in
+                        Text(warning)
+                            .font(.caption2.weight(.bold))
+                            .foregroundStyle(AppTheme.amber)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+                .padding(10)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(AppTheme.blue.opacity(0.10), in: RoundedRectangle(cornerRadius: 12))
+                .overlay(RoundedRectangle(cornerRadius: 12).stroke(AppTheme.blue.opacity(0.22)))
+            }
+
+            if let previewError {
+                Label(previewError, systemImage: "exclamationmark.triangle.fill")
+                    .font(.caption2.weight(.bold))
+                    .foregroundStyle(AppTheme.red)
+                    .padding(10)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(AppTheme.red.opacity(0.12), in: RoundedRectangle(cornerRadius: 12))
+            }
+
             if let decision {
                 VStack(alignment: .leading, spacing: 4) {
                     Label(isAppliedDecision ? "Aplicada en Meta" : "Revisada", systemImage: isAppliedDecision ? "checkmark.seal.fill" : "checkmark.circle.fill")
@@ -7546,8 +7651,8 @@ struct MetaRecommendationRow: View {
                 .background((isAppliedDecision ? AppTheme.green : AppTheme.blue).opacity(0.12), in: RoundedRectangle(cornerRadius: 12))
                 .overlay(RoundedRectangle(cornerRadius: 12).stroke((isAppliedDecision ? AppTheme.green : AppTheme.blue).opacity(0.25)))
             } else if recommendation.isAutomaticallyApplicable {
-                Button(action: { confirming = true }) {
-                    if applying {
+                Button(action: { Task { await preparePreview() } }) {
+                    if applying || previewing {
                         ProgressView()
                             .frame(maxWidth: .infinity)
                     } else {
@@ -7558,7 +7663,7 @@ struct MetaRecommendationRow: View {
                 }
                 .buttonStyle(.borderedProminent)
                 .tint(color)
-                .disabled(applying)
+                .disabled(applying || previewing)
                 .confirmationDialog(applyTitle, isPresented: $confirming, titleVisibility: .visible) {
                     Button(confirmButtonTitle,
                            role: recommendation.severity == "PAUSE" ? .destructive : nil) {
@@ -7588,6 +7693,27 @@ struct MetaRecommendationRow: View {
         formatter.locale = Locale(identifier: "es_ES")
         formatter.dateFormat = "d MMM HH:mm"
         return formatter.string(from: date)
+    }
+
+    private func preparePreview() async {
+        guard let client = store.apiClient, let targetId = recommendation.targetId else {
+            confirming = true
+            return
+        }
+        previewing = true
+        previewError = nil
+        defer { previewing = false }
+        do {
+            preview = try await client.metaPreviewRecommendation(MetaApplyRecommendationRequest(
+                targetType: recommendation.targetType,
+                targetId: targetId,
+                severity: recommendation.severity,
+                suggestedDailyBudget: recommendation.suggestedDailyBudget
+            ))
+            confirming = true
+        } catch {
+            previewError = error.localizedDescription
+        }
     }
 }
 

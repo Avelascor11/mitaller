@@ -74,4 +74,19 @@ export class MetaController {
   applyRecommendation(@Body() body: ApplyMetaRecommendationDto) {
     return this.meta.applyRecommendation(body);
   }
+
+  @Post('recommendations/preview')
+  previewRecommendation(@Body() body: ApplyMetaRecommendationDto) {
+    return this.meta.previewRecommendation(body);
+  }
+
+  @Get('recommendations/history')
+  recommendationHistory(@Query('limit') limit?: string) {
+    return this.meta.recommendationHistory(Number(limit ?? 30));
+  }
+
+  @Get('learning')
+  learning(@Query('from') from?: string, @Query('to') to?: string) {
+    return this.meta.learning(from, to);
+  }
 }

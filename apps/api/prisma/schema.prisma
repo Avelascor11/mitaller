@@ -168,6 +168,22 @@ model User {
   activityLogs    ActivityLog[]
 }
 
+model MetaRecommendationAction {
+  id               String   @id
+  recommendationId String?  @map("recommendation_id")
+  targetType       String   @map("target_type")
+  targetId         String   @map("target_id")
+  severity         String
+  action           String
+  message          String
+  beforeJson       Json?    @map("before_json")
+  afterJson        Json?    @map("after_json")
+  createdAt        DateTime @default(now()) @map("created_at")
+
+  @@index([targetId, severity, createdAt])
+  @@map("meta_recommendation_actions")
+}
+
 model Order {
   id                  String             @id @default(cuid())
   shopifyOrderId      String             @unique
