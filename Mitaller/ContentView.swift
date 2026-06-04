@@ -6913,7 +6913,8 @@ struct MetaAdsView: View {
                         MetaRecommendationsCard(
                             title: "Recomendaciones",
                             subtitle: "Lectura experta del rendimiento actual",
-                            recommendations: summary.recommendations ?? []
+                            recommendations: summary.recommendations ?? [],
+                            onApplied: { Task { await reload() } }
                         )
 
                         if !summary.campaigns.isEmpty {
@@ -7064,9 +7065,14 @@ struct MetaStat: View {
 }
 
 struct MetaRecommendationsCard: View {
+    @Environment(WorkshopStore.self) private var store
     let title: String
     let subtitle: String
     let recommendations: [MetaRecommendation]
+    let onApplied: () -> Void
+    @State private var applyingId: String?
+    @State private var resultMessage: String?
+    @State private var errorMessage: String?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -7105,16 +7111,65 @@ struct MetaRecommendationsCard: View {
                 .background(AppTheme.surfaceSoft, in: RoundedRectangle(cornerRadius: 14))
             } else {
                 ForEach(recommendations.prefix(6)) { recommendation in
-                    MetaRecommendationRow(recommendation: recommendation)
+                    MetaRecommendationRow(
+                        recommendation: recommendation,
+                        applying: applyingId == recommendation.id,
+                        onApply: { Task { await apply(recommendation) } }
+                    )
                 }
+            }
+
+            if let resultMessage {
+                Label(resultMessage, systemImage: "checkmark.circle.fill")
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(AppTheme.green)
+                    .padding(10)
+                    .background(AppTheme.green.opacity(0.12), in: RoundedRectangle(cornerRadius: 12))
+            }
+
+            if let errorMessage {
+                Label(errorMessage, systemImage: "exclamationmark.triangle.fill")
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(AppTheme.red)
+                    .padding(10)
+                    .background(AppTheme.red.opacity(0.12), in: RoundedRectangle(cornerRadius: 12))
             }
         }
         .glassPanel(padding: 14, accent: AppTheme.amber)
+    }
+
+    private func apply(_ recommendation: MetaRecommendation) async {
+        guard let client = store.apiClient else {
+            errorMessage = "API no configurada"
+            return
+        }
+        guard recommendation.isAutomaticallyApplicable, let targetId = recommendation.targetId else {
+            errorMessage = "Esta recomendacion requiere revision manual"
+            return
+        }
+        applyingId = recommendation.id
+        resultMessage = nil
+        errorMessage = nil
+        defer { applyingId = nil }
+        do {
+            let result = try await client.metaApplyRecommendation(MetaApplyRecommendationRequest(
+                targetType: recommendation.targetType,
+                targetId: targetId,
+                severity: recommendation.severity,
+                suggestedDailyBudget: recommendation.suggestedDailyBudget
+            ))
+            resultMessage = result.message
+            onApplied()
+        } catch {
+            errorMessage = error.localizedDescription
+        }
     }
 }
 
 struct MetaRecommendationRow: View {
     let recommendation: MetaRecommendation
+    let applying: Bool
+    let onApply: () -> Void
 
     private var color: Color {
         switch recommendation.severity {
@@ -7143,6 +7198,14 @@ struct MetaRecommendationRow: View {
         case "FIX": "ARREGLAR"
         case "WATCH": "VIGILAR"
         default: "INFO"
+        }
+    }
+
+    private var applyTitle: String {
+        switch recommendation.severity {
+        case "SCALE": "Aplicar subida"
+        case "PAUSE": "Pausar ahora"
+        default: "Manual"
         }
     }
 
@@ -7182,6 +7245,21 @@ struct MetaRecommendationRow: View {
                 .font(.caption.weight(.bold))
                 .foregroundStyle(color)
                 .fixedSize(horizontal: false, vertical: true)
+            if recommendation.isAutomaticallyApplicable {
+                Button(action: onApply) {
+                    if applying {
+                        ProgressView()
+                            .frame(maxWidth: .infinity)
+                    } else {
+                        Label(applyTitle, systemImage: recommendation.severity == "PAUSE" ? "pause.fill" : "arrow.up.right")
+                            .font(.caption.weight(.heavy))
+                            .frame(maxWidth: .infinity)
+                    }
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(color)
+                .disabled(applying)
+            }
         }
         .padding(12)
         .background(AppTheme.surfaceSoft, in: RoundedRectangle(cornerRadius: 14))
@@ -7328,7 +7406,8 @@ struct MetaCampaignDetailView: View {
                     MetaRecommendationsCard(
                         title: "Que haria ahora",
                         subtitle: "Campaña, grupos y anuncios de esta vista",
-                        recommendations: detail.recommendations ?? []
+                        recommendations: detail.recommendations ?? [],
+                        onApplied: { Task { await reload() } }
                     )
 
                     HStack(spacing: 10) {

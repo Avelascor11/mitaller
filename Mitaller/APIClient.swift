@@ -301,6 +301,10 @@ struct APIClient {
         let request = try jsonRequest(path: "/meta/campaigns/\(Self.pathSegment(id))/status", method: "POST", body: MetaStatusRequest(status: status))
         let _: EmptyResponse = try await perform(request)
     }
+    func metaApplyRecommendation(_ body: MetaApplyRecommendationRequest) async throws -> MetaApplyRecommendationResult {
+        let request = try jsonRequest(path: "/meta/recommendations/apply", method: "POST", body: body)
+        return try await perform(request)
+    }
 
     // MARK: - Influencers
     func influencerSummary() async throws -> InfluencerSummary {
@@ -480,6 +484,30 @@ struct MetaRecommendation: Decodable, Identifiable {
     let priority: Int
     let currentDailyBudget: Double?
     let suggestedDailyBudget: Double?
+
+    var isAutomaticallyApplicable: Bool {
+        guard targetId != nil else { return false }
+        if severity == "PAUSE" { return targetType == "CAMPAIGN" || targetType == "ADSET" || targetType == "AD" }
+        if severity == "SCALE" { return targetType == "ADSET" && suggestedDailyBudget != nil }
+        return false
+    }
+}
+
+struct MetaApplyRecommendationRequest: Encodable {
+    let targetType: String
+    let targetId: String
+    let severity: String
+    let suggestedDailyBudget: Double?
+}
+
+struct MetaApplyRecommendationResult: Decodable {
+    let ok: Bool
+    let applied: Bool
+    let targetType: String?
+    let targetId: String?
+    let action: String?
+    let suggestedDailyBudget: Double?
+    let message: String
 }
 
 struct MetaCampaignDetail: Decodable {

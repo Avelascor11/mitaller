@@ -1,6 +1,6 @@
 import { Body, Controller, Get, Headers, Param, Post, Query, Req, UnauthorizedException } from '@nestjs/common';
 import type { Request } from 'express';
-import { CreateCampaignDto, MetaService } from './meta.service';
+import { ApplyMetaRecommendationDto, CreateCampaignDto, MetaService } from './meta.service';
 
 /** Mobile app routes — no JWT (internal Railway URL), like mobile-returns. */
 @Controller('meta')
@@ -68,5 +68,10 @@ export class MetaController {
   @Post('campaigns/:id/status')
   setStatus(@Param('id') id: string, @Body() body: { status: 'ACTIVE' | 'PAUSED' }) {
     return this.meta.setCampaignStatus(id, body.status);
+  }
+
+  @Post('recommendations/apply')
+  applyRecommendation(@Body() body: ApplyMetaRecommendationDto) {
+    return this.meta.applyRecommendation(body);
   }
 }

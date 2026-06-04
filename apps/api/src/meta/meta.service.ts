@@ -70,6 +70,13 @@ export interface MetaRecommendation {
   suggestedDailyBudget: number | null;
 }
 
+export interface ApplyMetaRecommendationDto {
+  targetType: 'CAMPAIGN' | 'ADSET' | 'AD';
+  targetId: string;
+  severity: 'SCALE' | 'PAUSE' | 'WATCH' | 'FIX' | 'INFO';
+  suggestedDailyBudget?: number | null;
+}
+
 export interface BestSeller {
   sku: string | null;
   title: string;
@@ -1095,5 +1102,53 @@ export class MetaService {
     this.assert();
     await this.graphPost(campaignId, { status });
     return { campaignId, status };
+  }
+
+  async applyRecommendation(dto: ApplyMetaRecommendationDto) {
+    this.assert();
+    if (!dto.targetId || !['CAMPAIGN', 'ADSET', 'AD'].includes(dto.targetType)) {
+      throw new BadRequestException('Recomendacion sin objetivo aplicable');
+    }
+
+    if (dto.severity === 'PAUSE') {
+      await this.graphPost(dto.targetId, { status: 'PAUSED' });
+      return {
+        ok: true,
+        applied: true,
+        targetType: dto.targetType,
+        targetId: dto.targetId,
+        action: 'PAUSED',
+        message: 'Se ha pausado en Meta Ads.'
+      };
+    }
+
+    if (dto.severity === 'SCALE') {
+      if (dto.targetType !== 'ADSET') {
+        throw new BadRequestException('Solo puedo subir presupuesto automaticamente en grupos de anuncios con presupuesto diario');
+      }
+      const budget = Number(dto.suggestedDailyBudget ?? 0);
+      if (!Number.isFinite(budget) || budget <= 0) {
+        throw new BadRequestException('La recomendacion no incluye presupuesto sugerido valido');
+      }
+      await this.graphPost(dto.targetId, { daily_budget: Math.round(budget * 100) });
+      return {
+        ok: true,
+        applied: true,
+        targetType: dto.targetType,
+        targetId: dto.targetId,
+        action: 'BUDGET_UPDATED',
+        suggestedDailyBudget: +budget.toFixed(2),
+        message: `Presupuesto diario actualizado a ${budget.toFixed(2)} €.`
+      };
+    }
+
+    return {
+      ok: true,
+      applied: false,
+      targetType: dto.targetType,
+      targetId: dto.targetId,
+      action: 'NO_AUTOMATIC_ACTION',
+      message: 'Esta recomendacion requiere revision manual.'
+    };
   }
 }
