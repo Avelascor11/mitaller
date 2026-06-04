@@ -513,6 +513,7 @@ struct MetaRecommendation: Decodable, Identifiable {
     let title: String
     let reason: String
     let action: String
+    let solution: String?
     let metricLabel: String
     let priority: Int
     let currentDailyBudget: Double?
@@ -522,6 +523,9 @@ struct MetaRecommendation: Decodable, Identifiable {
         guard targetId != nil else { return false }
         if severity == "PAUSE" { return targetType == "CAMPAIGN" || targetType == "ADSET" || targetType == "AD" }
         if severity == "SCALE" {
+            return targetType == "CAMPAIGN" || targetType == "ADSET" || targetType == "AD"
+        }
+        if severity == "FIX" {
             return targetType == "CAMPAIGN" || targetType == "ADSET" || targetType == "AD"
         }
         return false

@@ -64,6 +64,7 @@ export interface MetaRecommendation {
   title: string;
   reason: string;
   action: string;
+  solution?: string;
   metricLabel: string;
   priority: number;
   currentDailyBudget: number | null;
@@ -773,6 +774,7 @@ export class MetaService {
         title: 'ROAS global bajo',
         reason: `El ROAS global del rango es ${accountRoas.toFixed(2)}x.`,
         action: 'No escales presupuesto general; concentra gasto en campañas con compras y pausa pruebas flojas.',
+        solution: 'Solucion: revisar las campañas con peor ROAS, bajar presupuesto en las flojas y mantener solo las que traen compras.',
         metricLabel: `${accountRoas.toFixed(2)}x ROAS`,
         priority: 88
       }));
@@ -901,6 +903,7 @@ export class MetaService {
         title: `Rentabilidad floja en este ${label}`,
         reason: `${input.targetName} consigue compras, pero con ROAS ${input.roas?.toFixed(2) ?? '0.00'}x.`,
         action: 'No escales. Revisa margen, oferta, precio y landing antes de meter mas presupuesto.',
+        solution: 'Solucion aplicable: bajar el presupuesto un 20% para proteger margen mientras revisas oferta, precio y pagina.',
         metricLabel: `${input.roas?.toFixed(2) ?? '0.00'}x ROAS`,
         priority: 84
       }));
@@ -933,6 +936,9 @@ export class MetaService {
         title: `CTR bajo en este ${label}`,
         reason: `${input.targetName} tiene CTR ${input.ctr?.toFixed(2)}% con ${input.impressions} impresiones.`,
         action: 'Cambia gancho, primera imagen/video o texto inicial. El problema parece mas creativo que presupuesto.',
+        solution: input.targetType === 'AD'
+          ? 'Solucion aplicable: pausar este anuncio para que deje de gastar mientras preparas una variante con mejor gancho.'
+          : 'Solucion aplicable: bajar el presupuesto un 20% mientras cambias creatividades o copys dentro de este conjunto.',
         metricLabel: `${input.ctr?.toFixed(2)}% CTR`,
         priority: 72
       }));
@@ -1208,6 +1214,31 @@ export class MetaService {
       throw new BadRequestException('Solo puedo subir presupuesto en campañas o grupos de anuncios.');
     }
 
+    if (dto.severity === 'FIX') {
+      if (dto.targetType === 'AD') {
+        await this.graphPost(dto.targetId, { status: 'PAUSED' });
+        return {
+          ok: true,
+          applied: true,
+          targetType: dto.targetType,
+          targetId: dto.targetId,
+          action: 'AD_PAUSED_FOR_FIX',
+          message: 'Anuncio pausado en Meta Ads para cortar gasto mientras revisas creatividad/oferta.'
+        };
+      }
+
+      const result = await this.adjustDailyBudget(dto.targetType, dto.targetId, 0.8);
+      return {
+        ok: true,
+        applied: true,
+        targetType: dto.targetType,
+        targetId: dto.targetId,
+        action: 'BUDGET_REDUCED_FOR_FIX',
+        suggestedDailyBudget: result.total,
+        message: result.message
+      };
+    }
+
     return {
       ok: true,
       applied: false,
@@ -1216,5 +1247,43 @@ export class MetaService {
       action: 'NO_AUTOMATIC_ACTION',
       message: 'Esta recomendacion requiere revision manual.'
     };
+  }
+
+  private async adjustDailyBudget(targetType: 'CAMPAIGN' | 'ADSET' | 'AD', targetId: string, multiplier: number) {
+    if (targetType === 'ADSET') {
+      const adset = await this.graphGet<{ daily_budget?: string; name?: string }>(targetId, { fields: 'daily_budget,name' });
+      const current = Number(adset.daily_budget ?? 0);
+      if (current <= 0) throw new BadRequestException('Este grupo no tiene presupuesto diario editable.');
+      const next = +(current / 100 * multiplier).toFixed(2);
+      await this.graphPost(targetId, { daily_budget: Math.round(next * 100) });
+      return { total: next, message: `Presupuesto de "${adset.name ?? targetId}" bajado a ${next.toFixed(2)} €/día.` };
+    }
+
+    if (targetType === 'CAMPAIGN') {
+      const campaign = await this.graphGet<{ daily_budget?: string; name?: string }>(targetId, { fields: 'daily_budget,name' });
+      const campBudget = Number(campaign.daily_budget ?? 0);
+      if (campBudget > 0) {
+        const next = +(campBudget / 100 * multiplier).toFixed(2);
+        await this.graphPost(targetId, { daily_budget: Math.round(next * 100) });
+        return { total: next, message: `Presupuesto de campaña bajado a ${next.toFixed(2)} €/día.` };
+      }
+
+      const adsets = await this.graphGet<{ data: Array<{ id: string; daily_budget?: string; name?: string }> }>(
+        `${targetId}/adsets`,
+        { fields: 'daily_budget,name', limit: '50' }
+      );
+      const targets = (adsets.data ?? []).filter((a) => Number(a.daily_budget ?? 0) > 0);
+      if (!targets.length) throw new BadRequestException('Esta campaña no tiene presupuesto diario editable.');
+
+      let total = 0;
+      for (const a of targets) {
+        const next = +(Number(a.daily_budget) / 100 * multiplier).toFixed(2);
+        await this.graphPost(a.id, { daily_budget: Math.round(next * 100) });
+        total += next;
+      }
+      return { total: +total.toFixed(2), message: `Presupuesto bajado un 20% en ${targets.length} grupo(s). Nuevo total ${total.toFixed(2)} €/día.` };
+    }
+
+    throw new BadRequestException('No puedo ajustar presupuesto directamente en este objetivo.');
   }
 }

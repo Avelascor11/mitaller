@@ -7141,6 +7141,7 @@ struct MetaRecommendationsCard: View {
         recommendations
             .prefix(6)
             .filter { $0.isAutomaticallyApplicable }
+            .filter { $0.severity != "FIX" }
             .filter { recommendation in
                 !history.contains { $0.recommendationId == recommendation.id }
             }
@@ -7281,7 +7282,8 @@ struct MetaRecommendationsCard: View {
             ))
             resultMessage = result.message
             let prefix = source == "auto" ? "Auto " : ""
-            record(recommendation, decision: prefix + (recommendation.severity == "PAUSE" ? "pausada" : "aplicada"), message: result.message)
+            let decision = recommendation.severity == "PAUSE" ? "pausada" : recommendation.severity == "FIX" ? "arreglada" : "aplicada"
+            record(recommendation, decision: prefix + decision, message: result.message)
             if reloadAfterApply { onApplied() }
         } catch {
             errorMessage = error.localizedDescription
@@ -7350,6 +7352,11 @@ struct MetaRecommendationRow: View {
             return "Se subirá el presupuesto diario un +15% en \(recommendation.targetName). Se aplica YA en Meta Ads."
         case "PAUSE":
             return "Se PAUSARÁ \(recommendation.targetName) en Meta Ads ahora mismo. Dejará de gastar y de mostrarse."
+        case "FIX":
+            if recommendation.targetType == "AD" {
+                return "Se pausará este anuncio en Meta Ads para cortar gasto mientras preparas una variante mejor. El cambio se aplica YA."
+            }
+            return "Se bajará el presupuesto diario un 20% en \(recommendation.targetName) para proteger gasto mientras revisas la causa. El cambio se aplica YA."
         default:
             return "Se aplicará el cambio en Meta Ads."
         }
@@ -7373,6 +7380,11 @@ struct MetaRecommendationRow: View {
             return "Impacto: subida de presupuesto pendiente de calcular."
         case "PAUSE":
             return "Impacto: deja de gastar y de mostrarse desde Meta Ads."
+        case "FIX":
+            if recommendation.targetType == "AD" {
+                return "Impacto: pausa el anuncio problemático para cortar gasto."
+            }
+            return "Impacto: baja presupuesto diario un 20% mientras corriges oferta, landing o creatividad."
         default:
             return manualReason
         }
@@ -7384,7 +7396,7 @@ struct MetaRecommendationRow: View {
         }
         switch recommendation.severity {
         case "FIX":
-            return "Revision manual: hay que corregir configuracion o creatividad antes de tocar presupuesto."
+            return "Solucion: puedes aplicar un arreglo seguro desde la app."
         case "WATCH":
             return "Revision manual: aun no hay señal suficiente para tocar Meta Ads automaticamente."
         case "INFO":
@@ -7433,7 +7445,25 @@ struct MetaRecommendationRow: View {
         switch recommendation.severity {
         case "SCALE": "Aplicar subida"
         case "PAUSE": "Pausar ahora"
+        case "FIX": "Ver solución"
         default: "Manual"
+        }
+    }
+
+    private var confirmButtonTitle: String {
+        switch recommendation.severity {
+        case "SCALE": "Sí, subir presupuesto"
+        case "PAUSE": "Pausar ahora"
+        case "FIX": recommendation.targetType == "AD" ? "Pausar anuncio" : "Bajar presupuesto 20%"
+        default: "Aplicar"
+        }
+    }
+
+    private var applyIcon: String {
+        switch recommendation.severity {
+        case "PAUSE": "pause.fill"
+        case "FIX": "wrench.and.screwdriver.fill"
+        default: "arrow.up.right"
         }
     }
 
@@ -7441,6 +7471,7 @@ struct MetaRecommendationRow: View {
         guard let decision else { return false }
         return decision.decision.lowercased().contains("aplicada")
             || decision.decision.lowercased().contains("pausada")
+            || decision.decision.lowercased().contains("arreglada")
     }
 
     var body: some View {
@@ -7479,6 +7510,16 @@ struct MetaRecommendationRow: View {
                 .font(.caption.weight(.bold))
                 .foregroundStyle(color)
                 .fixedSize(horizontal: false, vertical: true)
+            if let solution = recommendation.solution, !solution.isEmpty {
+                Label(solution, systemImage: "lightbulb.max.fill")
+                    .font(.caption2.weight(.bold))
+                    .foregroundStyle(AppTheme.ink)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 8)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(AppTheme.surfaceSoft.opacity(0.82), in: RoundedRectangle(cornerRadius: 10))
+                    .overlay(RoundedRectangle(cornerRadius: 10).stroke(color.opacity(0.18)))
+            }
             Label(impactText, systemImage: recommendation.isAutomaticallyApplicable ? "bolt.fill" : "hand.raised.fill")
                 .font(.caption2.weight(.bold))
                 .foregroundStyle(recommendation.isAutomaticallyApplicable ? color : AppTheme.muted)
@@ -7510,7 +7551,7 @@ struct MetaRecommendationRow: View {
                         ProgressView()
                             .frame(maxWidth: .infinity)
                     } else {
-                        Label(applyTitle, systemImage: recommendation.severity == "PAUSE" ? "pause.fill" : "arrow.up.right")
+                        Label(applyTitle, systemImage: applyIcon)
                             .font(.caption.weight(.heavy))
                             .frame(maxWidth: .infinity)
                     }
@@ -7519,7 +7560,7 @@ struct MetaRecommendationRow: View {
                 .tint(color)
                 .disabled(applying)
                 .confirmationDialog(applyTitle, isPresented: $confirming, titleVisibility: .visible) {
-                    Button(recommendation.severity == "PAUSE" ? "Pausar ahora" : "Sí, subir presupuesto",
+                    Button(confirmButtonTitle,
                            role: recommendation.severity == "PAUSE" ? .destructive : nil) {
                         onApply()
                     }
