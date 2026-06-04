@@ -7900,10 +7900,8 @@ struct EconomicsView: View {
                     if loading && current == nil {
                         ProgressView().frame(maxWidth: .infinity)
                     } else if let summary = current {
-                        CashFlowHealthCard(summary: summary)
-                        AllocationPlanCard(summary: summary)
-                        ShippingReserveCard(summary: summary)
-                        EconomicsSummaryCard(summary: summary)
+                        EconomicsHeroCard(summary: summary)
+                        ReservasCard(summary: summary)
                     }
 
                     if !products.isEmpty {
@@ -9319,6 +9317,91 @@ struct ShopifyPayoutLineRow: View {
         .padding(10)
         .background(AppTheme.surface)
         .clipShape(RoundedRectangle(cornerRadius: 12))
+    }
+}
+
+struct EconomicsHeroCard: View {
+    let summary: EconomicsSummary
+    private var color: Color {
+        switch summary.cashStatus {
+        case "HEALTHY": AppTheme.green
+        case "WATCH": AppTheme.amber
+        default: AppTheme.red
+        }
+    }
+    private var statusTitle: String {
+        switch summary.cashStatus {
+        case "HEALTHY": "Caja sana"
+        case "WATCH": "Caja justa"
+        default: "No retirar"
+        }
+    }
+    private var statusMessage: String {
+        switch summary.cashStatus {
+        case "HEALTHY": "Puedes tocar la caja libre; costes y reservas cubiertos."
+        case "WATCH": "Aparta primero las reservas. Sé prudente."
+        default: "No retires: primero cubre costes y reservas."
+        }
+    }
+    var body: some View {
+        VStack(spacing: 14) {
+            HStack(spacing: 10) {
+                MoneyTile(label: "Ingresos", value: summary.grossRevenue, currency: summary.currency, color: AppTheme.blue)
+                MoneyTile(label: "Margen", value: summary.netMargin, currency: summary.currency, color: summary.netMargin >= 0 ? AppTheme.ink : AppTheme.red)
+                MoneyTile(label: "Caja libre", value: summary.cashFree, currency: summary.currency, color: color)
+            }
+            Divider().background(AppTheme.line)
+            HStack(spacing: 8) {
+                Image(systemName: summary.cashStatus == "HEALTHY" ? "checkmark.seal.fill" : "exclamationmark.triangle.fill")
+                    .foregroundStyle(color)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(statusTitle).font(.subheadline.weight(.heavy)).foregroundStyle(color)
+                    Text(statusMessage).font(.caption2).foregroundStyle(AppTheme.muted)
+                }
+                Spacer()
+                if let pct = summary.netMarginPct {
+                    Text(String(format: "%.0f%%", pct))
+                        .font(.headline.weight(.heavy))
+                        .foregroundStyle(pct >= 0 ? AppTheme.green : AppTheme.red)
+                }
+            }
+        }
+        .glassPanel(padding: 16, accent: color)
+    }
+}
+
+struct ReservasCard: View {
+    let summary: EconomicsSummary
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Label("Apartar", systemImage: "lock.fill").font(.subheadline.weight(.heavy)).foregroundStyle(AppTheme.ink)
+                Spacer()
+                Text(formatMoney(summary.cashOut, currency: summary.currency))
+                    .font(.system(size: 20, weight: .heavy, design: .rounded)).foregroundStyle(AppTheme.amber)
+            }
+            Divider().background(AppTheme.line)
+            VStack(spacing: 8) {
+                ReserveLine(label: "Coste producto + merma", value: summary.replacementReserve, currency: summary.currency, color: AppTheme.blue)
+                ReserveLine(label: "Envíos", value: summary.shippingCost, currency: summary.currency, color: AppTheme.amber)
+                ReserveLine(label: "Comisiones Shopify", value: summary.shopifyFee, currency: summary.currency, color: AppTheme.purple)
+                ReserveLine(label: "Reserva fiscal \(Int((summary.taxReserveRate * 100).rounded()))%", value: summary.taxReserve, currency: summary.currency, color: AppTheme.red)
+                if let ad = summary.adSpend, ad > 0 {
+                    ReserveLine(label: "Gasto Meta Ads", value: ad, currency: summary.currency, color: AppTheme.amber)
+                }
+            }
+            if let reserve = summary.adsReserve, reserve > 0 {
+                HStack(spacing: 8) {
+                    Image(systemName: "megaphone.fill").foregroundStyle(AppTheme.amber)
+                    Text("Saldo Meta pendiente de cobro").font(.caption.weight(.semibold)).foregroundStyle(AppTheme.muted)
+                    Spacer()
+                    Text(formatMoney(reserve, currency: summary.currency)).font(.subheadline.weight(.heavy)).foregroundStyle(AppTheme.amber)
+                }
+                .padding(10)
+                .background(AppTheme.amber.opacity(0.12), in: RoundedRectangle(cornerRadius: 10))
+            }
+        }
+        .glassPanel(padding: 16, accent: AppTheme.amber)
     }
 }
 

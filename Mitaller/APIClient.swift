@@ -942,6 +942,8 @@ struct EconomicsSummary: Decodable {
     let netMargin: Double
     let netMarginPct: Double?
     let shippingReserve: Double
+    let adSpend: Double?
+    let adsReserve: Double?
     let orderCount: Int
     let orders: [OrderBreakdown]
 }

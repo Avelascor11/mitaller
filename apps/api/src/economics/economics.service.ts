@@ -575,7 +575,7 @@ export class EconomicsService {
     let print = 0;
     let description = '';
     if (isSudadera) {
-      blank = 6.79;
+      blank = 6.60;
       if (isBlack) {
         print = 2.25 + 0.45;
         description = 'Sudadera negra (DTF espalda+frontal)';
@@ -584,7 +584,7 @@ export class EconomicsService {
         description = 'Sudadera blanca (DTG)';
       }
     } else if (isCamiseta) {
-      blank = 2.79;
+      blank = 2.73;
       if (isBlack) {
         print = 2.25 + 0.45;
         description = 'Camiseta negra (DTF espalda+frontal)';
