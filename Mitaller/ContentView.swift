@@ -7359,6 +7359,9 @@ struct MetaRecommendationRow: View {
             if recommendation.targetType == "CAMPAIGN" {
                 return "Impacto: sube presupuesto diario un 15% en campaña o grupos activos."
             }
+            if recommendation.targetType == "AD" {
+                return "Impacto: sube un 15% el presupuesto del grupo donde esta este anuncio."
+            }
             if let current = recommendation.currentDailyBudget, let suggested = recommendation.suggestedDailyBudget {
                 return "Impacto: \(String(format: "%.2f €", current)) -> \(String(format: "%.2f €", suggested)) al dia."
             }
@@ -7386,7 +7389,7 @@ struct MetaRecommendationRow: View {
             return "Informativo: sirve para entender el rendimiento, no para aplicar cambios."
         case "SCALE":
             if recommendation.targetType == "AD" {
-                return "Revision manual: Meta no permite subir presupuesto a nivel anuncio."
+                return "Impacto: sube un 15% el presupuesto del grupo donde esta este anuncio."
             }
             return "Revision manual: falta presupuesto sugerido editable."
         default:

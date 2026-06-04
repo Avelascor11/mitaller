@@ -944,9 +944,9 @@ export class MetaService {
         targetId: input.targetId,
         targetName: input.targetName,
         severity: 'INFO',
-        title: `Aun falta muestra en este ${label}`,
+        title: `Aun no hay suficientes datos en este ${label}`,
         reason: `${input.targetName} solo lleva ${this.money(input.spend)} de gasto.`,
-        action: 'No tomes decisiones fuertes todavia; espera mas datos salvo que veas un error claro.',
+        action: 'Dejalo correr un poco mas antes de decidir; todavia no hay gasto ni impresiones suficientes.',
         metricLabel: `${this.money(input.spend)} gastados`,
         priority: 30
       }));
@@ -1125,9 +1125,14 @@ export class MetaService {
     if (dto.severity === 'SCALE') {
       // ADSET: bump the suggested daily budget directly.
       if (dto.targetType === 'ADSET') {
-        const budget = Number(dto.suggestedDailyBudget ?? 0);
+        let budget = Number(dto.suggestedDailyBudget ?? 0);
         if (!Number.isFinite(budget) || budget <= 0) {
-          throw new BadRequestException('La recomendacion no incluye presupuesto sugerido valido');
+          const adset = await this.graphGet<{ daily_budget?: string }>(dto.targetId, { fields: 'daily_budget' });
+          const current = Number(adset.daily_budget ?? 0);
+          if (current <= 0) {
+            throw new BadRequestException('Este grupo no tiene presupuesto diario editable.');
+          }
+          budget = +(current / 100 * 1.15).toFixed(2);
         }
         await this.graphPost(dto.targetId, { daily_budget: Math.round(budget * 100) });
         return {
@@ -1173,6 +1178,30 @@ export class MetaService {
           ok: true, applied: true, targetType: 'CAMPAIGN', targetId: dto.targetId,
           action: 'BUDGET_UPDATED', suggestedDailyBudget: +total.toFixed(2),
           message: `Subido +15% en ${targets.length} grupo(s). Nuevo total ${total.toFixed(2)} €/día.`
+        };
+      }
+
+      // AD: budget lives on its parent ad set. Bump that ad set +15%.
+      if (dto.targetType === 'AD') {
+        const ad = await this.graphGet<{ adset_id?: string; name?: string }>(dto.targetId, { fields: 'adset_id,name' });
+        if (!ad.adset_id) {
+          throw new BadRequestException('No encuentro el grupo de anuncios asociado a este anuncio.');
+        }
+        const adset = await this.graphGet<{ daily_budget?: string; name?: string }>(ad.adset_id, { fields: 'daily_budget,name' });
+        const adsetBudget = Number(adset.daily_budget ?? 0);
+        if (adsetBudget <= 0) {
+          throw new BadRequestException('El grupo de este anuncio no tiene presupuesto diario editable.');
+        }
+        const next = +(adsetBudget / 100 * 1.15).toFixed(2);
+        await this.graphPost(ad.adset_id, { daily_budget: Math.round(next * 100) });
+        return {
+          ok: true,
+          applied: true,
+          targetType: 'AD',
+          targetId: dto.targetId,
+          action: 'PARENT_ADSET_BUDGET_UPDATED',
+          suggestedDailyBudget: next,
+          message: `Anuncio ganador: presupuesto del grupo "${adset.name ?? ad.adset_id}" subido a ${next.toFixed(2)} €/día.`
         };
       }
 

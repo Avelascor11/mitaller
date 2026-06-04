@@ -522,9 +522,7 @@ struct MetaRecommendation: Decodable, Identifiable {
         guard targetId != nil else { return false }
         if severity == "PAUSE" { return targetType == "CAMPAIGN" || targetType == "ADSET" || targetType == "AD" }
         if severity == "SCALE" {
-            // ADSET needs a suggested budget; CAMPAIGN is resolved server-side.
-            if targetType == "ADSET" { return suggestedDailyBudget != nil }
-            return targetType == "CAMPAIGN"
+            return targetType == "CAMPAIGN" || targetType == "ADSET" || targetType == "AD"
         }
         return false
     }
