@@ -7226,6 +7226,7 @@ struct MetaRecommendationsCard: View {
                     MetaRecommendationRow(
                         recommendation: recommendation,
                         applying: applyingId == recommendation.id,
+                        decision: history.first { $0.recommendationId == recommendation.id },
                         onApply: { Task { await apply(recommendation) } },
                         onManualReview: { markManual(recommendation) }
                     )
@@ -7332,6 +7333,7 @@ struct MetaRecommendationsCard: View {
 struct MetaRecommendationRow: View {
     let recommendation: MetaRecommendation
     let applying: Bool
+    let decision: MetaRecommendationDecision?
     let onApply: () -> Void
     let onManualReview: () -> Void
     @State private var confirming = false
@@ -7435,6 +7437,12 @@ struct MetaRecommendationRow: View {
         }
     }
 
+    private var isAppliedDecision: Bool {
+        guard let decision else { return false }
+        return decision.decision.lowercased().contains("aplicada")
+            || decision.decision.lowercased().contains("pausada")
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 9) {
             HStack(alignment: .top, spacing: 10) {
@@ -7478,7 +7486,25 @@ struct MetaRecommendationRow: View {
                 .padding(.vertical, 7)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .background((recommendation.isAutomaticallyApplicable ? color : AppTheme.muted).opacity(0.12), in: RoundedRectangle(cornerRadius: 10))
-            if recommendation.isAutomaticallyApplicable {
+
+            if let decision {
+                VStack(alignment: .leading, spacing: 4) {
+                    Label(isAppliedDecision ? "Aplicada en Meta" : "Revisada", systemImage: isAppliedDecision ? "checkmark.seal.fill" : "checkmark.circle.fill")
+                        .font(.caption.weight(.black))
+                        .foregroundStyle(isAppliedDecision ? AppTheme.green : AppTheme.blue)
+                    Text(decision.message)
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(AppTheme.ink)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Text(shortDate(decision.createdAt))
+                        .font(.caption2.weight(.bold))
+                        .foregroundStyle(AppTheme.muted)
+                }
+                .padding(10)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background((isAppliedDecision ? AppTheme.green : AppTheme.blue).opacity(0.12), in: RoundedRectangle(cornerRadius: 12))
+                .overlay(RoundedRectangle(cornerRadius: 12).stroke((isAppliedDecision ? AppTheme.green : AppTheme.blue).opacity(0.25)))
+            } else if recommendation.isAutomaticallyApplicable {
                 Button(action: { confirming = true }) {
                     if applying {
                         ProgressView()
@@ -7514,6 +7540,13 @@ struct MetaRecommendationRow: View {
         .padding(12)
         .background(AppTheme.surfaceSoft, in: RoundedRectangle(cornerRadius: 14))
         .overlay(RoundedRectangle(cornerRadius: 14).stroke(color.opacity(0.28)))
+    }
+
+    private func shortDate(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "es_ES")
+        formatter.dateFormat = "d MMM HH:mm"
+        return formatter.string(from: date)
     }
 }
 
