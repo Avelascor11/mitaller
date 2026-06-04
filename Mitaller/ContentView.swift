@@ -7170,6 +7170,24 @@ struct MetaRecommendationRow: View {
     let recommendation: MetaRecommendation
     let applying: Bool
     let onApply: () -> Void
+    @State private var confirming = false
+
+    private var confirmSummary: String {
+        switch recommendation.severity {
+        case "SCALE":
+            if recommendation.targetType == "CAMPAIGN" {
+                return "Se subirá el presupuesto diario un +15% en \(recommendation.targetName) (en la campaña o en sus grupos activos). El cambio se aplica YA en Meta Ads."
+            }
+            if let b = recommendation.suggestedDailyBudget {
+                return "Se subirá el presupuesto diario de \(recommendation.targetName) a \(String(format: "%.2f €", b)). Se aplica YA en Meta Ads."
+            }
+            return "Se subirá el presupuesto diario un +15% en \(recommendation.targetName). Se aplica YA en Meta Ads."
+        case "PAUSE":
+            return "Se PAUSARÁ \(recommendation.targetName) en Meta Ads ahora mismo. Dejará de gastar y de mostrarse."
+        default:
+            return "Se aplicará el cambio en Meta Ads."
+        }
+    }
 
     private var color: Color {
         switch recommendation.severity {
@@ -7246,7 +7264,7 @@ struct MetaRecommendationRow: View {
                 .foregroundStyle(color)
                 .fixedSize(horizontal: false, vertical: true)
             if recommendation.isAutomaticallyApplicable {
-                Button(action: onApply) {
+                Button(action: { confirming = true }) {
                     if applying {
                         ProgressView()
                             .frame(maxWidth: .infinity)
@@ -7259,6 +7277,15 @@ struct MetaRecommendationRow: View {
                 .buttonStyle(.borderedProminent)
                 .tint(color)
                 .disabled(applying)
+                .confirmationDialog(applyTitle, isPresented: $confirming, titleVisibility: .visible) {
+                    Button(recommendation.severity == "PAUSE" ? "Pausar ahora" : "Sí, subir presupuesto",
+                           role: recommendation.severity == "PAUSE" ? .destructive : nil) {
+                        onApply()
+                    }
+                    Button("Cancelar", role: .cancel) {}
+                } message: {
+                    Text(confirmSummary)
+                }
             }
         }
         .padding(12)
