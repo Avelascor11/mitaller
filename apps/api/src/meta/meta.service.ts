@@ -84,11 +84,22 @@ export interface MetaRecommendationPreview {
   warnings: string[];
 }
 
+export interface MetaDailyPlanItem {
+  recommendation: MetaRecommendation;
+  preview: MetaRecommendationPreview | null;
+  canApply: boolean;
+  skipReason: string | null;
+}
+
 export interface ApplyMetaRecommendationDto {
   targetType: 'CAMPAIGN' | 'ADSET' | 'AD';
   targetId: string;
   severity: 'SCALE' | 'PAUSE' | 'WATCH' | 'FIX' | 'INFO';
   suggestedDailyBudget?: number | null;
+}
+
+export interface ApplyMetaDailyPlanDto {
+  items: ApplyMetaRecommendationDto[];
 }
 
 export interface BestSeller {
@@ -1379,6 +1390,84 @@ export class MetaService {
       ],
       nextAction: recs[0]?.title ?? 'Revisar datos de nuevo manana.',
       recommendationCount: recs.length
+    };
+  }
+
+  async dailyPlan(from?: string, to?: string) {
+    const summary = await this.summary(from, to);
+    const candidates = (summary.recommendations ?? [])
+      .filter((item) => item.targetId && ['SCALE', 'PAUSE', 'FIX'].includes(item.severity))
+      .slice(0, 8);
+
+    const items: MetaDailyPlanItem[] = [];
+    for (const recommendation of candidates) {
+      const dto: ApplyMetaRecommendationDto = {
+        targetType: recommendation.targetType as 'CAMPAIGN' | 'ADSET' | 'AD',
+        targetId: recommendation.targetId!,
+        severity: recommendation.severity,
+        suggestedDailyBudget: recommendation.suggestedDailyBudget
+      };
+      try {
+        const preview = await this.previewRecommendation(dto);
+        items.push({
+          recommendation,
+          preview,
+          canApply: preview.canApply,
+          skipReason: preview.warnings.length ? preview.warnings.join(' ') : null
+        });
+      } catch (error) {
+        items.push({
+          recommendation,
+          preview: null,
+          canApply: false,
+          skipReason: error instanceof Error ? error.message : 'No se pudo preparar la vista previa.'
+        });
+      }
+    }
+
+    const scale = items.filter((item) => item.recommendation.severity === 'SCALE' && item.canApply).length;
+    const pause = items.filter((item) => item.recommendation.severity === 'PAUSE' && item.canApply).length;
+    const fix = items.filter((item) => item.recommendation.severity === 'FIX' && item.canApply).length;
+    const headline = items.some((item) => item.canApply)
+      ? `Hoy aplicaria ${scale + pause + fix} accion(es): ${scale} subir, ${fix} arreglar, ${pause} pausar.`
+      : 'Hoy no aplicaria cambios automaticos; revisaria los datos.';
+
+    return {
+      from: summary.from,
+      to: summary.to,
+      headline,
+      items,
+      totals: { scale, fix, pause, applicable: scale + fix + pause, blocked: items.filter((item) => !item.canApply).length }
+    };
+  }
+
+  async applyDailyPlan(body: ApplyMetaDailyPlanDto) {
+    const items = (body.items ?? [])
+      .filter((item) => item.targetId && ['CAMPAIGN', 'ADSET', 'AD'].includes(item.targetType) && ['SCALE', 'PAUSE', 'FIX'].includes(item.severity))
+      .slice(0, 8);
+    if (!items.length) throw new BadRequestException('Plan sin acciones aplicables.');
+
+    const results: Array<{ ok: boolean; targetId: string; severity: string; message: string }> = [];
+    for (const item of items) {
+      try {
+        const result = await this.applyRecommendation(item);
+        results.push({ ok: true, targetId: item.targetId, severity: item.severity, message: result.message });
+      } catch (error) {
+        results.push({
+          ok: false,
+          targetId: item.targetId,
+          severity: item.severity,
+          message: error instanceof Error ? error.message : 'No se pudo aplicar.'
+        });
+      }
+    }
+
+    return {
+      ok: true,
+      applied: results.filter((item) => item.ok).length,
+      failed: results.filter((item) => !item.ok).length,
+      results,
+      message: `Plan aplicado: ${results.filter((item) => item.ok).length} OK, ${results.filter((item) => !item.ok).length} fallo(s).`
     };
   }
 

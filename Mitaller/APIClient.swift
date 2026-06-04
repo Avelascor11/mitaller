@@ -321,6 +321,14 @@ struct APIClient {
         let f = DateFormatter.apiDay
         return try await get("/meta/learning?from=\(f.string(from: from))&to=\(f.string(from: to))")
     }
+    func metaDailyPlan(from: Date, to: Date) async throws -> MetaDailyPlan {
+        let f = DateFormatter.apiDay
+        return try await get("/meta/daily-plan?from=\(f.string(from: from))&to=\(f.string(from: to))")
+    }
+    func metaApplyDailyPlan(_ body: MetaApplyDailyPlanRequest) async throws -> MetaApplyDailyPlanResult {
+        let request = try jsonRequest(path: "/meta/daily-plan/apply", method: "POST", body: body)
+        return try await perform(request)
+    }
 
     // MARK: - Influencers
     func influencerSummary() async throws -> InfluencerSummary {
@@ -589,6 +597,41 @@ struct MetaLearningSummary: Decodable {
     let bullets: [String]
     let nextAction: String
     let recommendationCount: Int
+}
+
+struct MetaDailyPlan: Decodable {
+    let from: String
+    let to: String
+    let headline: String
+    let items: [MetaDailyPlanItem]
+    let totals: MetaDailyPlanTotals
+}
+
+struct MetaDailyPlanItem: Decodable, Identifiable {
+    let recommendation: MetaRecommendation
+    let preview: MetaRecommendationPreview?
+    let canApply: Bool
+    let skipReason: String?
+    var id: String { recommendation.id }
+}
+
+struct MetaDailyPlanTotals: Decodable {
+    let scale: Int
+    let fix: Int
+    let pause: Int
+    let applicable: Int
+    let blocked: Int
+}
+
+struct MetaApplyDailyPlanRequest: Encodable {
+    let items: [MetaApplyRecommendationRequest]
+}
+
+struct MetaApplyDailyPlanResult: Decodable {
+    let ok: Bool
+    let applied: Int
+    let failed: Int
+    let message: String
 }
 
 struct MetaCampaignDetail: Decodable {

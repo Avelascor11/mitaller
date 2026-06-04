@@ -6785,6 +6785,7 @@ struct MetaAdsView: View {
     @State private var summary: MetaSummary?
     @State private var health: AdsHealth?
     @State private var learning: MetaLearningSummary?
+    @State private var dailyPlan: MetaDailyPlan?
     @State private var loading = false
     @State private var error: String?
     @State private var range: MetaRange = .today
@@ -6914,6 +6915,10 @@ struct MetaAdsView: View {
                         if let health { AdsHealthCard(health: health) }
                         MetaKpiCard(summary: summary)
                         if let learning { MetaLearningCard(learning: learning) }
+                        if let dailyPlan {
+                            MetaDailyPlanCard(plan: dailyPlan, onApplied: { Task { await reload() } })
+                                .environment(store)
+                        }
                         MetaRecommendationsCard(
                             title: "Recomendaciones",
                             subtitle: "Lectura experta del rendimiento actual",
@@ -7011,9 +7016,11 @@ struct MetaAdsView: View {
             async let s = client.metaSummary(from: r.from, to: r.to)
             async let h = client.adsHealth(from: r.from, to: r.to)
             async let l = client.metaLearning(from: r.from, to: r.to)
+            async let p = client.metaDailyPlan(from: r.from, to: r.to)
             summary = try await s
             health = try? await h
             learning = try? await l
+            dailyPlan = try? await p
         } catch {
             self.error = error.localizedDescription
         }
@@ -7120,6 +7127,148 @@ struct MetaLearningCard: View {
                 .fixedSize(horizontal: false, vertical: true)
         }
         .glassPanel(padding: 16, accent: AppTheme.purple)
+    }
+}
+
+struct MetaDailyPlanCard: View {
+    @Environment(WorkshopStore.self) private var store
+    let plan: MetaDailyPlan
+    let onApplied: () -> Void
+    @State private var applying = false
+    @State private var confirming = false
+    @State private var resultMessage: String?
+    @State private var errorMessage: String?
+
+    private var applicableItems: [MetaDailyPlanItem] {
+        plan.items.filter(\.canApply)
+    }
+
+    private var buttonTitle: String {
+        applicableItems.isEmpty ? "Sin acciones aplicables" : "Aplicar plan del día"
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 10) {
+                Image(systemName: "wand.and.sparkles")
+                    .font(.title2)
+                    .foregroundStyle(AppTheme.green)
+                    .frame(width: 30)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Plan del día")
+                        .font(.caption.weight(.black))
+                        .foregroundStyle(AppTheme.green)
+                    Text(plan.headline)
+                        .font(.subheadline.weight(.heavy))
+                        .foregroundStyle(AppTheme.ink)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                Spacer()
+            }
+
+            HStack(spacing: 8) {
+                MetaPlanPill(title: "Subir", value: plan.totals.scale, color: AppTheme.green)
+                MetaPlanPill(title: "Arreglar", value: plan.totals.fix, color: AppTheme.amber)
+                MetaPlanPill(title: "Pausar", value: plan.totals.pause, color: AppTheme.red)
+            }
+
+            ForEach(plan.items.prefix(4)) { item in
+                HStack(alignment: .top, spacing: 9) {
+                    Image(systemName: item.canApply ? "checkmark.circle.fill" : "lock.fill")
+                        .font(.caption)
+                        .foregroundStyle(item.canApply ? AppTheme.green : AppTheme.muted)
+                        .padding(.top, 2)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(item.recommendation.title)
+                            .font(.caption.weight(.heavy))
+                            .foregroundStyle(AppTheme.ink)
+                            .lineLimit(1)
+                        Text(item.preview?.impact ?? item.skipReason ?? item.recommendation.action)
+                            .font(.caption2.weight(.semibold))
+                            .foregroundStyle(item.canApply ? AppTheme.muted : AppTheme.amber)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    Spacer()
+                }
+            }
+
+            Button(action: { confirming = true }) {
+                if applying {
+                    ProgressView().frame(maxWidth: .infinity)
+                } else {
+                    Label(buttonTitle, systemImage: "bolt.fill")
+                        .font(.caption.weight(.heavy))
+                        .frame(maxWidth: .infinity)
+                }
+            }
+            .buttonStyle(.borderedProminent)
+            .tint(AppTheme.green)
+            .disabled(applying || applicableItems.isEmpty)
+            .confirmationDialog("Aplicar plan del día", isPresented: $confirming, titleVisibility: .visible) {
+                Button("Sí, aplicar \(applicableItems.count) acción(es)") {
+                    Task { await applyPlan() }
+                }
+                Button("Cancelar", role: .cancel) {}
+            } message: {
+                Text("La app aplicará solo las acciones desbloqueadas: \(plan.totals.scale) subida(s), \(plan.totals.fix) arreglo(s), \(plan.totals.pause) pausa(s).")
+            }
+
+            if let resultMessage {
+                Label(resultMessage, systemImage: "checkmark.circle.fill")
+                    .font(.caption2.weight(.bold))
+                    .foregroundStyle(AppTheme.green)
+            }
+            if let errorMessage {
+                Label(errorMessage, systemImage: "exclamationmark.triangle.fill")
+                    .font(.caption2.weight(.bold))
+                    .foregroundStyle(AppTheme.red)
+            }
+        }
+        .glassPanel(padding: 16, accent: AppTheme.green)
+    }
+
+    private func applyPlan() async {
+        guard let client = store.apiClient else { errorMessage = "API no configurada"; return }
+        let body = MetaApplyDailyPlanRequest(items: applicableItems.compactMap { item in
+            guard let targetId = item.recommendation.targetId else { return nil }
+            return MetaApplyRecommendationRequest(
+                targetType: item.recommendation.targetType,
+                targetId: targetId,
+                severity: item.recommendation.severity,
+                suggestedDailyBudget: item.recommendation.suggestedDailyBudget
+            )
+        })
+        applying = true
+        resultMessage = nil
+        errorMessage = nil
+        defer { applying = false }
+        do {
+            let result = try await client.metaApplyDailyPlan(body)
+            resultMessage = result.message
+            onApplied()
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+}
+
+struct MetaPlanPill: View {
+    let title: String
+    let value: Int
+    let color: Color
+
+    var body: some View {
+        VStack(spacing: 2) {
+            Text("\(value)")
+                .font(.headline.weight(.black))
+                .foregroundStyle(color)
+            Text(title.uppercased())
+                .font(.caption2.weight(.heavy))
+                .foregroundStyle(AppTheme.muted)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 9)
+        .background(color.opacity(0.10), in: RoundedRectangle(cornerRadius: 12))
     }
 }
 
