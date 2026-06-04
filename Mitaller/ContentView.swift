@@ -6790,6 +6790,9 @@ struct MetaAdsView: View {
     @State private var customTo = Calendar.current.startOfDay(for: Date())
     @State private var showCreate = false
     @State private var statusBusy: String?
+    @State private var searchText = ""
+    @State private var campaignFilter: CampaignFilter = .all
+    @State private var campaignSort: CampaignSort = .spend
 
     enum MetaRange: String, CaseIterable, Identifiable {
         case today, week, month, custom
@@ -6797,6 +6800,33 @@ struct MetaAdsView: View {
         var label: String {
             switch self {
             case .today: "Hoy"; case .week: "Semana"; case .month: "Mes"; case .custom: "Calendario"
+            }
+        }
+    }
+
+    enum CampaignFilter: String, CaseIterable, Identifiable {
+        case all, active, paused, attention
+        var id: String { rawValue }
+        var label: String {
+            switch self {
+            case .all: "Todas"
+            case .active: "Activas"
+            case .paused: "Pausadas"
+            case .attention: "Revisar"
+            }
+        }
+    }
+
+    enum CampaignSort: String, CaseIterable, Identifiable {
+        case spend, roas, purchases, ctr, name
+        var id: String { rawValue }
+        var label: String {
+            switch self {
+            case .spend: "Gasto"
+            case .roas: "ROAS"
+            case .purchases: "Compras"
+            case .ctr: "CTR"
+            case .name: "Nombre"
             }
         }
     }
@@ -6810,6 +6840,35 @@ struct MetaAdsView: View {
         case .month: return (cal.date(from: cal.dateComponents([.year, .month], from: today)) ?? today, today)
         case .custom: return (customFrom, customTo)
         }
+    }
+
+    private var filteredCampaigns: [MetaCampaign] {
+        guard let campaigns = summary?.campaigns else { return [] }
+        let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        return campaigns
+            .filter { campaign in
+                switch campaignFilter {
+                case .all: true
+                case .active: campaign.status == "ACTIVE"
+                case .paused: campaign.status != "ACTIVE"
+                case .attention: campaign.spend > 0 && (campaign.purchases == 0 || (campaign.roas ?? 0) < 1)
+                }
+            }
+            .filter { campaign in
+                query.isEmpty
+                || campaign.name.lowercased().contains(query)
+                || campaign.status.lowercased().contains(query)
+                || (campaign.objective ?? "").lowercased().contains(query)
+            }
+            .sorted { a, b in
+                switch campaignSort {
+                case .spend: a.spend == b.spend ? a.name < b.name : a.spend > b.spend
+                case .roas: (a.roas ?? -1) == (b.roas ?? -1) ? a.spend > b.spend : (a.roas ?? -1) > (b.roas ?? -1)
+                case .purchases: a.purchases == b.purchases ? a.spend > b.spend : a.purchases > b.purchases
+                case .ctr: (a.ctr ?? -1) == (b.ctr ?? -1) ? a.spend > b.spend : (a.ctr ?? -1) > (b.ctr ?? -1)
+                case .name: a.name.localizedCaseInsensitiveCompare(b.name) == .orderedAscending
+                }
+            }
     }
 
     var body: some View {
@@ -6853,13 +6912,36 @@ struct MetaAdsView: View {
                         MetaKpiCard(summary: summary)
 
                         if !summary.campaigns.isEmpty {
-                            SectionHeader(title: "Campañas", subtitle: "Rendimiento en el rango seleccionado")
-                            ForEach(summary.campaigns) { c in
-                                MetaCampaignRow(
-                                    campaign: c,
-                                    busy: statusBusy == c.id,
-                                    onToggle: { Task { await toggle(c) } }
+                            SectionHeader(title: "Campañas", subtitle: "\(filteredCampaigns.count) de \(summary.campaigns.count) en el rango seleccionado")
+                            MetaCampaignToolbar(
+                                searchText: $searchText,
+                                filter: $campaignFilter,
+                                sort: $campaignSort
+                            )
+                            if filteredCampaigns.isEmpty {
+                                EmptyStateCard(
+                                    title: "Sin campañas con estos filtros",
+                                    subtitle: "Cambia la busqueda, el estado o la ordenacion."
                                 )
+                            } else {
+                                ForEach(filteredCampaigns) { c in
+                                    VStack(spacing: 10) {
+                                        MetaCampaignRow(
+                                            campaign: c,
+                                            busy: statusBusy == c.id,
+                                            onToggle: { Task { await toggle(c) } }
+                                        )
+                                        NavigationLink(value: c.id) {
+                                            Label("Entrar en campaña", systemImage: "rectangle.stack.fill")
+                                                .font(.caption.weight(.heavy))
+                                                .frame(maxWidth: .infinity)
+                                                .padding(.vertical, 10)
+                                                .background(AppTheme.blue.opacity(0.16), in: Capsule())
+                                                .foregroundStyle(AppTheme.blue)
+                                        }
+                                        .buttonStyle(.plain)
+                                    }
+                                }
                             }
                         }
 
@@ -6883,6 +6965,11 @@ struct MetaAdsView: View {
             }
             .screenBackground()
             .navigationTitle("Meta Ads")
+            .navigationDestination(for: String.self) { campaignId in
+                let r = dateRange
+                MetaCampaignDetailView(campaignId: campaignId, from: r.from, to: r.to)
+                    .environment(store)
+            }
             .toolbar {
                 ToolbarItem(placement: .primaryAction) {
                     Button { showCreate = true } label: {
@@ -6968,6 +7055,355 @@ struct MetaStat: View {
                 .lineLimit(1)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+struct MetaCampaignToolbar: View {
+    @Binding var searchText: String
+    @Binding var filter: MetaAdsView.CampaignFilter
+    @Binding var sort: MetaAdsView.CampaignSort
+
+    var body: some View {
+        VStack(spacing: 10) {
+            HStack(spacing: 10) {
+                Image(systemName: "magnifyingglass")
+                    .foregroundStyle(AppTheme.muted)
+                TextField("Buscar campaña, objetivo o estado", text: $searchText)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                if !searchText.isEmpty {
+                    Button { searchText = "" } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .foregroundStyle(AppTheme.muted)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .padding(12)
+            .background(AppTheme.surfaceSoft, in: RoundedRectangle(cornerRadius: 16))
+            .overlay(RoundedRectangle(cornerRadius: 16).stroke(AppTheme.line))
+
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    ForEach(MetaAdsView.CampaignFilter.allCases) { item in
+                        Button { filter = item } label: {
+                            Text(item.label)
+                                .font(.caption.weight(.heavy))
+                                .padding(.horizontal, 12)
+                                .padding(.vertical, 8)
+                                .background((filter == item ? AppTheme.blue : AppTheme.surfaceSoft).opacity(filter == item ? 0.22 : 1), in: Capsule())
+                                .foregroundStyle(filter == item ? AppTheme.blue : AppTheme.muted)
+                                .overlay(Capsule().stroke(filter == item ? AppTheme.blue.opacity(0.45) : AppTheme.line))
+                        }
+                        .buttonStyle(.plain)
+                    }
+                    Menu {
+                        ForEach(MetaAdsView.CampaignSort.allCases) { item in
+                            Button(item.label) { sort = item }
+                        }
+                    } label: {
+                        Label(sort.label, systemImage: "arrow.up.arrow.down")
+                            .font(.caption.weight(.heavy))
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 8)
+                            .background(AppTheme.amber.opacity(0.16), in: Capsule())
+                            .foregroundStyle(AppTheme.amber)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+        }
+        .glassPanel(padding: 12, accent: AppTheme.blue)
+    }
+}
+
+struct MetaCampaignDetailView: View {
+    @Environment(WorkshopStore.self) private var store
+    let campaignId: String
+    let from: Date
+    let to: Date
+
+    @State private var detail: MetaCampaignDetail?
+    @State private var loading = false
+    @State private var error: String?
+    @State private var selectedTab: Tab = .adsets
+    @State private var sort: Sort = .spend
+
+    enum Tab: String, CaseIterable, Identifiable {
+        case adsets, ads
+        var id: String { rawValue }
+        var label: String { self == .adsets ? "Grupos" : "Anuncios" }
+    }
+
+    enum Sort: String, CaseIterable, Identifiable {
+        case spend, roas, purchases, ctr
+        var id: String { rawValue }
+        var label: String {
+            switch self {
+            case .spend: "Gasto"
+            case .roas: "ROAS"
+            case .purchases: "Compras"
+            case .ctr: "CTR"
+            }
+        }
+    }
+
+    private var sortedAdsets: [MetaAdSet] {
+        (detail?.adsets ?? []).sorted { compare($0, $1) }
+    }
+
+    private var sortedAds: [MetaAd] {
+        (detail?.ads ?? []).sorted { compare($0, $1) }
+    }
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 16) {
+                if loading && detail == nil {
+                    ProgressView().frame(maxWidth: .infinity)
+                } else if let detail {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text(detail.campaign.name)
+                            .font(.system(size: 28, weight: .heavy, design: .rounded))
+                            .foregroundStyle(AppTheme.ink)
+                            .lineLimit(3)
+                        HStack(spacing: 8) {
+                            MetaStatusBadge(status: detail.campaign.status)
+                            if let objective = detail.campaign.objective {
+                                Text(objective)
+                                    .font(.caption.weight(.heavy))
+                                    .foregroundStyle(AppTheme.muted)
+                                    .padding(.horizontal, 9)
+                                    .padding(.vertical, 5)
+                                    .background(AppTheme.surfaceSoft, in: Capsule())
+                            }
+                        }
+                    }
+
+                    MetaKpiCard(summary: MetaSummary(
+                        from: detail.from,
+                        to: detail.to,
+                        configured: true,
+                        currency: "EUR",
+                        spend: detail.campaign.spend,
+                        attributedRevenue: detail.campaign.purchaseValue,
+                        purchases: detail.campaign.purchases,
+                        roas: detail.campaign.roas,
+                        activeCampaigns: detail.campaign.status == "ACTIVE" ? 1 : 0,
+                        campaigns: [detail.campaign],
+                        bestSellers: []
+                    ))
+
+                    HStack(spacing: 10) {
+                        Picker("Vista", selection: $selectedTab) {
+                            ForEach(Tab.allCases) { Text($0.label).tag($0) }
+                        }
+                        .pickerStyle(.segmented)
+                        Menu {
+                            ForEach(Sort.allCases) { item in
+                                Button(item.label) { sort = item }
+                            }
+                        } label: {
+                            Image(systemName: "arrow.up.arrow.down.circle.fill")
+                                .font(.title2)
+                                .foregroundStyle(AppTheme.blue)
+                        }
+                    }
+
+                    if selectedTab == .adsets {
+                        SectionHeader(title: "Grupos de anuncios", subtitle: "\(sortedAdsets.count) dentro de esta campaña")
+                        ForEach(sortedAdsets) { adset in
+                            MetaAdSetCard(adset: adset)
+                        }
+                    } else {
+                        SectionHeader(title: "Anuncios", subtitle: "\(sortedAds.count) creatividades y piezas")
+                        ForEach(sortedAds) { ad in
+                            MetaAdCard(ad: ad)
+                        }
+                    }
+                }
+
+                if let error {
+                    Text(error)
+                        .font(.footnote)
+                        .foregroundStyle(AppTheme.red)
+                        .padding(10)
+                        .glassPanel(padding: 10, accent: AppTheme.red)
+                }
+            }
+            .padding()
+        }
+        .screenBackground()
+        .navigationTitle("Campaña")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .primaryAction) {
+                Button { Task { await reload() } } label: {
+                    Image(systemName: "arrow.clockwise")
+                }
+                .disabled(loading)
+            }
+        }
+        .task { await reload() }
+        .refreshable { await reload() }
+    }
+
+    private func reload() async {
+        guard let client = store.apiClient else { error = "API no configurada"; return }
+        loading = true
+        error = nil
+        defer { loading = false }
+        do {
+            detail = try await client.metaCampaignDetail(id: campaignId, from: from, to: to)
+        } catch {
+            self.error = error.localizedDescription
+        }
+    }
+
+    private func compare(_ a: MetaAdSet, _ b: MetaAdSet) -> Bool {
+        switch sort {
+        case .spend: a.spend == b.spend ? a.name < b.name : a.spend > b.spend
+        case .roas: (a.roas ?? -1) == (b.roas ?? -1) ? a.spend > b.spend : (a.roas ?? -1) > (b.roas ?? -1)
+        case .purchases: a.purchases == b.purchases ? a.spend > b.spend : a.purchases > b.purchases
+        case .ctr: (a.ctr ?? -1) == (b.ctr ?? -1) ? a.spend > b.spend : (a.ctr ?? -1) > (b.ctr ?? -1)
+        }
+    }
+
+    private func compare(_ a: MetaAd, _ b: MetaAd) -> Bool {
+        switch sort {
+        case .spend: a.spend == b.spend ? a.name < b.name : a.spend > b.spend
+        case .roas: (a.roas ?? -1) == (b.roas ?? -1) ? a.spend > b.spend : (a.roas ?? -1) > (b.roas ?? -1)
+        case .purchases: a.purchases == b.purchases ? a.spend > b.spend : a.purchases > b.purchases
+        case .ctr: (a.ctr ?? -1) == (b.ctr ?? -1) ? a.spend > b.spend : (a.ctr ?? -1) > (b.ctr ?? -1)
+        }
+    }
+}
+
+struct MetaStatusBadge: View {
+    let status: String
+    private var isActive: Bool { status == "ACTIVE" }
+    var body: some View {
+        Text(isActive ? "ACTIVA" : status)
+            .font(.caption2.weight(.heavy))
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
+            .background((isActive ? AppTheme.green : AppTheme.muted).opacity(0.18), in: Capsule())
+            .foregroundStyle(isActive ? AppTheme.green : AppTheme.muted)
+    }
+}
+
+struct MetaAdSetCard: View {
+    let adset: MetaAdSet
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .top) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(adset.name)
+                        .font(.headline.weight(.heavy))
+                        .foregroundStyle(AppTheme.ink)
+                    Text([adset.optimizationGoal, adset.billingEvent].compactMap { $0 }.joined(separator: " · "))
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(AppTheme.muted)
+                }
+                Spacer()
+                MetaStatusBadge(status: adset.status)
+            }
+            if let budget = adset.dailyBudget ?? adset.lifetimeBudget {
+                Label(String(format: "%.2f € de presupuesto", budget), systemImage: "eurosign.circle.fill")
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(AppTheme.amber)
+            }
+            MetaPerformanceGrid(spend: adset.spend, roas: adset.roas, purchases: adset.purchases, ctr: adset.ctr, impressions: adset.impressions, clicks: adset.clicks)
+        }
+        .padding()
+        .glassPanel(padding: 14, accent: adset.status == "ACTIVE" ? AppTheme.green : AppTheme.blue)
+    }
+}
+
+struct MetaAdCard: View {
+    let ad: MetaAd
+    var body: some View {
+        HStack(alignment: .top, spacing: 12) {
+            AsyncImage(url: ad.thumbnailUrl.flatMap { URL(string: $0) }) { phase in
+                switch phase {
+                case .success(let image):
+                    image.resizable().scaledToFill()
+                default:
+                    ZStack {
+                        AppTheme.surfaceSoft
+                        Image(systemName: "photo")
+                            .foregroundStyle(AppTheme.muted)
+                    }
+                }
+            }
+            .frame(width: 72, height: 72)
+            .clipShape(RoundedRectangle(cornerRadius: 14))
+            .overlay(RoundedRectangle(cornerRadius: 14).stroke(AppTheme.line))
+
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(alignment: .top) {
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(ad.name)
+                            .font(.headline.weight(.heavy))
+                            .foregroundStyle(AppTheme.ink)
+                            .lineLimit(2)
+                        if let creativeName = ad.creativeName {
+                            Text(creativeName)
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(AppTheme.muted)
+                                .lineLimit(1)
+                        }
+                    }
+                    Spacer()
+                    MetaStatusBadge(status: ad.status)
+                }
+                MetaPerformanceGrid(spend: ad.spend, roas: ad.roas, purchases: ad.purchases, ctr: ad.ctr, impressions: ad.impressions, clicks: ad.clicks)
+            }
+        }
+        .padding()
+        .glassPanel(padding: 14, accent: ad.status == "ACTIVE" ? AppTheme.green : AppTheme.blue)
+    }
+}
+
+struct MetaPerformanceGrid: View {
+    let spend: Double
+    let roas: Double?
+    let purchases: Int
+    let ctr: Double?
+    let impressions: Int
+    let clicks: Int
+
+    var body: some View {
+        LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: 3), spacing: 8) {
+            item("Gasto", String(format: "%.0f €", spend), AppTheme.red)
+            item("ROAS", roas.map { String(format: "%.1fx", $0) } ?? "—", AppTheme.blue)
+            item("Compras", "\(purchases)", AppTheme.green)
+            item("CTR", ctr.map { String(format: "%.1f%%", $0) } ?? "—", AppTheme.amber)
+            item("Impr.", compactNumber(impressions), AppTheme.ink)
+            item("Clicks", compactNumber(clicks), AppTheme.ink)
+        }
+    }
+
+    private func item(_ title: String, _ value: String, _ color: Color) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(title.uppercased())
+                .font(.caption2.weight(.black))
+                .foregroundStyle(AppTheme.muted)
+            Text(value)
+                .font(.footnote.weight(.heavy))
+                .foregroundStyle(color)
+                .minimumScaleFactor(0.7)
+                .lineLimit(1)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(8)
+        .background(AppTheme.surfaceSoft.opacity(0.88), in: RoundedRectangle(cornerRadius: 10))
+    }
+
+    private func compactNumber(_ value: Int) -> String {
+        if value >= 1_000_000 { return String(format: "%.1fM", Double(value) / 1_000_000) }
+        if value >= 1_000 { return String(format: "%.1fk", Double(value) / 1_000) }
+        return "\(value)"
     }
 }
 

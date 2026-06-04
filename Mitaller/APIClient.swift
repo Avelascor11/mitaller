@@ -288,6 +288,10 @@ struct APIClient {
         let f = DateFormatter.apiDay
         return try await get("/meta/spend/daily?date=\(f.string(from: date))")
     }
+    func metaCampaignDetail(id: String, from: Date, to: Date) async throws -> MetaCampaignDetail {
+        let f = DateFormatter.apiDay
+        return try await get("/meta/campaigns/\(Self.pathSegment(id))?from=\(f.string(from: from))&to=\(f.string(from: to))")
+    }
     func metaTemplates() async throws -> [MetaTemplate] { try await get("/meta/templates") }
     func metaCreateCampaign(_ body: MetaCreateCampaignRequest) async throws -> MetaCreateCampaignResult {
         let request = try jsonRequest(path: "/meta/campaigns", method: "POST", body: body)
@@ -421,6 +425,57 @@ struct MetaCampaign: Decodable, Identifiable {
     let purchases: Int
     let purchaseValue: Double
     let roas: Double?
+}
+
+struct MetaAdSet: Decodable, Identifiable {
+    let id: String
+    let name: String
+    let status: String
+    let effectiveStatus: String?
+    let dailyBudget: Double?
+    let lifetimeBudget: Double?
+    let optimizationGoal: String?
+    let billingEvent: String?
+    let spend: Double
+    let impressions: Int
+    let clicks: Int
+    let ctr: Double?
+    let cpc: Double?
+    let reach: Int
+    let purchases: Int
+    let purchaseValue: Double
+    let roas: Double?
+}
+
+struct MetaAd: Decodable, Identifiable {
+    let id: String
+    let name: String
+    let status: String
+    let effectiveStatus: String?
+    let adsetId: String?
+    let creativeId: String?
+    let creativeName: String?
+    let thumbnailUrl: String?
+    let spend: Double
+    let impressions: Int
+    let clicks: Int
+    let ctr: Double?
+    let cpc: Double?
+    let reach: Int
+    let purchases: Int
+    let purchaseValue: Double
+    let roas: Double?
+}
+
+struct MetaCampaignDetail: Decodable {
+    let from: String
+    let to: String
+    let campaign: MetaCampaign
+    let createdTime: String?
+    let updatedTime: String?
+    let effectiveStatus: String?
+    let adsets: [MetaAdSet]
+    let ads: [MetaAd]
 }
 
 struct MetaBestSeller: Decodable, Identifiable {

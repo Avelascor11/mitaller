@@ -21,6 +21,40 @@ export interface CampaignInsight {
   roas: number | null;
 }
 
+export interface MetaPerformanceInsight {
+  spend: number;
+  impressions: number;
+  clicks: number;
+  ctr: number | null;
+  cpc: number | null;
+  reach: number;
+  purchases: number;
+  purchaseValue: number;
+  roas: number | null;
+}
+
+export interface AdSetInsight extends MetaPerformanceInsight {
+  id: string;
+  name: string;
+  status: string;
+  effectiveStatus: string | null;
+  dailyBudget: number | null;
+  lifetimeBudget: number | null;
+  optimizationGoal: string | null;
+  billingEvent: string | null;
+}
+
+export interface AdInsight extends MetaPerformanceInsight {
+  id: string;
+  name: string;
+  status: string;
+  effectiveStatus: string | null;
+  adsetId: string | null;
+  creativeId: string | null;
+  creativeName: string | null;
+  thumbnailUrl: string | null;
+}
+
 export interface BestSeller {
   sku: string | null;
   title: string;
@@ -519,8 +553,99 @@ export class MetaService {
     return (data.data ?? []).map((c) => this.mapCampaign(c));
   }
 
+  async campaignDetail(campaignId: string, from: string, to: string) {
+    this.assert();
+    const time = JSON.stringify({ since: from, until: to });
+    const [campaignRaw, adsetsRaw, adsRaw] = await Promise.all([
+      this.graphGet<any>(campaignId, {
+        fields: [
+          'name',
+          'status',
+          'effective_status',
+          'objective',
+          'created_time',
+          'updated_time',
+          `insights.time_range(${time}){spend,impressions,clicks,ctr,cpc,reach,actions,action_values}`
+        ].join(',')
+      }),
+      this.graphGet<{ data: any[] }>(`${campaignId}/adsets`, {
+        fields: [
+          'name',
+          'status',
+          'effective_status',
+          'daily_budget',
+          'lifetime_budget',
+          'optimization_goal',
+          'billing_event',
+          `insights.time_range(${time}){spend,impressions,clicks,ctr,cpc,reach,actions,action_values}`
+        ].join(','),
+        limit: '100'
+      }),
+      this.graphGet<{ data: any[] }>(`${campaignId}/ads`, {
+        fields: [
+          'name',
+          'status',
+          'effective_status',
+          'adset_id',
+          'creative{id,name,thumbnail_url}',
+          `insights.time_range(${time}){spend,impressions,clicks,ctr,cpc,reach,actions,action_values}`
+        ].join(','),
+        limit: '100'
+      })
+    ]);
+
+    return {
+      from,
+      to,
+      campaign: this.mapCampaign(campaignRaw),
+      createdTime: campaignRaw.created_time ?? null,
+      updatedTime: campaignRaw.updated_time ?? null,
+      effectiveStatus: campaignRaw.effective_status ?? null,
+      adsets: (adsetsRaw.data ?? []).map((adset) => this.mapAdSet(adset)),
+      ads: (adsRaw.data ?? []).map((ad) => this.mapAd(ad))
+    };
+  }
+
   private mapCampaign(c: any): CampaignInsight {
-    const ins = c.insights?.data?.[0];
+    const perf = this.mapPerformance(c.insights?.data?.[0]);
+    return {
+      id: c.id,
+      name: c.name,
+      status: c.status,
+      objective: c.objective ?? null,
+      ...perf
+    };
+  }
+
+  private mapAdSet(adset: any): AdSetInsight {
+    return {
+      id: adset.id,
+      name: adset.name,
+      status: adset.status,
+      effectiveStatus: adset.effective_status ?? null,
+      dailyBudget: adset.daily_budget != null ? +(Number(adset.daily_budget) / 100).toFixed(2) : null,
+      lifetimeBudget: adset.lifetime_budget != null ? +(Number(adset.lifetime_budget) / 100).toFixed(2) : null,
+      optimizationGoal: adset.optimization_goal ?? null,
+      billingEvent: adset.billing_event ?? null,
+      ...this.mapPerformance(adset.insights?.data?.[0])
+    };
+  }
+
+  private mapAd(ad: any): AdInsight {
+    return {
+      id: ad.id,
+      name: ad.name,
+      status: ad.status,
+      effectiveStatus: ad.effective_status ?? null,
+      adsetId: ad.adset_id ?? null,
+      creativeId: ad.creative?.id ?? null,
+      creativeName: ad.creative?.name ?? null,
+      thumbnailUrl: ad.creative?.thumbnail_url ?? null,
+      ...this.mapPerformance(ad.insights?.data?.[0])
+    };
+  }
+
+  private mapPerformance(ins: any): MetaPerformanceInsight {
     const actions: any[] = ins?.actions ?? [];
     const values: any[] = ins?.action_values ?? [];
     const purchaseAction = actions.find((a) => a.action_type === 'purchase' || a.action_type === 'omni_purchase');
@@ -528,10 +653,6 @@ export class MetaService {
     const spend = Number(ins?.spend ?? 0);
     const pv = Number(purchaseValue?.value ?? 0);
     return {
-      id: c.id,
-      name: c.name,
-      status: c.status,
-      objective: c.objective ?? null,
       spend: +spend.toFixed(2),
       impressions: Number(ins?.impressions ?? 0),
       clicks: Number(ins?.clicks ?? 0),

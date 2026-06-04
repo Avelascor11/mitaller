@@ -23,6 +23,12 @@ export class MetaController {
     return this.meta.campaigns(from ?? today, to ?? today);
   }
 
+  @Get('campaigns/:id')
+  campaignDetail(@Param('id') id: string, @Query('from') from?: string, @Query('to') to?: string) {
+    const today = new Date().toISOString().slice(0, 10);
+    return this.meta.campaignDetail(id, from ?? today, to ?? today);
+  }
+
   @Get('templates')
   templates() {
     return this.meta.campaignTemplates();
