@@ -168,9 +168,14 @@ export class MetaService {
     const conversations = await this.fetchInstagramConversations(cappedLimit);
     const imported: Array<{ influencerId: string; igHandle: string; score: number; reason: string; messagePreview: string | null }> = [];
     let ignored = 0;
+    let failed = 0;
 
     for (const conversation of conversations) {
-      const messages = this.extractConversationMessages(conversation);
+      const messages = await this.fetchConversationMessages(conversation.id);
+      if (!messages.length) {
+        failed += 1;
+        continue;
+      }
       const text = messages.map((message) => message.text).filter(Boolean).join('\n');
       const detection = this.detectInfluencerIntent(text);
       if (!detection.isCandidate) {
@@ -212,20 +217,38 @@ export class MetaService {
       });
     }
 
-    return { ok: true, checked: conversations.length, imported: imported.length, ignored, influencers: imported };
+    return { ok: true, checked: conversations.length, imported: imported.length, ignored, failed, influencers: imported };
   }
 
   private async fetchInstagramConversations(limit: number) {
     const response = await this.graphGet<{ data?: any[] }>(`${this.pageId}/conversations`, {
       platform: 'instagram',
       limit: String(limit),
-      fields: 'participants,messages.limit(10){message,from,created_time}'
+      fields: 'id,participants,updated_time'
     });
     return Array.isArray(response.data) ? response.data : [];
   }
 
+  private async fetchConversationMessages(conversationId?: string): Promise<ImportedConversationMessage[]> {
+    if (!conversationId) return [];
+    try {
+      const response = await this.graphGet<{ data?: any[] }>(`${conversationId}/messages`, {
+        limit: '8',
+        fields: 'message,from,created_time'
+      });
+      return this.mapConversationMessages(response.data ?? []);
+    } catch (error) {
+      this.logger.warn(`No se pudieron leer mensajes de conversacion ${conversationId}: ${(error as Error).message}`);
+      return [];
+    }
+  }
+
   private extractConversationMessages(conversation: any): ImportedConversationMessage[] {
     const rawMessages = Array.isArray(conversation?.messages?.data) ? conversation.messages.data : [];
+    return this.mapConversationMessages(rawMessages);
+  }
+
+  private mapConversationMessages(rawMessages: any[]): ImportedConversationMessage[] {
     return rawMessages
       .map((message: any) => ({
         text: typeof message?.message === 'string' ? message.message : '',
