@@ -42,8 +42,8 @@ struct APIClient {
         config.requestCachePolicy = .useProtocolCachePolicy
         config.urlCache = URLCache(memoryCapacity: 32 * 1024 * 1024, diskCapacity: 256 * 1024 * 1024, diskPath: "mitaller-http")
         config.waitsForConnectivity = true
-        config.timeoutIntervalForRequest = 12
-        config.timeoutIntervalForResource = 30
+        config.timeoutIntervalForRequest = 60
+        config.timeoutIntervalForResource = 90
         return URLSession(configuration: config)
     }()
 
@@ -359,20 +359,20 @@ struct APIClient {
         return try await perform(request)
     }
 
-    private func jsonRequest<T: Encodable>(path: String, method: String, body: T) throws -> URLRequest {
-        var request = try request(path: path, method: method)
+    private func jsonRequest<T: Encodable>(path: String, method: String, body: T, timeout: TimeInterval = 60) throws -> URLRequest {
+        var request = try request(path: path, method: method, timeout: timeout)
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = try JSONEncoder().encode(body)
         return request
     }
 
-    private func request(path: String, method: String) throws -> URLRequest {
+    private func request(path: String, method: String, timeout: TimeInterval = 12) throws -> URLRequest {
         guard let url = URL(string: path, relativeTo: baseURL) else {
             throw APIClientError.invalidURL
         }
         var request = URLRequest(url: url)
         request.httpMethod = method
-        request.timeoutInterval = 12
+        request.timeoutInterval = timeout
         if let token {
             request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         }
