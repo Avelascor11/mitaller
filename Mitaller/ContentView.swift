@@ -7130,9 +7130,26 @@ struct MetaRecommendationsCard: View {
     @State private var resultMessage: String?
     @State private var errorMessage: String?
     @State private var history = MetaRecommendationDecisionStore.load()
+    @State private var autoApplying = false
+    @AppStorage("metaAutoApplyRecommendationsEnabled.v1") private var autoApplyFutureRecommendations = false
 
     private var automaticCount: Int {
         recommendations.filter(\.isAutomaticallyApplicable).count
+    }
+
+    private var pendingAutomaticRecommendations: [MetaRecommendation] {
+        recommendations
+            .prefix(6)
+            .filter { $0.isAutomaticallyApplicable }
+            .filter { recommendation in
+                !history.contains { $0.recommendationId == recommendation.id }
+            }
+    }
+
+    private var autoApplyTaskKey: String {
+        let ids = recommendations.prefix(6).map(\.id).joined(separator: "|")
+        let applied = history.map(\.recommendationId).joined(separator: "|")
+        return "\(autoApplyFutureRecommendations)-\(ids)-\(applied)"
     }
 
     var body: some View {
@@ -7160,6 +7177,33 @@ struct MetaRecommendationsCard: View {
                             .foregroundStyle(AppTheme.muted)
                     }
                 }
+            }
+
+            if !recommendations.isEmpty {
+                VStack(alignment: .leading, spacing: 8) {
+                    Toggle(isOn: $autoApplyFutureRecommendations) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Auto aplicar futuras")
+                                .font(.caption.weight(.heavy))
+                                .foregroundStyle(AppTheme.ink)
+                            Text(autoApplyFutureRecommendations ? "Activo: aplicara subidas/pausas seguras al refrescar." : "Apagado: solo aplicas cambios cuando pulses el boton.")
+                                .font(.caption2.weight(.semibold))
+                                .foregroundStyle(AppTheme.muted)
+                        }
+                    }
+                    .toggleStyle(.switch)
+                    if autoApplyFutureRecommendations {
+                        Label(
+                            pendingAutomaticRecommendations.isEmpty ? "No hay recomendaciones automaticas pendientes." : "\(pendingAutomaticRecommendations.count) recomendacion(es) se aplicaran automaticamente.",
+                            systemImage: autoApplying ? "arrow.triangle.2.circlepath" : "shield.checkered"
+                        )
+                        .font(.caption2.weight(.bold))
+                        .foregroundStyle(autoApplying ? AppTheme.amber : AppTheme.green)
+                    }
+                }
+                .padding(12)
+                .background(AppTheme.surfaceSoft, in: RoundedRectangle(cornerRadius: 14))
+                .overlay(RoundedRectangle(cornerRadius: 14).stroke(AppTheme.green.opacity(autoApplyFutureRecommendations ? 0.35 : 0.12)))
             }
 
             if recommendations.isEmpty {
@@ -7209,9 +7253,12 @@ struct MetaRecommendationsCard: View {
             }
         }
         .glassPanel(padding: 14, accent: AppTheme.amber)
+        .task(id: autoApplyTaskKey) {
+            await autoApplyPendingIfNeeded()
+        }
     }
 
-    private func apply(_ recommendation: MetaRecommendation) async {
+    private func apply(_ recommendation: MetaRecommendation, source: String = "manual", reloadAfterApply: Bool = true) async {
         guard let client = store.apiClient else {
             errorMessage = "API no configurada"
             return
@@ -7232,10 +7279,32 @@ struct MetaRecommendationsCard: View {
                 suggestedDailyBudget: recommendation.suggestedDailyBudget
             ))
             resultMessage = result.message
-            record(recommendation, decision: recommendation.severity == "PAUSE" ? "Pausada" : "Aplicada", message: result.message)
-            onApplied()
+            let prefix = source == "auto" ? "Auto " : ""
+            record(recommendation, decision: prefix + (recommendation.severity == "PAUSE" ? "pausada" : "aplicada"), message: result.message)
+            if reloadAfterApply { onApplied() }
         } catch {
             errorMessage = error.localizedDescription
+        }
+    }
+
+    private func autoApplyPendingIfNeeded() async {
+        guard autoApplyFutureRecommendations, !autoApplying else { return }
+        let pending = pendingAutomaticRecommendations
+        guard !pending.isEmpty else { return }
+
+        autoApplying = true
+        errorMessage = nil
+        resultMessage = nil
+        defer { autoApplying = false }
+
+        var applied = 0
+        for recommendation in pending {
+            await apply(recommendation, source: "auto", reloadAfterApply: false)
+            if errorMessage == nil { applied += 1 }
+        }
+        if applied > 0 {
+            resultMessage = "Auto aplicado: \(applied) recomendacion(es)."
+            onApplied()
         }
     }
 
