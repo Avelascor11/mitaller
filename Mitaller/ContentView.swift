@@ -6910,6 +6910,11 @@ struct MetaAdsView: View {
                                 .glassPanel(padding: 10, accent: AppTheme.amber)
                         }
                         MetaKpiCard(summary: summary)
+                        MetaRecommendationsCard(
+                            title: "Recomendaciones",
+                            subtitle: "Lectura experta del rendimiento actual",
+                            recommendations: summary.recommendations ?? []
+                        )
 
                         if !summary.campaigns.isEmpty {
                             SectionHeader(title: "Campañas", subtitle: "\(filteredCampaigns.count) de \(summary.campaigns.count) en el rango seleccionado")
@@ -7058,6 +7063,132 @@ struct MetaStat: View {
     }
 }
 
+struct MetaRecommendationsCard: View {
+    let title: String
+    let subtitle: String
+    let recommendations: [MetaRecommendation]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .firstTextBaseline) {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(title)
+                        .font(.headline.weight(.heavy))
+                        .foregroundStyle(AppTheme.ink)
+                    Text(subtitle)
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(AppTheme.muted)
+                }
+                Spacer()
+                Text("\(recommendations.count)")
+                    .font(.caption.weight(.heavy))
+                    .padding(.horizontal, 9)
+                    .padding(.vertical, 5)
+                    .background(AppTheme.blue.opacity(0.16), in: Capsule())
+                    .foregroundStyle(AppTheme.blue)
+            }
+
+            if recommendations.isEmpty {
+                HStack(spacing: 10) {
+                    Image(systemName: "checkmark.seal.fill")
+                        .foregroundStyle(AppTheme.green)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Sin alertas claras")
+                            .font(.subheadline.weight(.heavy))
+                            .foregroundStyle(AppTheme.ink)
+                        Text("No hay suficiente señal negativa o positiva para recomendar cambios fuertes.")
+                            .font(.caption)
+                            .foregroundStyle(AppTheme.muted)
+                    }
+                }
+                .padding(12)
+                .background(AppTheme.surfaceSoft, in: RoundedRectangle(cornerRadius: 14))
+            } else {
+                ForEach(recommendations.prefix(6)) { recommendation in
+                    MetaRecommendationRow(recommendation: recommendation)
+                }
+            }
+        }
+        .glassPanel(padding: 14, accent: AppTheme.amber)
+    }
+}
+
+struct MetaRecommendationRow: View {
+    let recommendation: MetaRecommendation
+
+    private var color: Color {
+        switch recommendation.severity {
+        case "SCALE": AppTheme.green
+        case "PAUSE": AppTheme.red
+        case "FIX": AppTheme.amber
+        case "WATCH": AppTheme.blue
+        default: AppTheme.muted
+        }
+    }
+
+    private var icon: String {
+        switch recommendation.severity {
+        case "SCALE": "arrow.up.right.circle.fill"
+        case "PAUSE": "pause.circle.fill"
+        case "FIX": "wrench.and.screwdriver.fill"
+        case "WATCH": "eye.circle.fill"
+        default: "info.circle.fill"
+        }
+    }
+
+    private var label: String {
+        switch recommendation.severity {
+        case "SCALE": "ESCALAR"
+        case "PAUSE": "PAUSAR"
+        case "FIX": "ARREGLAR"
+        case "WATCH": "VIGILAR"
+        default: "INFO"
+        }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 9) {
+            HStack(alignment: .top, spacing: 10) {
+                Image(systemName: icon)
+                    .font(.title3)
+                    .foregroundStyle(color)
+                    .frame(width: 26)
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack(spacing: 8) {
+                        Text(label)
+                            .font(.caption2.weight(.black))
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 4)
+                            .background(color.opacity(0.18), in: Capsule())
+                            .foregroundStyle(color)
+                        Text(recommendation.metricLabel)
+                            .font(.caption2.weight(.heavy))
+                            .foregroundStyle(AppTheme.muted)
+                    }
+                    Text(recommendation.title)
+                        .font(.subheadline.weight(.heavy))
+                        .foregroundStyle(AppTheme.ink)
+                    Text(recommendation.targetName)
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(AppTheme.muted)
+                        .lineLimit(1)
+                }
+                Spacer()
+            }
+            Text(recommendation.reason)
+                .font(.caption)
+                .foregroundStyle(AppTheme.muted)
+            Text(recommendation.action)
+                .font(.caption.weight(.bold))
+                .foregroundStyle(color)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(12)
+        .background(AppTheme.surfaceSoft, in: RoundedRectangle(cornerRadius: 14))
+        .overlay(RoundedRectangle(cornerRadius: 14).stroke(color.opacity(0.28)))
+    }
+}
+
 struct MetaCampaignToolbar: View {
     @Binding var searchText: String
     @Binding var filter: MetaAdsView.CampaignFilter
@@ -7191,8 +7322,14 @@ struct MetaCampaignDetailView: View {
                         roas: detail.campaign.roas,
                         activeCampaigns: detail.campaign.status == "ACTIVE" ? 1 : 0,
                         campaigns: [detail.campaign],
+                        recommendations: nil,
                         bestSellers: []
                     ))
+                    MetaRecommendationsCard(
+                        title: "Que haria ahora",
+                        subtitle: "Campaña, grupos y anuncios de esta vista",
+                        recommendations: detail.recommendations ?? []
+                    )
 
                     HStack(spacing: 10) {
                         Picker("Vista", selection: $selectedTab) {

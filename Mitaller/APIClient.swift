@@ -467,6 +467,21 @@ struct MetaAd: Decodable, Identifiable {
     let roas: Double?
 }
 
+struct MetaRecommendation: Decodable, Identifiable {
+    let id: String
+    let targetType: String
+    let targetId: String?
+    let targetName: String
+    let severity: String
+    let title: String
+    let reason: String
+    let action: String
+    let metricLabel: String
+    let priority: Int
+    let currentDailyBudget: Double?
+    let suggestedDailyBudget: Double?
+}
+
 struct MetaCampaignDetail: Decodable {
     let from: String
     let to: String
@@ -476,6 +491,7 @@ struct MetaCampaignDetail: Decodable {
     let effectiveStatus: String?
     let adsets: [MetaAdSet]
     let ads: [MetaAd]
+    let recommendations: [MetaRecommendation]?
 }
 
 struct MetaBestSeller: Decodable, Identifiable {
@@ -497,6 +513,7 @@ struct MetaSummary: Decodable {
     let roas: Double?
     let activeCampaigns: Int
     let campaigns: [MetaCampaign]
+    let recommendations: [MetaRecommendation]?
     let bestSellers: [MetaBestSeller]
 }
 

@@ -55,6 +55,21 @@ export interface AdInsight extends MetaPerformanceInsight {
   thumbnailUrl: string | null;
 }
 
+export interface MetaRecommendation {
+  id: string;
+  targetType: 'ACCOUNT' | 'CAMPAIGN' | 'ADSET' | 'AD';
+  targetId: string | null;
+  targetName: string;
+  severity: 'SCALE' | 'PAUSE' | 'WATCH' | 'FIX' | 'INFO';
+  title: string;
+  reason: string;
+  action: string;
+  metricLabel: string;
+  priority: number;
+  currentDailyBudget: number | null;
+  suggestedDailyBudget: number | null;
+}
+
 export interface BestSeller {
   sku: string | null;
   title: string;
@@ -602,7 +617,12 @@ export class MetaService {
       updatedTime: campaignRaw.updated_time ?? null,
       effectiveStatus: campaignRaw.effective_status ?? null,
       adsets: (adsetsRaw.data ?? []).map((adset) => this.mapAdSet(adset)),
-      ads: (adsRaw.data ?? []).map((ad) => this.mapAd(ad))
+      ads: (adsRaw.data ?? []).map((ad) => this.mapAd(ad)),
+      recommendations: this.buildDetailRecommendations(
+        this.mapCampaign(campaignRaw),
+        (adsetsRaw.data ?? []).map((adset) => this.mapAdSet(adset)),
+        (adsRaw.data ?? []).map((ad) => this.mapAd(ad))
+      )
     };
   }
 
@@ -712,8 +732,245 @@ export class MetaService {
       roas: spend > 0 ? +(revenue / spend).toFixed(2) : null,
       activeCampaigns: campaigns.filter((c) => c.status === 'ACTIVE').length,
       campaigns,
+      recommendations: this.buildCampaignRecommendations(campaigns, spend > 0 ? revenue / spend : null),
       bestSellers
     };
+  }
+
+  private buildCampaignRecommendations(campaigns: CampaignInsight[], accountRoas: number | null): MetaRecommendation[] {
+    const recommendations: MetaRecommendation[] = [];
+    const active = campaigns.filter((campaign) => campaign.status === 'ACTIVE');
+    const totalSpend = campaigns.reduce((sum, campaign) => sum + campaign.spend, 0);
+    const totalPurchases = campaigns.reduce((sum, campaign) => sum + campaign.purchases, 0);
+
+    if (totalSpend >= 20 && totalPurchases === 0) {
+      recommendations.push(this.recommendation({
+        targetType: 'ACCOUNT',
+        targetId: null,
+        targetName: 'Cuenta Meta Ads',
+        severity: 'WATCH',
+        title: 'Hay gasto sin compras atribuidas',
+        reason: `Se han gastado ${this.money(totalSpend)} en el rango y Meta no atribuye compras.`,
+        action: 'Revisa pixel, eventos de compra y campañas activas antes de subir presupuesto.',
+        metricLabel: `${this.money(totalSpend)} · 0 compras`,
+        priority: 92
+      }));
+    }
+
+    if (accountRoas != null && totalSpend >= 25 && accountRoas < 1.2) {
+      recommendations.push(this.recommendation({
+        targetType: 'ACCOUNT',
+        targetId: null,
+        targetName: 'Cuenta Meta Ads',
+        severity: 'FIX',
+        title: 'ROAS global bajo',
+        reason: `El ROAS global del rango es ${accountRoas.toFixed(2)}x.`,
+        action: 'No escales presupuesto general; concentra gasto en campañas con compras y pausa pruebas flojas.',
+        metricLabel: `${accountRoas.toFixed(2)}x ROAS`,
+        priority: 88
+      }));
+    }
+
+    for (const campaign of active) {
+      recommendations.push(...this.recommendForPerformance({
+        targetType: 'CAMPAIGN',
+        targetId: campaign.id,
+        targetName: campaign.name,
+        status: campaign.status,
+        spend: campaign.spend,
+        purchases: campaign.purchases,
+        roas: campaign.roas,
+        ctr: campaign.ctr,
+        impressions: campaign.impressions
+      }));
+    }
+
+    return this.rankRecommendations(recommendations);
+  }
+
+  private buildDetailRecommendations(campaign: CampaignInsight, adsets: AdSetInsight[], ads: AdInsight[]) {
+    const recommendations: MetaRecommendation[] = [];
+    recommendations.push(...this.recommendForPerformance({
+      targetType: 'CAMPAIGN',
+      targetId: campaign.id,
+      targetName: campaign.name,
+      status: campaign.status,
+      spend: campaign.spend,
+      purchases: campaign.purchases,
+      roas: campaign.roas,
+      ctr: campaign.ctr,
+      impressions: campaign.impressions
+    }));
+
+    for (const adset of adsets.filter((item) => item.status === 'ACTIVE')) {
+      recommendations.push(...this.recommendForPerformance({
+        targetType: 'ADSET',
+        targetId: adset.id,
+        targetName: adset.name,
+        status: adset.status,
+        spend: adset.spend,
+        purchases: adset.purchases,
+        roas: adset.roas,
+        ctr: adset.ctr,
+        impressions: adset.impressions,
+        dailyBudget: adset.dailyBudget
+      }));
+    }
+
+    for (const ad of ads.filter((item) => item.status === 'ACTIVE')) {
+      recommendations.push(...this.recommendForPerformance({
+        targetType: 'AD',
+        targetId: ad.id,
+        targetName: ad.name,
+        status: ad.status,
+        spend: ad.spend,
+        purchases: ad.purchases,
+        roas: ad.roas,
+        ctr: ad.ctr,
+        impressions: ad.impressions
+      }));
+    }
+
+    const bestAd = ads
+      .filter((ad) => ad.spend >= 5 && ad.purchases > 0)
+      .sort((a, b) => (b.roas ?? 0) - (a.roas ?? 0))[0];
+    if (bestAd && (bestAd.roas ?? 0) >= 2.5) {
+      recommendations.push(this.recommendation({
+        targetType: 'AD',
+        targetId: bestAd.id,
+        targetName: bestAd.name,
+        severity: 'SCALE',
+        title: 'Anuncio ganador detectado',
+        reason: `${bestAd.name} tiene ${bestAd.purchases} compras y ROAS ${bestAd.roas?.toFixed(2)}x.`,
+        action: 'Usalo como referencia creativa. Replica angulo, primera frase y visual en nuevas variantes.',
+        metricLabel: `${bestAd.roas?.toFixed(2)}x · ${bestAd.purchases} compras`,
+        priority: 86
+      }));
+    }
+
+    return this.rankRecommendations(recommendations);
+  }
+
+  private recommendForPerformance(input: {
+    targetType: 'CAMPAIGN' | 'ADSET' | 'AD';
+    targetId: string;
+    targetName: string;
+    status: string;
+    spend: number;
+    purchases: number;
+    roas: number | null;
+    ctr: number | null;
+    impressions: number;
+    dailyBudget?: number | null;
+  }): MetaRecommendation[] {
+    if (input.status !== 'ACTIVE') return [];
+    const recommendations: MetaRecommendation[] = [];
+    const label = input.targetType === 'CAMPAIGN' ? 'campaña' : input.targetType === 'ADSET' ? 'grupo' : 'anuncio';
+    const budget = input.dailyBudget ?? null;
+    const suggestedBudget = budget != null ? +(budget * 1.15).toFixed(2) : null;
+
+    if (input.spend >= 8 && input.purchases === 0) {
+      recommendations.push(this.recommendation({
+        targetType: input.targetType,
+        targetId: input.targetId,
+        targetName: input.targetName,
+        severity: input.spend >= 20 ? 'PAUSE' : 'WATCH',
+        title: input.spend >= 20 ? `Pausaria este ${label}` : `Vigila este ${label}`,
+        reason: `${input.targetName} lleva ${this.money(input.spend)} de gasto y 0 compras.`,
+        action: input.spend >= 20
+          ? 'Pausalo o baja presupuesto hasta revisar audiencia, creatividad y evento de compra.'
+          : 'Dale poco margen mas, pero no subas presupuesto hasta que genere compra.',
+        metricLabel: `${this.money(input.spend)} · 0 compras`,
+        priority: input.spend >= 20 ? 96 : 78
+      }));
+    }
+
+    if (input.spend >= 12 && input.purchases > 0 && (input.roas ?? 0) < 1.1) {
+      recommendations.push(this.recommendation({
+        targetType: input.targetType,
+        targetId: input.targetId,
+        targetName: input.targetName,
+        severity: 'FIX',
+        title: `Rentabilidad floja en este ${label}`,
+        reason: `${input.targetName} consigue compras, pero con ROAS ${input.roas?.toFixed(2) ?? '0.00'}x.`,
+        action: 'No escales. Revisa margen, oferta, precio y landing antes de meter mas presupuesto.',
+        metricLabel: `${input.roas?.toFixed(2) ?? '0.00'}x ROAS`,
+        priority: 84
+      }));
+    }
+
+    if (input.spend >= 10 && input.purchases >= 2 && (input.roas ?? 0) >= 2.2) {
+      recommendations.push(this.recommendation({
+        targetType: input.targetType,
+        targetId: input.targetId,
+        targetName: input.targetName,
+        severity: 'SCALE',
+        title: `Subiria presupuesto en este ${label}`,
+        reason: `${input.targetName} tiene ${input.purchases} compras y ROAS ${input.roas?.toFixed(2)}x.`,
+        action: suggestedBudget != null
+          ? `Sube de ${this.money(budget ?? 0)} a ${this.money(suggestedBudget)} diarios y vuelve a revisar manana.`
+          : 'Sube presupuesto un 10-15% y vuelve a revisar manana; evita duplicar de golpe.',
+        metricLabel: `${input.roas?.toFixed(2)}x · ${input.purchases} compras`,
+        priority: 90,
+        currentDailyBudget: budget,
+        suggestedDailyBudget: suggestedBudget
+      }));
+    }
+
+    if (input.impressions >= 1500 && input.spend >= 5 && (input.ctr ?? 0) > 0 && (input.ctr ?? 0) < 0.8) {
+      recommendations.push(this.recommendation({
+        targetType: input.targetType,
+        targetId: input.targetId,
+        targetName: input.targetName,
+        severity: 'FIX',
+        title: `CTR bajo en este ${label}`,
+        reason: `${input.targetName} tiene CTR ${input.ctr?.toFixed(2)}% con ${input.impressions} impresiones.`,
+        action: 'Cambia gancho, primera imagen/video o texto inicial. El problema parece mas creativo que presupuesto.',
+        metricLabel: `${input.ctr?.toFixed(2)}% CTR`,
+        priority: 72
+      }));
+    }
+
+    if (input.spend < 5 && input.impressions < 1000) {
+      recommendations.push(this.recommendation({
+        targetType: input.targetType,
+        targetId: input.targetId,
+        targetName: input.targetName,
+        severity: 'INFO',
+        title: `Aun falta muestra en este ${label}`,
+        reason: `${input.targetName} solo lleva ${this.money(input.spend)} de gasto.`,
+        action: 'No tomes decisiones fuertes todavia; espera mas datos salvo que veas un error claro.',
+        metricLabel: `${this.money(input.spend)} gastados`,
+        priority: 30
+      }));
+    }
+
+    return recommendations;
+  }
+
+  private recommendation(input: Omit<MetaRecommendation, 'id' | 'currentDailyBudget' | 'suggestedDailyBudget'> & Partial<Pick<MetaRecommendation, 'currentDailyBudget' | 'suggestedDailyBudget'>>) {
+    return {
+      id: `${input.targetType}:${input.targetId ?? 'account'}:${input.severity}:${input.title}`.toLowerCase().replace(/[^a-z0-9]+/g, '-'),
+      currentDailyBudget: input.currentDailyBudget ?? null,
+      suggestedDailyBudget: input.suggestedDailyBudget ?? null,
+      ...input
+    };
+  }
+
+  private rankRecommendations(items: MetaRecommendation[]) {
+    const seen = new Set<string>();
+    return items
+      .sort((a, b) => b.priority - a.priority)
+      .filter((item) => {
+        if (seen.has(item.id)) return false;
+        seen.add(item.id);
+        return true;
+      })
+      .slice(0, 12);
+  }
+
+  private money(value: number) {
+    return `${value.toFixed(2)} €`;
   }
 
   // ---------- template (existing campaign structure) ----------
