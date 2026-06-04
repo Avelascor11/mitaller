@@ -7129,6 +7129,11 @@ struct MetaRecommendationsCard: View {
     @State private var applyingId: String?
     @State private var resultMessage: String?
     @State private var errorMessage: String?
+    @State private var history = MetaRecommendationDecisionStore.load()
+
+    private var automaticCount: Int {
+        recommendations.filter(\.isAutomaticallyApplicable).count
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -7142,12 +7147,19 @@ struct MetaRecommendationsCard: View {
                         .foregroundStyle(AppTheme.muted)
                 }
                 Spacer()
-                Text("\(recommendations.count)")
-                    .font(.caption.weight(.heavy))
-                    .padding(.horizontal, 9)
-                    .padding(.vertical, 5)
-                    .background(AppTheme.blue.opacity(0.16), in: Capsule())
-                    .foregroundStyle(AppTheme.blue)
+                VStack(alignment: .trailing, spacing: 4) {
+                    Text("\(recommendations.count)")
+                        .font(.caption.weight(.heavy))
+                        .padding(.horizontal, 9)
+                        .padding(.vertical, 5)
+                        .background(AppTheme.blue.opacity(0.16), in: Capsule())
+                        .foregroundStyle(AppTheme.blue)
+                    if !recommendations.isEmpty {
+                        Text("\(automaticCount) aplicables")
+                            .font(.caption2.weight(.bold))
+                            .foregroundStyle(AppTheme.muted)
+                    }
+                }
             }
 
             if recommendations.isEmpty {
@@ -7170,7 +7182,8 @@ struct MetaRecommendationsCard: View {
                     MetaRecommendationRow(
                         recommendation: recommendation,
                         applying: applyingId == recommendation.id,
-                        onApply: { Task { await apply(recommendation) } }
+                        onApply: { Task { await apply(recommendation) } },
+                        onManualReview: { markManual(recommendation) }
                     )
                 }
             }
@@ -7189,6 +7202,10 @@ struct MetaRecommendationsCard: View {
                     .foregroundStyle(AppTheme.red)
                     .padding(10)
                     .background(AppTheme.red.opacity(0.12), in: RoundedRectangle(cornerRadius: 12))
+            }
+
+            if !history.isEmpty {
+                MetaRecommendationHistoryView(history: history)
             }
         }
         .glassPanel(padding: 14, accent: AppTheme.amber)
@@ -7215,10 +7232,31 @@ struct MetaRecommendationsCard: View {
                 suggestedDailyBudget: recommendation.suggestedDailyBudget
             ))
             resultMessage = result.message
+            record(recommendation, decision: recommendation.severity == "PAUSE" ? "Pausada" : "Aplicada", message: result.message)
             onApplied()
         } catch {
             errorMessage = error.localizedDescription
         }
+    }
+
+    private func markManual(_ recommendation: MetaRecommendation) {
+        resultMessage = "Recomendacion marcada para revision manual."
+        errorMessage = nil
+        record(recommendation, decision: "Revision manual", message: recommendation.action)
+    }
+
+    private func record(_ recommendation: MetaRecommendation, decision: String, message: String) {
+        let entry = MetaRecommendationDecision(
+            id: UUID().uuidString,
+            recommendationId: recommendation.id,
+            targetName: recommendation.targetName,
+            title: recommendation.title,
+            severity: recommendation.severity,
+            decision: decision,
+            message: message,
+            createdAt: Date()
+        )
+        history = MetaRecommendationDecisionStore.save([entry] + history)
     }
 }
 
@@ -7226,6 +7264,7 @@ struct MetaRecommendationRow: View {
     let recommendation: MetaRecommendation
     let applying: Bool
     let onApply: () -> Void
+    let onManualReview: () -> Void
     @State private var confirming = false
 
     private var confirmSummary: String {
@@ -7242,6 +7281,47 @@ struct MetaRecommendationRow: View {
             return "Se PAUSARÁ \(recommendation.targetName) en Meta Ads ahora mismo. Dejará de gastar y de mostrarse."
         default:
             return "Se aplicará el cambio en Meta Ads."
+        }
+    }
+
+    private var impactText: String {
+        switch recommendation.severity {
+        case "SCALE":
+            if recommendation.targetType == "CAMPAIGN" {
+                return "Impacto: sube presupuesto diario un 15% en campaña o grupos activos."
+            }
+            if let current = recommendation.currentDailyBudget, let suggested = recommendation.suggestedDailyBudget {
+                return "Impacto: \(String(format: "%.2f €", current)) -> \(String(format: "%.2f €", suggested)) al dia."
+            }
+            if let suggested = recommendation.suggestedDailyBudget {
+                return "Impacto: nuevo presupuesto diario \(String(format: "%.2f €", suggested))."
+            }
+            return "Impacto: subida de presupuesto pendiente de calcular."
+        case "PAUSE":
+            return "Impacto: deja de gastar y de mostrarse desde Meta Ads."
+        default:
+            return manualReason
+        }
+    }
+
+    private var manualReason: String {
+        if recommendation.targetId == nil {
+            return "Revision manual: no hay objetivo directo en Meta Ads."
+        }
+        switch recommendation.severity {
+        case "FIX":
+            return "Revision manual: hay que corregir configuracion o creatividad antes de tocar presupuesto."
+        case "WATCH":
+            return "Revision manual: aun no hay señal suficiente para tocar Meta Ads automaticamente."
+        case "INFO":
+            return "Informativo: sirve para entender el rendimiento, no para aplicar cambios."
+        case "SCALE":
+            if recommendation.targetType == "AD" {
+                return "Revision manual: Meta no permite subir presupuesto a nivel anuncio."
+            }
+            return "Revision manual: falta presupuesto sugerido editable."
+        default:
+            return "Revision manual: esta recomendacion no tiene accion automatica segura."
         }
     }
 
@@ -7319,6 +7399,13 @@ struct MetaRecommendationRow: View {
                 .font(.caption.weight(.bold))
                 .foregroundStyle(color)
                 .fixedSize(horizontal: false, vertical: true)
+            Label(impactText, systemImage: recommendation.isAutomaticallyApplicable ? "bolt.fill" : "hand.raised.fill")
+                .font(.caption2.weight(.bold))
+                .foregroundStyle(recommendation.isAutomaticallyApplicable ? color : AppTheme.muted)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 7)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background((recommendation.isAutomaticallyApplicable ? color : AppTheme.muted).opacity(0.12), in: RoundedRectangle(cornerRadius: 10))
             if recommendation.isAutomaticallyApplicable {
                 Button(action: { confirming = true }) {
                     if applying {
@@ -7342,11 +7429,108 @@ struct MetaRecommendationRow: View {
                 } message: {
                     Text(confirmSummary)
                 }
+            } else {
+                Button(action: onManualReview) {
+                    Label("Marcar revisada", systemImage: "checkmark.circle")
+                        .font(.caption.weight(.heavy))
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.bordered)
+                .tint(AppTheme.muted)
             }
         }
         .padding(12)
         .background(AppTheme.surfaceSoft, in: RoundedRectangle(cornerRadius: 14))
         .overlay(RoundedRectangle(cornerRadius: 14).stroke(color.opacity(0.28)))
+    }
+}
+
+struct MetaRecommendationDecision: Codable, Identifiable {
+    let id: String
+    let recommendationId: String
+    let targetName: String
+    let title: String
+    let severity: String
+    let decision: String
+    let message: String
+    let createdAt: Date
+}
+
+enum MetaRecommendationDecisionStore {
+    private static let key = "metaRecommendationDecisionHistory.v1"
+    private static let limit = 12
+
+    static func load() -> [MetaRecommendationDecision] {
+        guard let data = UserDefaults.standard.data(forKey: key) else { return [] }
+        return (try? JSONDecoder().decode([MetaRecommendationDecision].self, from: data)) ?? []
+    }
+
+    @discardableResult
+    static func save(_ history: [MetaRecommendationDecision]) -> [MetaRecommendationDecision] {
+        let trimmed = Array(history.prefix(limit))
+        if let data = try? JSONEncoder().encode(trimmed) {
+            UserDefaults.standard.set(data, forKey: key)
+        }
+        return trimmed
+    }
+}
+
+struct MetaRecommendationHistoryView: View {
+    let history: [MetaRecommendationDecision]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Label("Historial reciente", systemImage: "clock.arrow.circlepath")
+                    .font(.caption.weight(.heavy))
+                    .foregroundStyle(AppTheme.ink)
+                Spacer()
+                Text("\(history.count)")
+                    .font(.caption2.weight(.black))
+                    .foregroundStyle(AppTheme.muted)
+            }
+            ForEach(history.prefix(4)) { item in
+                HStack(alignment: .top, spacing: 9) {
+                    Circle()
+                        .fill(color(for: item.severity))
+                        .frame(width: 8, height: 8)
+                        .padding(.top, 5)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("\(item.decision) · \(item.targetName)")
+                            .font(.caption.weight(.heavy))
+                            .foregroundStyle(AppTheme.ink)
+                            .lineLimit(1)
+                        Text(item.message)
+                            .font(.caption2)
+                            .foregroundStyle(AppTheme.muted)
+                            .lineLimit(2)
+                        Text(shortDate(item.createdAt))
+                            .font(.caption2.weight(.bold))
+                            .foregroundStyle(AppTheme.muted.opacity(0.8))
+                    }
+                }
+            }
+        }
+        .padding(12)
+        .background(AppTheme.surfaceSoft, in: RoundedRectangle(cornerRadius: 14))
+        .overlay(RoundedRectangle(cornerRadius: 14).stroke(AppTheme.line.opacity(0.6)))
+    }
+
+    private func color(for severity: String) -> Color {
+        switch severity {
+        case "SCALE": AppTheme.green
+        case "PAUSE": AppTheme.red
+        case "FIX": AppTheme.amber
+        case "WATCH": AppTheme.blue
+        default: AppTheme.muted
+        }
+    }
+
+    private func shortDate(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "es_ES")
+        formatter.dateFormat = "d MMM HH:mm"
+        return formatter.string(from: date)
     }
 }
 
