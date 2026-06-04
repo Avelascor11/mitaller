@@ -1123,23 +1123,60 @@ export class MetaService {
     }
 
     if (dto.severity === 'SCALE') {
-      if (dto.targetType !== 'ADSET') {
-        throw new BadRequestException('Solo puedo subir presupuesto automaticamente en grupos de anuncios con presupuesto diario');
+      // ADSET: bump the suggested daily budget directly.
+      if (dto.targetType === 'ADSET') {
+        const budget = Number(dto.suggestedDailyBudget ?? 0);
+        if (!Number.isFinite(budget) || budget <= 0) {
+          throw new BadRequestException('La recomendacion no incluye presupuesto sugerido valido');
+        }
+        await this.graphPost(dto.targetId, { daily_budget: Math.round(budget * 100) });
+        return {
+          ok: true,
+          applied: true,
+          targetType: dto.targetType,
+          targetId: dto.targetId,
+          action: 'BUDGET_UPDATED',
+          suggestedDailyBudget: +budget.toFixed(2),
+          message: `Presupuesto diario subido a ${budget.toFixed(2)} €.`
+        };
       }
-      const budget = Number(dto.suggestedDailyBudget ?? 0);
-      if (!Number.isFinite(budget) || budget <= 0) {
-        throw new BadRequestException('La recomendacion no incluye presupuesto sugerido valido');
+
+      // CAMPAIGN: resolve where the budget lives and bump +15%.
+      if (dto.targetType === 'CAMPAIGN') {
+        const campaign = await this.graphGet<{ daily_budget?: string }>(dto.targetId, { fields: 'daily_budget' });
+        const campBudget = Number(campaign.daily_budget ?? 0);
+        if (campBudget > 0) {
+          const next = +(campBudget / 100 * 1.15).toFixed(2);
+          await this.graphPost(dto.targetId, { daily_budget: Math.round(next * 100) });
+          return {
+            ok: true, applied: true, targetType: 'CAMPAIGN', targetId: dto.targetId,
+            action: 'BUDGET_UPDATED', suggestedDailyBudget: next,
+            message: `Presupuesto de campaña subido a ${next.toFixed(2)} €/día.`
+          };
+        }
+        // No CBO → budget lives on adsets. Bump each active adset with a daily budget.
+        const adsets = await this.graphGet<{ data: Array<{ id: string; daily_budget?: string; status?: string }> }>(
+          `${dto.targetId}/adsets`,
+          { fields: 'daily_budget,status', limit: '50' }
+        );
+        const targets = (adsets.data ?? []).filter((a) => Number(a.daily_budget ?? 0) > 0);
+        if (!targets.length) {
+          throw new BadRequestException('Esta campaña no tiene presupuesto diario editable (revisa presupuesto a nivel de grupo o de por vida en Meta).');
+        }
+        let total = 0;
+        for (const a of targets) {
+          const next = +(Number(a.daily_budget) / 100 * 1.15).toFixed(2);
+          await this.graphPost(a.id, { daily_budget: Math.round(next * 100) });
+          total += next;
+        }
+        return {
+          ok: true, applied: true, targetType: 'CAMPAIGN', targetId: dto.targetId,
+          action: 'BUDGET_UPDATED', suggestedDailyBudget: +total.toFixed(2),
+          message: `Subido +15% en ${targets.length} grupo(s). Nuevo total ${total.toFixed(2)} €/día.`
+        };
       }
-      await this.graphPost(dto.targetId, { daily_budget: Math.round(budget * 100) });
-      return {
-        ok: true,
-        applied: true,
-        targetType: dto.targetType,
-        targetId: dto.targetId,
-        action: 'BUDGET_UPDATED',
-        suggestedDailyBudget: +budget.toFixed(2),
-        message: `Presupuesto diario actualizado a ${budget.toFixed(2)} €.`
-      };
+
+      throw new BadRequestException('Solo puedo subir presupuesto en campañas o grupos de anuncios.');
     }
 
     return {

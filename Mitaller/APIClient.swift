@@ -488,7 +488,11 @@ struct MetaRecommendation: Decodable, Identifiable {
     var isAutomaticallyApplicable: Bool {
         guard targetId != nil else { return false }
         if severity == "PAUSE" { return targetType == "CAMPAIGN" || targetType == "ADSET" || targetType == "AD" }
-        if severity == "SCALE" { return targetType == "ADSET" && suggestedDailyBudget != nil }
+        if severity == "SCALE" {
+            // ADSET needs a suggested budget; CAMPAIGN is resolved server-side.
+            if targetType == "ADSET" { return suggestedDailyBudget != nil }
+            return targetType == "CAMPAIGN"
+        }
         return false
     }
 }
