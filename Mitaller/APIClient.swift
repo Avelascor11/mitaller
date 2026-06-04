@@ -301,6 +301,11 @@ struct APIClient {
         let request = try jsonRequest(path: "/meta/campaigns/\(Self.pathSegment(id))/status", method: "POST", body: MetaStatusRequest(status: status))
         let _: EmptyResponse = try await perform(request)
     }
+    func adsHealth(from: Date? = nil, to: Date? = nil) async throws -> AdsHealth {
+        let f = DateFormatter.apiDay
+        if let from, let to { return try await get("/economics/ads-health?from=\(f.string(from: from))&to=\(f.string(from: to))") }
+        return try await get("/economics/ads-health")
+    }
     func metaApplyRecommendation(_ body: MetaApplyRecommendationRequest) async throws -> MetaApplyRecommendationResult {
         let request = try jsonRequest(path: "/meta/recommendations/apply", method: "POST", body: body)
         return try await perform(request)
@@ -469,6 +474,34 @@ struct MetaAd: Decodable, Identifiable {
     let purchases: Int
     let purchaseValue: Double
     let roas: Double?
+}
+
+struct AdsHealthCampaign: Decodable, Identifiable {
+    let id: String
+    let name: String
+    let spend: Double
+    let purchases: Int
+    let roas: Double?
+    let cpa: Double?
+    let status: String
+    let message: String
+}
+
+struct AdsHealth: Decodable {
+    let from: String
+    let to: String
+    let currency: String
+    let status: String        // GOOD | WATCH | BAD | INFO
+    let headline: String
+    let spend: Double
+    let attributedRevenue: Double
+    let roas: Double?
+    let orders: Int
+    let salesRevenue: Double
+    let netMarginAfterAds: Double
+    let marginPerOrder: Double?
+    let breakEvenCpa: Double?
+    let campaigns: [AdsHealthCampaign]
 }
 
 struct MetaRecommendation: Decodable, Identifiable {

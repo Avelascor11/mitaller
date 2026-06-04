@@ -27,6 +27,11 @@ export class EconomicsController {
     return this.economics.productMargins();
   }
 
+  @Get('ads-health')
+  adsHealth(@Query('from') from?: string, @Query('to') to?: string) {
+    return this.economics.adsHealth(from, to);
+  }
+
   @Get('cashflow')
   cashflow() {
     return this.economics.cashflow();

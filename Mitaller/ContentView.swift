@@ -6783,6 +6783,7 @@ struct CreateInfluencerSheet: View {
 struct MetaAdsView: View {
     @Environment(WorkshopStore.self) private var store
     @State private var summary: MetaSummary?
+    @State private var health: AdsHealth?
     @State private var loading = false
     @State private var error: String?
     @State private var range: MetaRange = .today
@@ -6909,6 +6910,7 @@ struct MetaAdsView: View {
                                 .padding(10)
                                 .glassPanel(padding: 10, accent: AppTheme.amber)
                         }
+                        if let health { AdsHealthCard(health: health) }
                         MetaKpiCard(summary: summary)
                         MetaRecommendationsCard(
                             title: "Recomendaciones",
@@ -7004,7 +7006,10 @@ struct MetaAdsView: View {
         defer { loading = false }
         do {
             let r = dateRange
-            summary = try await client.metaSummary(from: r.from, to: r.to)
+            async let s = client.metaSummary(from: r.from, to: r.to)
+            async let h = client.adsHealth(from: r.from, to: r.to)
+            summary = try await s
+            health = try? await h
         } catch {
             self.error = error.localizedDescription
         }
@@ -7021,6 +7026,57 @@ struct MetaAdsView: View {
         } catch {
             self.error = error.localizedDescription
         }
+    }
+}
+
+struct AdsHealthCard: View {
+    let health: AdsHealth
+    private func color(_ s: String) -> Color {
+        switch s { case "GOOD": AppTheme.green; case "WATCH": AppTheme.amber; case "BAD": AppTheme.red; default: AppTheme.muted }
+    }
+    private func icon(_ s: String) -> String {
+        switch s { case "GOOD": "checkmark.seal.fill"; case "WATCH": "exclamationmark.triangle.fill"; case "BAD": "xmark.octagon.fill"; default: "info.circle.fill" }
+    }
+    private var verdictWord: String {
+        switch health.status { case "GOOD": "VAMOS BIEN"; case "WATCH": "JUSTO"; case "BAD": "VAMOS MAL"; default: "SIN GASTO" }
+    }
+    private func eur(_ v: Double) -> String { String(format: "%.0f €", v) }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 10) {
+                Image(systemName: icon(health.status)).font(.title2).foregroundStyle(color(health.status))
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(verdictWord).font(.subheadline.weight(.black)).foregroundStyle(color(health.status))
+                    Text(health.headline).font(.caption).foregroundStyle(AppTheme.ink).fixedSize(horizontal: false, vertical: true)
+                }
+                Spacer()
+            }
+            Divider().background(AppTheme.line)
+            HStack(spacing: 10) {
+                MetaStat(title: "Gasto ads", value: eur(health.spend), accent: AppTheme.red)
+                MetaStat(title: "Ventas", value: "\(health.orders) · \(eur(health.salesRevenue))", accent: AppTheme.green)
+                MetaStat(title: "ROAS", value: health.roas.map { String(format: "%.1fx", $0) } ?? "—", accent: AppTheme.blue)
+            }
+            if let be = health.breakEvenCpa {
+                Text("Equilibrio: cada venta debe costar menos de \(eur(be)) (tu margen por pedido).")
+                    .font(.caption2).foregroundStyle(AppTheme.muted)
+            }
+            if !health.campaigns.isEmpty {
+                Divider().background(AppTheme.line)
+                ForEach(health.campaigns) { c in
+                    HStack(alignment: .top, spacing: 8) {
+                        Circle().fill(color(c.status)).frame(width: 8, height: 8).padding(.top, 5)
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text(c.name).font(.caption.weight(.bold)).foregroundStyle(AppTheme.ink).lineLimit(1)
+                            Text(c.message).font(.caption2).foregroundStyle(AppTheme.muted).fixedSize(horizontal: false, vertical: true)
+                        }
+                        Spacer()
+                    }
+                }
+            }
+        }
+        .glassPanel(padding: 16, accent: color(health.status))
     }
 }
 

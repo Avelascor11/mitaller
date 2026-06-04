@@ -88,6 +88,81 @@ export class EconomicsService {
     return this.summary(start, end);
   }
 
+  /** Plain-language verdict: are the ads working vs today's sales/margin? */
+  async adsHealth(from?: string, to?: string) {
+    const now = new Date();
+    const start = from ? new Date(`${from}T00:00:00.000`) : (() => { const d = new Date(now); d.setHours(0,0,0,0); return d; })();
+    const end = to ? new Date(`${to}T23:59:59.999`) : (() => { const d = new Date(now); d.setHours(23,59,59,999); return d; })();
+    const fStr = start.toISOString().slice(0, 10);
+    const tStr = end.toISOString().slice(0, 10);
+
+    const econ = await this.summary(start, end);
+    const meta = await this.meta.summary(fStr, tStr);
+
+    const contributionBeforeAds = econ.netMargin + (econ.adSpend ?? 0); // margin without ad cost
+    const orderCount = econ.orderCount;
+    const breakEvenCpa = orderCount > 0 ? +(contributionBeforeAds / orderCount).toFixed(2) : null;
+    const spend = meta.spend ?? 0;
+    const roas = meta.roas ?? null;
+
+    // account verdict
+    let status: 'GOOD' | 'WATCH' | 'BAD' | 'INFO';
+    let headline: string;
+    if (spend <= 0) {
+      status = 'INFO';
+      headline = 'Sin gasto en ads en este rango.';
+    } else if (econ.netMargin < 0) {
+      status = 'BAD';
+      headline = `Vas MAL: tras pagar ${this.money(spend)} de ads, pierdes ${this.money(Math.abs(econ.netMargin))}.`;
+    } else if (breakEvenCpa != null && roas != null && roas < 1.2) {
+      status = 'WATCH';
+      headline = `Justo: ROAS ${roas.toFixed(2)}x. Cubres pero con poco margen.`;
+    } else {
+      status = 'GOOD';
+      headline = `Vas BIEN: tras los ads te quedan ${this.money(econ.netMargin)}${roas != null ? `. ROAS ${roas.toFixed(2)}x` : ''}.`;
+    }
+
+    const campaigns = (meta.campaigns ?? [])
+      .filter((c: any) => c.status === 'ACTIVE' || c.spend > 0)
+      .map((c: any) => {
+        const cpa = c.purchases > 0 ? +(c.spend / c.purchases).toFixed(2) : null;
+        let cStatus: 'GOOD' | 'WATCH' | 'BAD';
+        let msg: string;
+        if (cpa == null) {
+          cStatus = c.spend >= 10 ? 'BAD' : 'WATCH';
+          msg = `${this.money(c.spend)} gastados, 0 ventas atribuidas.`;
+        } else if (breakEvenCpa != null && cpa > breakEvenCpa) {
+          cStatus = 'BAD';
+          msg = `${this.money(cpa)}/venta > tu margen ${this.money(breakEvenCpa)}/pedido. Pierde ~${this.money(cpa - breakEvenCpa)}/venta.`;
+        } else if (breakEvenCpa != null) {
+          cStatus = 'GOOD';
+          msg = `${this.money(cpa)}/venta < tu margen ${this.money(breakEvenCpa)}/pedido. Rentable.`;
+        } else {
+          cStatus = 'WATCH';
+          msg = `${this.money(cpa)}/venta. Sin datos de margen para comparar.`;
+        }
+        return { id: c.id, name: c.name, spend: c.spend, purchases: c.purchases, roas: c.roas ?? null, cpa, status: cStatus, message: msg };
+      })
+      .sort((a, b) => (a.status === 'BAD' ? -1 : 1) - (b.status === 'BAD' ? -1 : 1));
+
+    return {
+      from: fStr,
+      to: tStr,
+      currency: econ.currency,
+      status,
+      headline,
+      spend: +spend.toFixed(2),
+      attributedRevenue: meta.attributedRevenue ?? 0,
+      roas,
+      orders: orderCount,
+      salesRevenue: +econ.grossRevenue.toFixed(2),
+      netMarginAfterAds: +econ.netMargin.toFixed(2),
+      marginPerOrder: breakEvenCpa,
+      breakEvenCpa,
+      campaigns
+    };
+  }
+
   async productMargins() {
     const orders = await this.prisma.order.findMany({
       where: { items: { some: {} } },
