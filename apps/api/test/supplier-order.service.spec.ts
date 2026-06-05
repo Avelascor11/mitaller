@@ -363,7 +363,77 @@ describe('SupplierOrderService', () => {
     }));
   });
 
-  it('resuelve camiseta marron con Falk & Ross 2000 / 102.09 en lugar de B&C TG002', async () => {
+  it('resuelve camiseta rosa con Falk & Ross 5000 / 180.09 Azalea en lugar de B&C TG002', async () => {
+    const { service, prisma } = buildService({
+      matrix: {
+        groups: [{
+          garmentType: 'CAMISETA',
+          color: 'ROSA',
+          sizes: [{
+            stockItemId: 'stock-pink',
+            supplierSku: 'FR-TS-PNK-M',
+            subproductName: 'Camiseta Rosa - M',
+            size: 'M',
+            recommendedPurchaseQuantity: 2,
+            supplierAvailableQuantity: null,
+            pendingOrderNeed: 2,
+            currentInternalStock: 0,
+            minStockTarget: 0,
+            demandOrders: [{ orderNumber: '#9587' }]
+          }]
+        }]
+      },
+      supplierArticles: [
+        {
+          supplierSku: '032424253',
+          styleCode: 'TG002',
+          productName: 'B&C 032.42 Pink',
+          color: 'Pink',
+          size: 'M',
+          purchasePrice: null
+        },
+        {
+          supplierSku: '180095003',
+          styleCode: '180.09',
+          productName: '5000 - Heavy Cotton Adult T-Shirt',
+          color: 'Azalea',
+          size: 'M',
+          purchasePrice: null
+        }
+      ],
+      supplierStocks: [{ supplierSku: '180095003', availableQuantity: 12 }]
+    });
+
+    await service.generateDailyFalkRossOrder({ source: 'manual' });
+
+    expect(prisma.supplierPurchaseOrder.create).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        rawRequestJson: expect.objectContaining({
+          orderNote: expect.stringContaining('Camiseta Gildan 180.09'),
+          lines: [expect.objectContaining({
+            supplierSku: '180095003',
+            name: 'Camiseta Azalea - M',
+            quantity: 2
+          })]
+        }),
+        lines: expect.objectContaining({
+          create: [expect.objectContaining({
+            supplierSku: '180095003',
+            name: 'Camiseta Azalea - M',
+            supplierAvailableQuantity: 12,
+            rawDataJson: expect.objectContaining({
+              stockItemSupplierSku: 'FR-TS-PNK-M',
+              resolvedSupplierSku: '180095003',
+              resolvedStyleCode: '180.09',
+              expectedProductNumber: '180.09'
+            })
+          })]
+        })
+      })
+    }));
+  });
+
+  it('resuelve camiseta marron con Falk & Ross 5000 / 180.09 Dark Chocolate en lugar de 102.09', async () => {
     const { service, prisma } = buildService({
       matrix: {
         groups: [{
@@ -386,22 +456,22 @@ describe('SupplierOrderService', () => {
       supplierArticles: [
         {
           supplierSku: '180000111',
-          styleCode: 'TG002',
-          productName: 'B&C 032.42 Brown',
-          color: 'Brown',
-          size: 'M',
-          purchasePrice: null
-        },
-        {
-          supplierSku: '290000222',
           styleCode: '102.09',
           productName: '2000 - Ultra Cotton Adult T-Shirt',
           color: 'Maroon',
           size: 'M',
           purchasePrice: null
+        },
+        {
+          supplierSku: '180094454',
+          styleCode: '180.09',
+          productName: '5000 - Heavy Cotton Adult T-Shirt',
+          color: 'Dark Chocolate',
+          size: 'M',
+          purchasePrice: null
         }
       ],
-      supplierStocks: [{ supplierSku: '290000222', availableQuantity: 8 }]
+      supplierStocks: [{ supplierSku: '180094454', availableQuantity: 8 }]
     });
 
     await service.generateDailyFalkRossOrder({ source: 'manual' });
@@ -410,17 +480,21 @@ describe('SupplierOrderService', () => {
       data: expect.objectContaining({
         rawRequestJson: expect.objectContaining({
           orderNote: expect.stringContaining('Camiseta 032.42 -> 2.73 EUR'),
-          lines: [expect.objectContaining({ supplierSku: '290000222', quantity: 1 })]
+          lines: [expect.objectContaining({
+            supplierSku: '180094454',
+            name: 'Camiseta Dark Chocolate - M',
+            quantity: 1
+          })]
         }),
         lines: expect.objectContaining({
           create: [expect.objectContaining({
-            supplierSku: '290000222',
+            supplierSku: '180094454',
             supplierAvailableQuantity: 8,
             rawDataJson: expect.objectContaining({
               stockItemSupplierSku: 'FR-TS-BRN-M',
-              resolvedSupplierSku: '290000222',
-              resolvedStyleCode: '102.09',
-              expectedProductNumber: '102.09'
+              resolvedSupplierSku: '180094454',
+              resolvedStyleCode: '180.09',
+              expectedProductNumber: '180.09'
             })
           })]
         })

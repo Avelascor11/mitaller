@@ -10,6 +10,7 @@ import { SupplierAdapter, SupplierPurchaseOrderPayload } from './supplier.adapte
 const OPEN_SUPPLIER_ORDER_STATUSES = ['SUBMITTED'];
 const FALKROSS_PRICE_NOTE = [
   'Camiseta 032.42 -> 2.73 EUR',
+  'Camiseta Gildan 180.09 -> revisar tarifa Falk & Ross',
   'Sudadera 290.09 -> 7.30 EUR',
   'Sudadera 237.42 -> 6.60 EUR',
   'Sudadera 240.42 -> 6.00 EUR'
@@ -387,6 +388,8 @@ export class SupplierOrderService {
     const articleColor = article.color ?? article.productName;
     if (expectedColor === 'AZUL') return this.normalizedToken(articleColor).includes('royal blue');
     if (expectedColor === 'SAND') return this.normalizedToken(articleColor).includes('mastic');
+    if (expectedColor === 'ROSA') return this.normalizedToken(articleColor).includes('azalea');
+    if (expectedColor === 'MARRON') return this.normalizedToken(articleColor).includes('dark chocolate');
     return this.normalizedColor(articleColor) === expectedColor;
   }
 
@@ -400,6 +403,8 @@ export class SupplierOrderService {
     const normalized = this.normalizedColor(color);
     if (normalized === 'AZUL') return 'Royal Blue';
     if (normalized === 'SAND') return 'Mastic';
+    if (normalized === 'ROSA') return 'Azalea';
+    if (normalized === 'MARRON') return 'Dark Chocolate';
     return null;
   }
 
@@ -410,7 +415,7 @@ export class SupplierOrderService {
 
   private expectedFalkRossStyles(garmentType: string, color: string) {
     if (garmentType === 'SUDADERA') return ['WG005', '237.42', '23742'];
-    if (this.normalizedColor(color) === 'MARRON') return ['2000', '102.09', '10209'];
+    if (['MARRON', 'ROSA'].includes(this.normalizedColor(color))) return ['5000', '180.09', '18009'];
     return ['TG002', '032.42', '03242'];
   }
 
@@ -420,6 +425,7 @@ export class SupplierOrderService {
     if (normalized.includes('23742') || normalized.includes('wg005')) return '23742';
     if (normalized.includes('24042')) return '24042';
     if (normalized.includes('29009')) return '29009';
+    if (normalized.includes('18009') || normalized === '5000') return '18009';
     if (normalized.includes('10209') || normalized === '2000') return '10209';
     return normalized;
   }
