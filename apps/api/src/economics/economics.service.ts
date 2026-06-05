@@ -652,13 +652,8 @@ export class EconomicsService {
     let description = '';
     if (isBanador) {
       blank = 4.725; // 4,725 € + IVA (neto, IVA recuperable)
-      if (isWhite) {
-        print = 0.50;
-        description = 'Bañador claro (DTG)';
-      } else {
-        print = 2.25 + 0.45;
-        description = 'Bañador (DTF espalda+frontal)';
-      }
+      print = 2.25 + 0.45; // siempre DTF
+      description = 'Bañador (DTF espalda+frontal)';
     } else if (isSudadera) {
       blank = 6.60;
       if (isBlack) {
