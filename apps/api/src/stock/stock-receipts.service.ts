@@ -275,6 +275,7 @@ export class StockReceiptsService {
   }
 
   private detectKind(value: string) {
+    if (value.includes('banador') || value.includes('swim') || value.includes('bikini')) return 'banador';
     if (value.includes('sudadera') || value.includes('hoodie') || /\bwg005\b/.test(value)) return 'sudadera';
     if (value.includes('camiseta') || value.includes('shirt') || value.includes('tshirt') || value.includes('t shirt') || /\btg002\b/.test(value)) return 'camiseta';
     return undefined;

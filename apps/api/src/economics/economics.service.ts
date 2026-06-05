@@ -641,15 +641,25 @@ export class EconomicsService {
   private itemCost(item: any): ItemCost {
     const type = (item.productType ?? item.title ?? '').toString().toLowerCase();
     const color = (item.color ?? item.variantTitle ?? '').toString().toLowerCase();
+    const isBanador = /bañad|banad|swim|bikini|bath/.test(type);
     const isSudadera = /sudader/.test(type);
-    const isCamiseta = /camiset/.test(type) || !isSudadera;
+    const isCamiseta = !isBanador && (/camiset/.test(type) || !isSudadera);
     const isBlack = /negro|black/.test(color);
     const isWhite = /blanco|white/.test(color);
 
     let blank = 0;
     let print = 0;
     let description = '';
-    if (isSudadera) {
+    if (isBanador) {
+      blank = 4.725; // 4,725 € + IVA (neto, IVA recuperable)
+      if (isWhite) {
+        print = 0.50;
+        description = 'Bañador claro (DTG)';
+      } else {
+        print = 2.25 + 0.45;
+        description = 'Bañador (DTF espalda+frontal)';
+      }
+    } else if (isSudadera) {
       blank = 6.60;
       if (isBlack) {
         print = 2.25 + 0.45;
