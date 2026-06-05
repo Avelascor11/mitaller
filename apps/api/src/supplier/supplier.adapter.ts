@@ -191,10 +191,11 @@ export class SupplierAdapter {
     const shippingMethod = this.config.get<string>('FALKROSS_SHIPPING_METHOD') ?? '0';
     const partialShipment = this.config.get<string>('FALKROSS_PARTIAL_SHIPMENT') ?? 'true';
     const deliveryAddress = this.falkRossDeliveryAddressXml();
-    const products = payload.lines.map((line, index) => `
+    const lineReference = this.config.get<string>('FALKROSS_LINE_REFERENCE_MODE') === 'empty' ? '' : payload.orderNumber;
+    const products = payload.lines.map((line) => `
       <product>
         <p_sku>${this.xmlText(line.supplierSku)}</p_sku>
-        <p_lineref><![CDATA[${this.cdata(`${payload.orderNumber}-${index + 1}`)}]]></p_lineref>
+        <p_lineref><![CDATA[${this.cdata(lineReference)}]]></p_lineref>
         <p_quantity><pq_ordered>${line.quantity}</pq_ordered></p_quantity>
       </product>`).join('');
 
