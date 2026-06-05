@@ -181,6 +181,11 @@ export class SupplierAdapter {
     };
   }
 
+  buildFalkRossOrderXmlPreview(payload: SupplierPurchaseOrderPayload) {
+    const customerNumber = this.config.get<string>('FALKROSS_CUSTOMER_NUMBER') ?? '';
+    return this.buildFalkRossOrderXml(payload, customerNumber || 'CONFIGURE_FALKROSS_CUSTOMER_NUMBER');
+  }
+
   private buildFalkRossOrderXml(payload: SupplierPurchaseOrderPayload, customerNumber: string) {
     const requestDateTime = this.formatFalkRossDate(new Date());
     const shippingMethod = this.config.get<string>('FALKROSS_SHIPPING_METHOD') ?? '0';

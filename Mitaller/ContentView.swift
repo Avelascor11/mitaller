@@ -4227,6 +4227,8 @@ struct SupplierPurchaseOrderCard: View {
 
             if let latestOrder {
                 VStack(alignment: .leading, spacing: 10) {
+                    SupplierPurchaseDeliveryNotice(order: latestOrder)
+
                     HStack {
                         VStack(alignment: .leading, spacing: 2) {
                             Text(latestOrder.orderNumber)
@@ -4238,7 +4240,7 @@ struct SupplierPurchaseOrderCard: View {
                         }
                         Spacer()
                         if let externalOrderId = latestOrder.externalOrderId, !externalOrderId.isEmpty {
-                            Tag(text: externalOrderId, systemImage: "checkmark.seal.fill")
+                            Tag(text: "ID Falk & Ross \(externalOrderId)", systemImage: "checkmark.seal.fill")
                         }
                     }
 
@@ -4318,7 +4320,7 @@ struct SupplierPurchaseOrderCard: View {
                         showSubmitConfirmation = true
                     }
                 } label: {
-                    Label("Hacer compra", systemImage: "paperplane.fill")
+                    Label(latestOrder?.status.uppercased() == "DRAFT" ? "Enviar a Falk & Ross" : "Hacer compra", systemImage: "paperplane.fill")
                         .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.bordered)
@@ -4341,8 +4343,53 @@ struct SupplierPurchaseOrderCard: View {
             }
             Button("Cancelar", role: .cancel) {}
         } message: {
-            Text(orderPendingSubmit?.orderNote ?? "Revisa cantidades y SKUs antes de confirmar. Esta accion envia el pedido al proveedor si la API esta activada.")
+            Text(orderPendingSubmit?.orderNote ?? "Revisa cantidades y SKUs antes de confirmar. Si Falk & Ross acepta la API, se guardara el ID externo para que el proveedor pueda buscarlo.")
         }
+    }
+}
+
+struct SupplierPurchaseDeliveryNotice: View {
+    let order: SupplierPurchaseOrder
+
+    private var isSubmitted: Bool {
+        order.status.uppercased() == "SUBMITTED"
+    }
+
+    private var color: Color {
+        isSubmitted ? AppTheme.green : AppTheme.amber
+    }
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: isSubmitted ? "checkmark.seal.fill" : "exclamationmark.triangle.fill")
+                .font(.headline.weight(.black))
+                .foregroundStyle(color)
+                .frame(width: 24, height: 24)
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text(isSubmitted ? "Pedido enviado a Falk & Ross" : "Borrador interno, aun no enviado")
+                    .font(.subheadline.weight(.black))
+                    .foregroundStyle(AppTheme.ink)
+                Text(detail)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(AppTheme.muted)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(12)
+        .background(color.opacity(0.12))
+        .clipShape(RoundedRectangle(cornerRadius: 12))
+    }
+
+    private var detail: String {
+        if isSubmitted {
+            if let externalOrderId = order.externalOrderId, !externalOrderId.isEmpty {
+                return "El proveedor debe buscar el ID \(externalOrderId) o la referencia \(order.orderNumber)."
+            }
+            return "La API lo acepto, pero no devolvio ID externo. Usa la referencia \(order.orderNumber)."
+        }
+        return "Pulsa Enviar a Falk & Ross para que salga por API. Recomendar compra solo prepara el borrador."
     }
 }
 

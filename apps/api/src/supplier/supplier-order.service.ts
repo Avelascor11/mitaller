@@ -51,6 +51,37 @@ export class SupplierOrderService {
     return this.withOrderNote(order);
   }
 
+  async getPurchaseOrderProof(id: string) {
+    const order = await this.prisma.supplierPurchaseOrder.findUniqueOrThrow({
+      where: { id },
+      include: { lines: true }
+    });
+    const rawRequest = (order.rawRequestJson as unknown as SupplierPurchaseOrderPayload | null) ?? this.payloadFromOrder(order);
+    const rawResponse = order.rawResponseJson as Record<string, unknown> | null;
+    return {
+      id: order.id,
+      orderNumber: order.orderNumber,
+      status: order.status,
+      mode: order.mode,
+      externalOrderId: order.externalOrderId,
+      submittedAt: order.submittedAt,
+      errorMessage: order.errorMessage,
+      supplierSearchHint: order.externalOrderId
+        ? `Falk & Ross debe buscar orders_id ${order.externalOrderId} o referencia ${order.orderNumber}`
+        : `Este pedido aun no esta enviado a Falk & Ross. Solo existe como borrador interno ${order.orderNumber}.`,
+      requestXml: this.supplier.buildFalkRossOrderXmlPreview(rawRequest),
+      responseStatus: rawResponse?.status ?? null,
+      responseXml: typeof rawResponse?.xml === 'string' ? rawResponse.xml : null,
+      lines: order.lines.map((line) => ({
+        supplierSku: line.supplierSku,
+        name: line.name,
+        quantity: line.quantity,
+        color: line.color,
+        size: line.size
+      }))
+    };
+  }
+
   @Cron('0 20 * * *', { timeZone: 'Europe/Madrid' })
   async generateDailyFalkRossOrderCron() {
     if (this.config.get<string>('FALKROSS_DAILY_AUTO_ORDER') !== 'true') return;
@@ -211,20 +242,7 @@ export class SupplierOrderService {
       throw new BadRequestException('Falta importar el catalogo real de Falk & Ross antes de enviar el pedido al proveedor');
     }
 
-    const payload = (order.rawRequestJson as unknown as SupplierPurchaseOrderPayload | null) ?? {
-      supplier: order.supplier,
-      orderNumber: order.orderNumber,
-      requestedAt: new Date().toISOString(),
-      source: 'submit',
-      orderNote: this.falkRossOrderNote(),
-      lines: order.lines.map((line) => ({
-        supplierSku: line.supplierSku,
-        name: line.name,
-        quantity: line.quantity,
-        color: line.color ?? undefined,
-        size: line.size ?? undefined
-      }))
-    };
+    const payload = (order.rawRequestJson as unknown as SupplierPurchaseOrderPayload | null) ?? this.payloadFromOrder(order);
 
     const result = await this.supplier.submitPurchaseOrder(payload);
     const status = result.submitted ? 'SUBMITTED' : 'DRAFT';
@@ -252,6 +270,23 @@ export class SupplierOrderService {
     });
 
     return { status: result.submitted ? 'submitted' : 'draft', order: this.withOrderNote(updated), lines: updated.lines, result };
+  }
+
+  private payloadFromOrder(order: { supplier: string; orderNumber: string; lines: Array<{ supplierSku: string; name: string; quantity: number; color: string | null; size: string | null }> }): SupplierPurchaseOrderPayload {
+    return {
+      supplier: order.supplier,
+      orderNumber: order.orderNumber,
+      requestedAt: new Date().toISOString(),
+      source: 'submit',
+      orderNote: this.falkRossOrderNote(),
+      lines: order.lines.map((line) => ({
+        supplierSku: line.supplierSku,
+        name: line.name,
+        quantity: line.quantity,
+        color: line.color ?? undefined,
+        size: line.size ?? undefined
+      }))
+    };
   }
 
   private withOrderNote<T extends { rawRequestJson: Prisma.JsonValue | null }>(order: T) {

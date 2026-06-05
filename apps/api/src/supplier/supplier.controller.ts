@@ -39,6 +39,11 @@ export class SupplierController {
     return this.supplierOrders.getPurchaseOrder(id);
   }
 
+  @Get('purchase-orders/:id/proof')
+  purchaseOrderProof(@Param('id') id: string) {
+    return this.supplierOrders.getPurchaseOrderProof(id);
+  }
+
   @Post('purchase-orders/daily')
   generateDailyPurchaseOrder(@Body() body: { submit?: boolean }) {
     return this.supplierOrders.generateDailyFalkRossOrder({ submit: Boolean(body.submit), source: 'manual' });
