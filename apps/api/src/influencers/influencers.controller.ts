@@ -1,4 +1,5 @@
-import { Body, Controller, Get, Param, Patch, Post, Query } from '@nestjs/common';
+import { Body, Controller, Get, Param, Patch, Post, Query, Res } from '@nestjs/common';
+import type { Response } from 'express';
 import { InfluencersService } from './influencers.service';
 
 @Controller('influencers')
@@ -43,6 +44,20 @@ export class InfluencersController {
   @Post(':id/submissions')
   createSubmission(@Param('id') influencerId: string, @Body() body: CreateSubmissionBody) {
     return this.influencers.createSubmission(influencerId, body);
+  }
+
+  @Post(':id/submissions/upload')
+  uploadSubmission(@Param('id') influencerId: string, @Body() body: UploadSubmissionBody) {
+    return this.influencers.uploadSubmission(influencerId, body);
+  }
+
+  @Get('submissions/:id/video')
+  async submissionVideo(@Param('id') id: string, @Res() response: Response) {
+    const file = await this.influencers.getSubmissionVideo(id);
+    response.setHeader('Content-Type', file.mimeType);
+    response.setHeader('Content-Length', String(file.size));
+    response.setHeader('Content-Disposition', `inline; filename="${file.filename.replace(/"/g, '')}"`);
+    file.stream.pipe(response);
   }
 
   @Patch('submissions/:id')
@@ -94,13 +109,29 @@ export interface CreateSubmissionBody {
   collaborationId?: string;
   videoUrl?: string;
   thumbnailUrl?: string;
+  originalFilename?: string;
+  mimeType?: string;
+  fileSizeBytes?: number;
+  storageProvider?: string;
+  storageKey?: string;
+  source?: string;
+  usageRights?: string;
   caption?: string;
   type?: string;
   status?: string;
   metaCampaignId?: string;
+  receivedAt?: string;
+  approvedForAdsAt?: string;
+  notes?: string;
 }
 
 export interface UpdateSubmissionBody extends Partial<CreateSubmissionBody> {}
+
+export interface UploadSubmissionBody extends CreateSubmissionBody {
+  filename: string;
+  mimeType: string;
+  videoBase64: string;
+}
 
 @Controller('infuencers')
 export class InfluencersCompatController {

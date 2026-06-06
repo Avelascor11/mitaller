@@ -777,10 +777,20 @@ model UgcSubmission {
   collaborationId String?
   videoUrl        String?
   thumbnailUrl    String?
+  originalFilename String?
+  mimeType        String?
+  fileSizeBytes   Int?
+  storageProvider String?
+  storageKey      String?
+  source          String?
+  usageRights     String?
   caption         String?
   type            String         @default("UGC")
   status          UgcStatus      @default(PENDING)
   metaCampaignId  String?
+  receivedAt      DateTime?
+  approvedForAdsAt DateTime?
+  notes           String?
   createdAt       DateTime       @default(now())
   updatedAt       DateTime       @updatedAt
   influencer      Influencer     @relation(fields: [influencerId], references: [id], onDelete: Cascade)
@@ -788,6 +798,7 @@ model UgcSubmission {
 
   @@index([influencerId])
   @@index([status])
+  @@index([storageProvider])
 }
 
 model PortalConfig {

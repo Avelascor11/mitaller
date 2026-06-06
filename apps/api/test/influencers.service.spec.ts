@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { InfluencersService } from '../src/influencers/influencers.service';
 
 function serviceWith(prisma: Record<string, any>) {
-  return new InfluencersService(prisma as never);
+  return new InfluencersService(prisma as never, { get: vi.fn() } as never);
 }
 
 describe('InfluencersService', () => {

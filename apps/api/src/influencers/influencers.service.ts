@@ -1,5 +1,10 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { CollabStatus, CollabType, InfluencerStage, Prisma, UgcStatus } from '@prisma/client';
+import { randomUUID } from 'node:crypto';
+import { createReadStream } from 'node:fs';
+import { mkdir, stat, writeFile } from 'node:fs/promises';
+import { extname, join } from 'node:path';
 import { PrismaService } from '../prisma/prisma.service';
 import {
   CreateCollaborationBody,
@@ -7,12 +12,13 @@ import {
   CreateSubmissionBody,
   UpdateCollaborationBody,
   UpdateInfluencerBody,
-  UpdateSubmissionBody
+  UpdateSubmissionBody,
+  UploadSubmissionBody
 } from './influencers.controller';
 
 @Injectable()
 export class InfluencersService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(private readonly prisma: PrismaService, private readonly config: ConfigService) {}
 
   async summary() {
     const [influencers, collaborations, submissions] = await Promise.all([
@@ -131,13 +137,92 @@ export class InfluencersService {
         collaborationId: this.clean(input.collaborationId),
         videoUrl: this.clean(input.videoUrl),
         thumbnailUrl: this.clean(input.thumbnailUrl),
+        originalFilename: this.clean(input.originalFilename),
+        mimeType: this.clean(input.mimeType),
+        fileSizeBytes: this.optionalNumber(input.fileSizeBytes),
+        storageProvider: this.clean(input.storageProvider),
+        storageKey: this.clean(input.storageKey),
+        source: this.clean(input.source),
+        usageRights: this.clean(input.usageRights),
         caption: this.clean(input.caption),
         type: this.clean(input.type) ?? 'UGC',
         status: input.status ? this.enumValue(UgcStatus, input.status, 'status') : undefined,
-        metaCampaignId: this.clean(input.metaCampaignId)
+        metaCampaignId: this.clean(input.metaCampaignId),
+        receivedAt: this.optionalDate(input.receivedAt) ?? new Date(),
+        approvedForAdsAt: this.optionalDate(input.approvedForAdsAt),
+        notes: this.clean(input.notes)
       },
       include: { influencer: true, collaboration: true }
     });
+  }
+
+  async uploadSubmission(influencerId: string, input: UploadSubmissionBody) {
+    await this.ensureInfluencer(influencerId);
+    if (!input.filename?.trim()) throw new BadRequestException('filename requerido');
+    if (!input.mimeType?.startsWith('video/')) throw new BadRequestException('Solo se aceptan videos');
+    if (!input.videoBase64?.trim()) throw new BadRequestException('videoBase64 requerido');
+
+    const buffer = Buffer.from(input.videoBase64, 'base64');
+    if (!buffer.length) throw new BadRequestException('videoBase64 vacio');
+    if (buffer.length > this.maxUploadBytes()) {
+      throw new BadRequestException(`Video demasiado grande. Maximo ${Math.round(this.maxUploadBytes() / 1024 / 1024)} MB`);
+    }
+
+    const storageDir = this.ugcStorageDir();
+    const dateFolder = new Date().toISOString().slice(0, 10);
+    const safeFilename = this.safeFilename(input.filename);
+    const storageKey = `${dateFolder}/${randomUUID()}-${safeFilename}`;
+    await mkdir(join(storageDir, dateFolder), { recursive: true });
+    await writeFile(join(storageDir, ...storageKey.split('/')), buffer);
+
+    const created = await this.prisma.ugcSubmission.create({
+      data: {
+        influencerId,
+        collaborationId: this.clean(input.collaborationId),
+        videoUrl: 'pending',
+        thumbnailUrl: this.clean(input.thumbnailUrl),
+        originalFilename: safeFilename,
+        mimeType: input.mimeType.trim(),
+        fileSizeBytes: buffer.length,
+        storageProvider: this.storageProvider(),
+        storageKey,
+        source: this.clean(input.source) ?? 'manual_upload',
+        usageRights: this.clean(input.usageRights),
+        caption: this.clean(input.caption),
+        type: this.clean(input.type) ?? 'UGC',
+        status: input.status ? this.enumValue(UgcStatus, input.status, 'status') : undefined,
+        metaCampaignId: this.clean(input.metaCampaignId),
+        receivedAt: this.optionalDate(input.receivedAt) ?? new Date(),
+        approvedForAdsAt: this.optionalDate(input.approvedForAdsAt),
+        notes: this.clean(input.notes)
+      },
+      include: { influencer: true, collaboration: true }
+    });
+
+    return this.prisma.ugcSubmission.update({
+      where: { id: created.id },
+      data: { videoUrl: this.submissionVideoUrl(created.id) },
+      include: { influencer: true, collaboration: true }
+    });
+  }
+
+  async getSubmissionVideo(id: string) {
+    const submission = await this.prisma.ugcSubmission.findUnique({ where: { id } });
+    if (!submission) throw new NotFoundException('UGC no encontrado');
+    if (!submission.storageKey) throw new BadRequestException('Este UGC no tiene archivo guardado');
+    if (submission.storageProvider && submission.storageProvider !== this.storageProvider()) {
+      throw new BadRequestException(`Storage no soportado por este servidor: ${submission.storageProvider}`);
+    }
+
+    const filePath = join(this.ugcStorageDir(), ...submission.storageKey.split('/'));
+    const info = await stat(filePath).catch(() => null);
+    if (!info) throw new NotFoundException('Archivo UGC no encontrado en storage');
+    return {
+      stream: createReadStream(filePath),
+      mimeType: submission.mimeType ?? 'video/mp4',
+      filename: submission.originalFilename ?? `${submission.id}${extname(filePath) || '.mp4'}`,
+      size: info.size
+    };
   }
 
   async updateSubmission(id: string, input: UpdateSubmissionBody) {
@@ -149,10 +234,20 @@ export class InfluencersService {
         collaborationId: this.clean(input.collaborationId),
         videoUrl: this.clean(input.videoUrl),
         thumbnailUrl: this.clean(input.thumbnailUrl),
+        originalFilename: this.clean(input.originalFilename),
+        mimeType: this.clean(input.mimeType),
+        fileSizeBytes: this.optionalNumber(input.fileSizeBytes),
+        storageProvider: this.clean(input.storageProvider),
+        storageKey: this.clean(input.storageKey),
+        source: this.clean(input.source),
+        usageRights: this.clean(input.usageRights),
         caption: this.clean(input.caption),
         type: this.clean(input.type),
         status: input.status ? this.enumValue(UgcStatus, input.status, 'status') : undefined,
-        metaCampaignId: this.clean(input.metaCampaignId)
+        metaCampaignId: this.clean(input.metaCampaignId),
+        receivedAt: this.optionalDate(input.receivedAt),
+        approvedForAdsAt: this.optionalDate(input.approvedForAdsAt),
+        notes: this.clean(input.notes)
       },
       include: { influencer: true, collaboration: true }
     });
@@ -221,6 +316,33 @@ export class InfluencersService {
     const date = new Date(value);
     if (Number.isNaN(date.getTime())) throw new BadRequestException('Fecha invalida');
     return date;
+  }
+
+  private ugcStorageDir() {
+    return this.config.get<string>('UGC_STORAGE_DIR') ?? join(process.cwd(), 'storage', 'ugc');
+  }
+
+  private storageProvider() {
+    return this.config.get<string>('UGC_STORAGE_PROVIDER') ?? 'local';
+  }
+
+  private publicApiUrl() {
+    return (this.config.get<string>('PUBLIC_API_URL') ?? '').replace(/\/+$/, '');
+  }
+
+  private submissionVideoUrl(id: string) {
+    const path = `/influencers/submissions/${id}/video`;
+    return this.publicApiUrl() ? `${this.publicApiUrl()}${path}` : path;
+  }
+
+  private maxUploadBytes() {
+    const mb = Number(this.config.get<string>('UGC_MAX_UPLOAD_MB') ?? 250);
+    return Math.max(1, Number.isFinite(mb) ? mb : 250) * 1024 * 1024;
+  }
+
+  private safeFilename(value: string) {
+    const cleaned = value.trim().replace(/[/\\?%*:|"<>]/g, '-').replace(/\s+/g, ' ');
+    return cleaned.slice(0, 160) || 'ugc-video.mp4';
   }
 
   private enumValue<T extends Record<string, string>>(source: T, value: string, field: string): T[keyof T] {

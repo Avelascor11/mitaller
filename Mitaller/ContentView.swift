@@ -6851,6 +6851,13 @@ struct InfluencerDetailView: View {
                     }
                 }
 
+                if !influencer.submissions.isEmpty {
+                    SectionHeader(title: "Vídeos UGC", subtitle: "\(influencer.submissions.count) archivos o enlaces recibidos")
+                    ForEach(influencer.submissions) { submission in
+                        InfluencerSubmissionCard(submission: submission)
+                    }
+                }
+
                 if let notes = influencer.notes, !notes.isEmpty {
                     SectionHeader(title: "Notas", subtitle: "Contexto interno")
                     Text(notes)
@@ -6864,6 +6871,100 @@ struct InfluencerDetailView: View {
         .screenBackground()
         .navigationTitle("Influ")
         .refreshable { await store.loadInfluencers() }
+    }
+}
+
+struct InfluencerSubmissionCard: View {
+    let submission: InfluencerSubmission
+    @Environment(\.openURL) private var openURL
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .top, spacing: 10) {
+                Image(systemName: "play.rectangle.fill")
+                    .font(.title3.weight(.black))
+                    .foregroundStyle(AppTheme.teal)
+                    .frame(width: 34, height: 34)
+                    .background(AppTheme.tealSoft)
+                    .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(submission.originalFilename ?? submission.caption ?? "Vídeo UGC")
+                        .font(.headline.weight(.black))
+                        .foregroundStyle(AppTheme.ink)
+                        .lineLimit(2)
+                    Text(subtitle)
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(AppTheme.muted)
+                }
+                Spacer()
+                InfluencerSubmissionStatusBadge(status: submission.status)
+            }
+
+            HStack(spacing: 8) {
+                Tag(text: submission.type, systemImage: "sparkles")
+                if let usageRights = submission.usageRights, !usageRights.isEmpty {
+                    Tag(text: usageRights, systemImage: "checkmark.shield.fill")
+                }
+                if let source = submission.source, !source.isEmpty {
+                    Tag(text: source.replacingOccurrences(of: "_", with: " "), systemImage: "tray.and.arrow.down.fill")
+                }
+            }
+
+            if let notes = submission.notes, !notes.isEmpty {
+                Text(notes)
+                    .font(.footnote.weight(.medium))
+                    .foregroundStyle(AppTheme.muted)
+            }
+
+            if let videoUrl = submission.videoUrl, let url = URL(string: videoUrl) {
+                Button {
+                    openURL(url)
+                } label: {
+                    Label("Abrir vídeo", systemImage: "play.circle.fill")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.bordered)
+                .tint(AppTheme.teal)
+            }
+        }
+        .glassPanel(padding: 14, accent: AppTheme.teal)
+    }
+
+    private var subtitle: String {
+        var parts: [String] = []
+        if let fileSizeBytes = submission.fileSizeBytes {
+            parts.append(ByteCountFormatter.string(fromByteCount: Int64(fileSizeBytes), countStyle: .file))
+        }
+        if let mimeType = submission.mimeType {
+            parts.append(mimeType)
+        }
+        if let receivedAt = submission.receivedAt ?? submission.createdAt {
+            parts.append("recibido \(receivedAt.formatted(.dateTime.day().month().hour().minute()))")
+        }
+        return parts.isEmpty ? "Sin metadatos de archivo" : parts.joined(separator: " · ")
+    }
+}
+
+struct InfluencerSubmissionStatusBadge: View {
+    let status: String
+
+    private var color: Color {
+        switch status.uppercased() {
+        case "APPROVED", "PUBLISHED": AppTheme.green
+        case "REJECTED": AppTheme.red
+        default: AppTheme.amber
+        }
+    }
+
+    var body: some View {
+        Text(status.replacingOccurrences(of: "_", with: " ").uppercased())
+            .font(.caption2.weight(.black))
+            .foregroundStyle(color)
+            .padding(.horizontal, 9)
+            .padding(.vertical, 6)
+            .background(color.opacity(0.16))
+            .clipShape(Capsule())
     }
 }
 

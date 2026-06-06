@@ -75,6 +75,14 @@ Para imprimir etiquetas automaticamente en el taller, instala la Honeywell PC42d
 - `PUBLIC_API_URL`: URL publica de la API en Railway.
 - `BANK_REDIRECT_URL`: callback publico que usara el banco tras autorizar, normalmente `${PUBLIC_API_URL}/bank/callback`.
 
+## UGC / videos de influencers
+
+- `UGC_STORAGE_PROVIDER`: por defecto `local`.
+- `UGC_STORAGE_DIR`: carpeta donde la API guarda videos UGC. En Railway debe apuntar a un Volume persistente, por ejemplo `/data/ugc`.
+- `UGC_MAX_UPLOAD_MB`: tamano maximo por video. Por defecto `250`.
+
+Postgres guarda los metadatos del video, no el archivo pesado. El archivo vive en `UGC_STORAGE_DIR`. Si el servicio corre en Railway sin Volume persistente, los videos pueden perderse al redeploy. Para volumen alto, el siguiente paso natural es cambiar `UGC_STORAGE_PROVIDER` a Cloudflare R2/S3.
+
 ## Klaviyo
 
 - `KLAVIYO_API_KEY`: clave privada de Klaviyo para enviar eventos de devoluciones. No subir a GitHub. Si no está configurada, la API ignora esos eventos y no bloquea el flujo.

@@ -821,10 +821,19 @@ struct InfluencerSubmission: Decodable, Identifiable, Hashable {
     let collaborationId: String?
     let videoUrl: String?
     let thumbnailUrl: String?
+    let originalFilename: String?
+    let mimeType: String?
+    let fileSizeBytes: Int?
+    let storageProvider: String?
+    let source: String?
+    let usageRights: String?
     let caption: String?
     let type: String
     let status: String
     let metaCampaignId: String?
+    let receivedAt: Date?
+    let approvedForAdsAt: Date?
+    let notes: String?
     let createdAt: Date?
     let updatedAt: Date?
 }
