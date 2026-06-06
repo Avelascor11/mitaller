@@ -133,6 +133,11 @@ interface InfluencerDetection {
   tags: string[];
 }
 
+interface ImportInfluencerConversationOptions {
+  limit?: number;
+  includeWeak?: boolean;
+}
+
 interface ImportedConversationMessage {
   text: string;
   senderId?: string;
@@ -170,17 +175,29 @@ export class MetaService {
   }
 
   // ---------- low-level Graph calls ----------
-  private async graphGet<T>(path: string, params: Record<string, string> = {}): Promise<T> {
+  private async graphGet<T>(path: string, params: Record<string, string> = {}, timeoutMs = this.graphTimeoutMs()): Promise<T> {
     const url = new URL(`${GRAPH}/${this.version}/${path}`);
     url.searchParams.set('access_token', this.token);
     for (const [k, v] of Object.entries(params)) url.searchParams.set(k, v);
-    const res = await fetch(url.toString());
-    const json = await res.json();
-    if (!res.ok) {
-      this.logger.error(`Meta GET ${path} failed: ${JSON.stringify(json?.error ?? json)}`);
-      throw new BadRequestException(json?.error?.message ?? 'Error en la API de Meta');
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+      const res = await fetch(url.toString(), { signal: controller.signal });
+      const json = await res.json();
+      if (!res.ok) {
+        this.logger.error(`Meta GET ${path} failed: ${JSON.stringify(json?.error ?? json)}`);
+        throw new BadRequestException(json?.error?.message ?? 'Error en la API de Meta');
+      }
+      return json as T;
+    } catch (error) {
+      if (error instanceof BadRequestException) throw error;
+      const message = error instanceof Error && error.name === 'AbortError'
+        ? `Meta API timeout leyendo ${path}`
+        : `Meta API no disponible: ${error instanceof Error ? error.message : String(error)}`;
+      throw new BadRequestException(message);
+    } finally {
+      clearTimeout(timeout);
     }
-    return json as T;
   }
 
   private async graphPost<T>(path: string, body: Record<string, any>): Promise<T> {
@@ -197,6 +214,11 @@ export class MetaService {
       throw new BadRequestException(json?.error?.message ?? 'Error creando en Meta');
     }
     return json as T;
+  }
+
+  private graphTimeoutMs() {
+    const value = Number(this.config.get<string>('META_GRAPH_TIMEOUT_MS') ?? 10000);
+    return Number.isFinite(value) ? Math.max(1500, value) : 10000;
   }
 
   // ---------- Instagram/Messenger webhook ----------
@@ -240,12 +262,51 @@ export class MetaService {
     return { ok: true, received: events.length, processed: processed.length, ignored, influencers: processed };
   }
 
-  async importInfluencerConversations(limit = 50) {
+  async influencerConnectionStatus() {
+    const configured = {
+      token: Boolean(this.token),
+      pageId: Boolean(this.pageId),
+      instagramId: Boolean(this.instagramId),
+      webhookVerifyToken: Boolean(this.webhookVerifyToken),
+      appSecret: Boolean(this.appSecret)
+    };
+    if (!this.token || !this.pageId) {
+      return { ok: false, configured, message: 'Faltan META_ACCESS_TOKEN o META_PAGE_ID' };
+    }
+    try {
+      const [me, page] = await Promise.all([
+        this.graphGet<{ id?: string; name?: string }>('me', { fields: 'id,name' }, 5000),
+        this.graphGet<{ id?: string; name?: string; instagram_business_account?: { id?: string } }>(
+          this.pageId,
+          { fields: 'id,name,instagram_business_account' },
+          5000
+        )
+      ]);
+      return {
+        ok: true,
+        configured,
+        me,
+        page: { id: page.id, name: page.name, instagramBusinessAccountId: page.instagram_business_account?.id ?? null },
+        message: 'Meta conectado'
+      };
+    } catch (error) {
+      return {
+        ok: false,
+        configured,
+        message: error instanceof Error ? error.message : String(error)
+      };
+    }
+  }
+
+  async importInfluencerConversations(input: number | ImportInfluencerConversationOptions = 50) {
     if (!this.token || !this.pageId) {
       throw new BadRequestException('Meta no configurado para leer DMs (faltan META_ACCESS_TOKEN o META_PAGE_ID)');
     }
 
-    const cappedLimit = Math.max(1, Math.min(Number(limit) || 50, 100));
+    const options = typeof input === 'number' ? { limit: input } : input;
+    const includeWeak = Boolean(options.includeWeak);
+    const minReviewScore = includeWeak ? 8 : 40;
+    const cappedLimit = Math.max(1, Math.min(Number(options.limit) || 50, 100));
     const conversations = await this.fetchInstagramConversations(cappedLimit);
     const imported: Array<{ influencerId: string; igHandle: string; score: number; reason: string; messagePreview: string | null }> = [];
     let ignored = 0;
@@ -259,7 +320,7 @@ export class MetaService {
       }
       const text = messages.map((message) => message.text).filter(Boolean).join('\n');
       const detection = this.detectInfluencerIntent(text);
-      if (!detection.isCandidate) {
+      if (!detection.isCandidate && (!includeWeak || detection.score < minReviewScore)) {
         ignored += 1;
         continue;
       }
@@ -276,13 +337,20 @@ export class MetaService {
         ?? this.normalizeHandle(participantName)
         ?? `ig_${senderId}`;
       const latestMessage = messages.find((message) => message.senderId === senderId)?.text ?? messages[0]?.text ?? null;
+      const effectiveDetection = detection.isCandidate ? detection : {
+        isCandidate: true,
+        score: Math.max(detection.score, minReviewScore),
+        reason: detection.reason || 'Conversacion importada para revisar manualmente',
+        suggestedAction: 'Revisar conversacion y decidir si interesa',
+        tags: ['revision']
+      };
       const influencer = await this.upsertInfluencerFromWebhook({
         senderId,
         igHandle,
         fullName: profile?.name ?? participantName ?? null,
         message: latestMessage,
         timestamp: messages[0]?.createdAt,
-        detection
+        detection: effectiveDetection
       });
       if (!influencer) {
         ignored += 1;
@@ -293,7 +361,7 @@ export class MetaService {
         influencerId: influencer.id,
         igHandle: influencer.igHandle,
         score: influencer.detectionScore,
-        reason: influencer.detectionReason ?? detection.reason,
+        reason: influencer.detectionReason ?? effectiveDetection.reason,
         messagePreview: latestMessage ? latestMessage.slice(0, 120) : null
       });
     }
@@ -306,7 +374,7 @@ export class MetaService {
       platform: 'instagram',
       limit: String(limit),
       fields: 'id,participants,updated_time'
-    });
+    }, 10000);
     return Array.isArray(response.data) ? response.data : [];
   }
 
@@ -316,7 +384,7 @@ export class MetaService {
       const response = await this.graphGet<{ data?: any[] }>(`${conversationId}/messages`, {
         limit: '8',
         fields: 'message,from,created_time'
-      });
+      }, 5000);
       return this.mapConversationMessages(response.data ?? []);
     } catch (error) {
       this.logger.warn(`No se pudieron leer mensajes de conversacion ${conversationId}: ${(error as Error).message}`);
@@ -417,7 +485,9 @@ export class MetaService {
       }
     });
     if (!existing && !input.detection.isCandidate) return null;
-    const stage = existing?.stage && !['PROSPECT', 'CONTACTED'].includes(existing.stage) ? existing.stage : 'CONTACTED';
+    const stage = existing?.stage && !['PROSPECT', 'CONTACTED'].includes(existing.stage)
+      ? existing.stage
+      : input.detection.tags.includes('revision') ? 'PROSPECT' : 'CONTACTED';
     const tags = Array.from(new Set([...(existing?.tags ?? []), 'instagram-webhook', ...input.detection.tags]));
     const firstDetectedAt = existing?.firstDetectedAt ?? (input.detection.isCandidate ? input.timestamp ?? new Date() : undefined);
     const data = {

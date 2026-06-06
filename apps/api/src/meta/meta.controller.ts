@@ -55,9 +55,14 @@ export class MetaController {
     return this.meta.handleInstagramWebhook(body, signature, request.rawBody);
   }
 
+  @Get('influencers/status')
+  influencerConnectionStatus() {
+    return this.meta.influencerConnectionStatus();
+  }
+
   @Post('influencers/import-conversations')
-  importInfluencerConversations(@Body() body: { limit?: number }) {
-    return this.meta.importInfluencerConversations(body?.limit);
+  importInfluencerConversations(@Body() body: { limit?: number; includeWeak?: boolean }) {
+    return this.meta.importInfluencerConversations(body);
   }
 
   @Post('campaigns')

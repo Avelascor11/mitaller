@@ -6483,10 +6483,10 @@ struct InfluencersView: View {
                                 .font(.title3.weight(.black))
                                 .foregroundStyle(AppTheme.purple)
                             VStack(alignment: .leading, spacing: 3) {
-                                Text(store.isInfluencerActionRunning ? "Buscando conversaciones..." : "Buscar DMs de Instagram")
+                                Text(store.isInfluencerActionRunning ? "Buscando conversaciones..." : "Buscar candidatos en DMs")
                                     .font(.headline.weight(.black))
                                     .foregroundStyle(AppTheme.ink)
-                                Text("Revisa conversaciones abiertas y añade posibles colaboraciones.")
+                                Text("Importa conversaciones claras y dudosas para revisarlas aqui.")
                                     .font(.caption.weight(.semibold))
                                     .foregroundStyle(AppTheme.muted)
                             }
@@ -6589,8 +6589,8 @@ struct InfluencersView: View {
         do {
             let result = try await store.importInfluencerConversations()
             importMessage = result.imported == 0
-                ? "Revisadas \(result.checked) conversaciones. No he encontrado nuevas colaboraciones claras."
-                : "Añadidas \(result.imported) influs tras revisar \(result.checked) conversaciones."
+                ? "Revisadas \(result.checked) conversaciones. Ignoradas \(result.ignored), fallidas \(result.failed ?? 0)."
+                : "Añadidas \(result.imported) influs tras revisar \(result.checked). Ignoradas \(result.ignored), fallidas \(result.failed ?? 0)."
             await reload()
         } catch {
             importMessage = nil
