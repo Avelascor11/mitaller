@@ -221,6 +221,16 @@ export class MetaService {
     return Number.isFinite(value) ? Math.max(1500, value) : 10000;
   }
 
+  private instagramConversationTimeoutMs() {
+    const value = Number(this.config.get<string>('META_INSTAGRAM_CONVERSATION_TIMEOUT_MS') ?? 30000);
+    return Number.isFinite(value) ? Math.max(5000, value) : 30000;
+  }
+
+  private instagramMessageTimeoutMs() {
+    const value = Number(this.config.get<string>('META_INSTAGRAM_MESSAGE_TIMEOUT_MS') ?? 12000);
+    return Number.isFinite(value) ? Math.max(3000, value) : 12000;
+  }
+
   // ---------- Instagram/Messenger webhook ----------
   verifyWebhookChallenge(mode?: string, token?: string) {
     return mode === 'subscribe' && Boolean(this.webhookVerifyToken) && token === this.webhookVerifyToken;
@@ -374,7 +384,7 @@ export class MetaService {
       platform: 'instagram',
       limit: String(limit),
       fields: 'id,participants,updated_time'
-    }, 10000);
+    }, this.instagramConversationTimeoutMs());
     return Array.isArray(response.data) ? response.data : [];
   }
 
@@ -384,7 +394,7 @@ export class MetaService {
       const response = await this.graphGet<{ data?: any[] }>(`${conversationId}/messages`, {
         limit: '8',
         fields: 'message,from,created_time'
-      }, 5000);
+      }, this.instagramMessageTimeoutMs());
       return this.mapConversationMessages(response.data ?? []);
     } catch (error) {
       this.logger.warn(`No se pudieron leer mensajes de conversacion ${conversationId}: ${(error as Error).message}`);
