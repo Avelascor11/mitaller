@@ -850,7 +850,7 @@ final class WorkshopStore {
         syncError = nil
         defer { isInfluencerActionRunning = false }
         do {
-            let result = try await client.importInfluencerConversations(limit: 50)
+            let result = try await client.importInfluencerConversations(limit: 10)
             await loadInfluencers()
             return result
         } catch {
@@ -6588,7 +6588,9 @@ struct InfluencersView: View {
         importMessage = nil
         do {
             let result = try await store.importInfluencerConversations()
-            importMessage = result.imported == 0
+            importMessage = result.ok == false
+                ? (result.message ?? "Meta no ha devuelto conversaciones ahora mismo.")
+                : result.imported == 0
                 ? "Revisadas \(result.checked) conversaciones. Ignoradas \(result.ignored), fallidas \(result.failed ?? 0)."
                 : "Añadidas \(result.imported) influs tras revisar \(result.checked). Ignoradas \(result.ignored), fallidas \(result.failed ?? 0)."
             await reload()

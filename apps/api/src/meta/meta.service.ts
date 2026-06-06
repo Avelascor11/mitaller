@@ -308,7 +308,7 @@ export class MetaService {
     }
   }
 
-  async importInfluencerConversations(input: number | ImportInfluencerConversationOptions = 50) {
+  async importInfluencerConversations(input: number | ImportInfluencerConversationOptions = 10) {
     if (!this.token || !this.pageId) {
       throw new BadRequestException('Meta no configurado para leer DMs (faltan META_ACCESS_TOKEN o META_PAGE_ID)');
     }
@@ -316,8 +316,20 @@ export class MetaService {
     const options = typeof input === 'number' ? { limit: input } : input;
     const includeWeak = Boolean(options.includeWeak);
     const minReviewScore = includeWeak ? 8 : 40;
-    const cappedLimit = Math.max(1, Math.min(Number(options.limit) || 50, 100));
-    const conversations = await this.fetchInstagramConversations(cappedLimit);
+    const cappedLimit = Math.max(1, Math.min(Number(options.limit) || 10, 25));
+    const conversationsResult = await this.fetchInstagramConversationsSafely(cappedLimit);
+    if (!conversationsResult.ok) {
+      return {
+        ok: false,
+        checked: 0,
+        imported: 0,
+        ignored: 0,
+        failed: 1,
+        message: conversationsResult.message,
+        influencers: []
+      };
+    }
+    const conversations = conversationsResult.conversations;
     const imported: Array<{ influencerId: string; igHandle: string; score: number; reason: string; messagePreview: string | null }> = [];
     let ignored = 0;
     let failed = 0;
@@ -386,6 +398,21 @@ export class MetaService {
       fields: 'id,participants,updated_time'
     }, this.instagramConversationTimeoutMs());
     return Array.isArray(response.data) ? response.data : [];
+  }
+
+  private async fetchInstagramConversationsSafely(limit: number): Promise<
+    { ok: true; conversations: any[] } | { ok: false; message: string }
+  > {
+    try {
+      return { ok: true, conversations: await this.fetchInstagramConversations(limit) };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      this.logger.warn(`No se pudieron buscar conversaciones de Instagram: ${message}`);
+      return {
+        ok: false,
+        message: 'Meta ha tardado demasiado leyendo los DMs. Los DMs nuevos entraran por webhook; prueba otra vez en unos minutos o baja el limite de busqueda.'
+      };
+    }
   }
 
   private async fetchConversationMessages(conversationId?: string): Promise<ImportedConversationMessage[]> {

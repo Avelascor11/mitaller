@@ -357,7 +357,7 @@ struct APIClient {
         return try await get("/influencers\(suffix)")
     }
 
-    func importInfluencerConversations(limit: Int = 50, includeWeak: Bool = true) async throws -> InfluencerImportResult {
+    func importInfluencerConversations(limit: Int = 10, includeWeak: Bool = true) async throws -> InfluencerImportResult {
         let request = try jsonRequest(path: "/meta/influencers/import-conversations", method: "POST", body: InfluencerImportRequest(limit: limit, includeWeak: includeWeak))
         return try await perform(request)
     }
@@ -849,6 +849,7 @@ struct InfluencerImportResult: Decodable {
     let imported: Int
     let ignored: Int
     let failed: Int?
+    let message: String?
 }
 
 struct InfluencerSaveRequest: Encodable {
