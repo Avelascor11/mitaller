@@ -10,6 +10,47 @@ export class StockService {
     return this.prisma.stockItem.findMany({ include: { levels: { include: { location: true } } }, orderBy: { sku: 'asc' } });
   }
 
+  async createItem(input: { name: string; sku?: string; color?: string; size?: string; minStock?: number; barcode?: string; supplierSku?: string }) {
+    const name = input.name?.trim();
+    if (!name) throw new BadRequestException('Nombre requerido');
+    const sku = (input.sku?.trim() || this.slugSku(name)).toUpperCase();
+    const exists = await this.prisma.stockItem.findUnique({ where: { sku } });
+    if (exists) throw new BadRequestException(`Ya existe un artículo con SKU ${sku}`);
+    return this.prisma.stockItem.create({
+      data: {
+        sku,
+        name,
+        type: 'BLANK_GARMENT',
+        color: input.color?.trim() || null,
+        size: input.size?.trim()?.toUpperCase() || null,
+        barcode: input.barcode?.trim() || null,
+        supplierSku: input.supplierSku?.trim() || null,
+        minStock: Number.isInteger(input.minStock) && input.minStock! >= 0 ? input.minStock! : 0
+      },
+      include: { levels: { include: { location: true } } }
+    });
+  }
+
+  async updateItem(sku: string, input: { minStock?: number; name?: string; color?: string; size?: string; supplierSku?: string; barcode?: string }) {
+    const item = await this.prisma.stockItem.findUniqueOrThrow({ where: { sku } });
+    return this.prisma.stockItem.update({
+      where: { id: item.id },
+      data: {
+        minStock: Number.isInteger(input.minStock) && input.minStock! >= 0 ? input.minStock! : undefined,
+        name: input.name?.trim() || undefined,
+        color: input.color?.trim() ?? undefined,
+        size: input.size?.trim()?.toUpperCase() ?? undefined,
+        supplierSku: input.supplierSku?.trim() ?? undefined,
+        barcode: input.barcode?.trim() ?? undefined
+      },
+      include: { levels: { include: { location: true } } }
+    });
+  }
+
+  private slugSku(name: string) {
+    return name.normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-zA-Z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 40) || `ITEM-${Date.now()}`;
+  }
+
   locations() {
     return this.prisma.stockLocation.findMany({ orderBy: { code: 'asc' } });
   }

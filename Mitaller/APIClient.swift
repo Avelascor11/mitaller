@@ -158,6 +158,16 @@ struct APIClient {
         let _: StockDTO = try await perform(request)
     }
 
+    func createStockItem(_ body: CreateStockItemRequest) async throws {
+        let request = try jsonRequest(path: "/stock/items", method: "POST", body: body)
+        let _: StockDTO = try await perform(request)
+    }
+
+    func updateStockItem(sku: String, minStock: Int) async throws {
+        let request = try jsonRequest(path: "/stock/\(Self.pathSegment(sku))", method: "PATCH", body: UpdateStockItemRequest(minStock: minStock))
+        let _: StockDTO = try await perform(request)
+    }
+
     func mappingWorkbench() async throws -> MappingWorkbench {
         try await get("/purchase-needs/mapping-workbench")
     }
@@ -884,6 +894,16 @@ private struct ScanLabelRequest: Encodable {
 }
 private struct SetStockQuantityRequest: Encodable {
     let quantity: Int
+}
+struct CreateStockItemRequest: Encodable {
+    let name: String
+    let color: String?
+    let size: String?
+    let minStock: Int?
+    let supplierSku: String?
+}
+private struct UpdateStockItemRequest: Encodable {
+    let minStock: Int
 }
 private struct ManualPrintRequest: Encodable {
     let filename: String

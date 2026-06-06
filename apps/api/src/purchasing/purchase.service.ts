@@ -359,7 +359,7 @@ export class PurchaseService {
       };
       group.sizes.push({
         size,
-        subproductName: `${kind === 'SUDADERA' ? 'Sudadera' : 'Camiseta'} ${this.colorSingularLabel(color)} - ${size}`,
+        subproductName: `${this.kindLabel(kind)} ${this.colorSingularLabel(color)} - ${size}`,
         sku: stockItem?.sku ?? null,
         supplierSku: stockItem?.supplierSku ?? null,
         stockItemId: stockItem?.id ?? null,
@@ -382,7 +382,7 @@ export class PurchaseService {
         ...group,
         sizes: group.garmentType === 'DTF' ? group.sizes.sort((left, right) => left.subproductName.localeCompare(right.subproductName)) : sizes.map((size) => group.sizes.find((entry) => entry.size === size) ?? {
           size,
-          subproductName: `${group.garmentType === 'SUDADERA' ? 'Sudadera' : 'Camiseta'} ${this.colorSingularLabel(group.color)} - ${size}`,
+          subproductName: `${this.kindLabel(group.garmentType)} ${this.colorSingularLabel(group.color)} - ${size}`,
           sku: null,
           supplierSku: null,
           stockItemId: null,
@@ -603,7 +603,7 @@ export class PurchaseService {
         return {
           ...mapped,
           size: actualSize,
-          subproductName: `${mapped.kind === 'SUDADERA' ? 'Sudadera' : 'Camiseta'} ${this.colorSingularLabel(mapped.color)} - ${actualSize}`
+          subproductName: `${this.kindLabel(mapped.kind)} ${this.colorSingularLabel(mapped.color)} - ${actualSize}`
         };
       }
     }
@@ -620,7 +620,7 @@ export class PurchaseService {
       kind,
       color,
       size,
-      subproductName: `${kind === 'SUDADERA' ? 'Sudadera' : 'Camiseta'} ${this.colorSingularLabel(color)} - ${size}`
+      subproductName: `${this.kindLabel(kind)} ${this.colorSingularLabel(color)} - ${size}`
     };
   }
 
@@ -634,7 +634,7 @@ export class PurchaseService {
       kind,
       color,
       size,
-      subproductName: `${kind === 'SUDADERA' ? 'Sudadera' : 'Camiseta'} ${this.colorSingularLabel(color)} - ${size}`
+      subproductName: `${this.kindLabel(kind)} ${this.colorSingularLabel(color)} - ${size}`
     };
   }
 
@@ -835,9 +835,18 @@ export class PurchaseService {
     return Number(orderNumber.replace(/\D/g, '')) || 0;
   }
 
+  private kindLabel(kind: string) {
+    switch (kind) {
+      case 'SUDADERA': return 'Sudadera';
+      case 'BAÑADOR': return 'Bañador';
+      default: return 'Camiseta';
+    }
+  }
+
   private inferGarmentKind(value: string) {
     const normalized = this.normalizeText(value);
     // Word keywords
+    if (/\b(banador|swimsuit|swim|bikini)\b/.test(normalized)) return 'BAÑADOR';
     if (/\b(sudadera|hoodie|sweatshirt|hooded)\b/.test(normalized)) return 'SUDADERA';
     if (/\b(camiseta|tshirt|t-shirt|tee|shirt)\b/.test(normalized)) return 'CAMISETA';
     // SKU prefixes: WG* = sudadera, TG* = camiseta, HD* = sudadera, TS* = camiseta

@@ -2979,6 +2979,78 @@ struct LabelScanView: View {
     }
 }
 
+struct CreateStockItemSheet: View {
+    @Environment(WorkshopStore.self) private var store
+    @Environment(\.dismiss) private var dismiss
+    let onCreated: () -> Void
+    @State private var kind = "Bañador"
+    @State private var color = ""
+    @State private var size = "M"
+    @State private var minStock = 0
+    @State private var supplierSku = ""
+    @State private var saving = false
+    @State private var error: String?
+
+    private let kinds = ["Bañador", "Camiseta", "Sudadera"]
+    private let sizes = ["XS", "S", "M", "L", "XL", "XXL"]
+
+    private var itemName: String {
+        let c = color.trimmingCharacters(in: .whitespaces)
+        return "\(kind) \(c) - \(size)".replacingOccurrences(of: "  ", with: " ")
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("Artículo") {
+                    Picker("Tipo", selection: $kind) {
+                        ForEach(kinds, id: \.self) { Text($0).tag($0) }
+                    }
+                    TextField("Color (ej. Negro, Azul)", text: $color)
+                    Picker("Talla", selection: $size) {
+                        ForEach(sizes, id: \.self) { Text($0).tag($0) }
+                    }
+                    Stepper("Stock mínimo: \(minStock)", value: $minStock, in: 0...500)
+                    TextField("SKU proveedor (opcional)", text: $supplierSku).autocapitalization(.allCharacters)
+                }
+                Section {
+                    HStack {
+                        Text("Se creará").foregroundStyle(AppTheme.muted)
+                        Spacer()
+                        Text(itemName).font(.subheadline.weight(.bold))
+                    }
+                }
+                if let error { Section { Text(error).font(.footnote).foregroundStyle(AppTheme.red) } }
+                Section {
+                    Button {
+                        Task { await save() }
+                    } label: {
+                        if saving { ProgressView().frame(maxWidth: .infinity) }
+                        else { Label("Crear artículo", systemImage: "plus").frame(maxWidth: .infinity) }
+                    }.disabled(saving || color.trimmingCharacters(in: .whitespaces).isEmpty)
+                }
+            }
+            .navigationTitle("Nuevo artículo")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Cancelar") { dismiss() } } }
+        }
+    }
+
+    private func save() async {
+        guard let client = store.apiClient else { error = "API no configurada"; return }
+        saving = true; error = nil; defer { saving = false }
+        let body = CreateStockItemRequest(
+            name: itemName,
+            color: color.trimmingCharacters(in: .whitespaces),
+            size: size,
+            minStock: minStock,
+            supplierSku: supplierSku.isEmpty ? nil : supplierSku
+        )
+        do { try await client.createStockItem(body); onCreated(); dismiss() }
+        catch { self.error = error.localizedDescription }
+    }
+}
+
 struct StockView: View {
     @Environment(WorkshopStore.self) private var store
     @State private var query = ""
@@ -2987,6 +3059,7 @@ struct StockView: View {
     @State private var showingReceiptPDF = false
     @State private var receiptReview: StockReceiptReviewState?
     @State private var stockEdit: StockEditSelection?
+    @State private var showCreateItem = false
 
     var garmentGroups: [PurchaseMatrixGroup] {
         store.purchaseMatrix.filter { $0.garmentType != "DTF" }
@@ -3083,9 +3156,16 @@ struct StockView: View {
                     Image(systemName: "arrow.clockwise")
                 }
                 .disabled(store.isLoading)
+                Button { showCreateItem = true } label: {
+                    Image(systemName: "plus.circle.fill")
+                }
             }
             .refreshable {
                 await store.syncFromAPI()
+            }
+            .sheet(isPresented: $showCreateItem) {
+                CreateStockItemSheet(onCreated: { Task { await store.syncFromAPI() } })
+                    .environment(store)
             }
             .sheet(isPresented: $showingScanner) {
                 NavigationStack {

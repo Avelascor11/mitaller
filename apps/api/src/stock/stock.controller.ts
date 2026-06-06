@@ -31,9 +31,19 @@ export class StockController {
     return this.receipts.confirmReceipt(id, body.lines ?? []);
   }
 
+  @Post('items')
+  createItem(@Body() body: { name: string; sku?: string; color?: string; size?: string; minStock?: number; barcode?: string; supplierSku?: string }) {
+    return this.stock.createItem(body);
+  }
+
   @Get(':sku')
   getStockBySku(@Param('sku') sku: string) {
     return this.stock.getStockBySku(sku);
+  }
+
+  @Patch(':sku')
+  updateItem(@Param('sku') sku: string, @Body() body: { minStock?: number; name?: string; color?: string; size?: string; supplierSku?: string; barcode?: string }) {
+    return this.stock.updateItem(sku, body);
   }
 
   @Post('move')
