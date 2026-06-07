@@ -593,7 +593,32 @@ export class PurchaseService {
     return index;
   }
 
+  // Swimsuits ship "por dorsal": title like `Bañador "14"`. Each dorsal = a color.
+  private readonly banadorDorsalColor: Record<string, string> = {
+    '14': 'VERDE', '55': 'AZUL', '1': 'NAVY', '16': 'ROJO', '4': 'NARANJA'
+  };
+
+  private mapBanadorByDorsal(item: { title: string; sku: string; size?: string | null; variantTitle?: string | null; productType?: string | null }) {
+    const text = this.normalizeText(`${item.title} ${item.productType ?? ''} ${item.sku}`);
+    if (!/banador|swimsuit|swim|bikini/.test(text)) return null;
+    const dorsal = `${item.title}`.match(/(\d{1,3})/)?.[1];
+    if (!dorsal) return null;
+    const color = this.banadorDorsalColor[dorsal];
+    if (!color) return null;
+    const size = this.normalizeSize(`${item.size ?? ''} ${item.variantTitle ?? ''} ${item.title}`);
+    if (!size) return null;
+    return {
+      kind: 'BAÑADOR',
+      color,
+      size,
+      subproductName: `Bañador ${this.colorSingularLabel(color)} - ${size}`
+    };
+  }
+
   private mapOrderItemToBlankGarment(item: { productType?: string | null; title: string; sku: string; color?: string | null; size?: string | null; variantTitle?: string | null }, mappingIndex?: Map<string, string>) {
+    const banador = this.mapBanadorByDorsal(item);
+    if (banador) return banador;
+
     const mappedSubproduct = mappingIndex?.get(`name:${this.normalizeText(item.title)}`) ?? (this.isReliableSku(item.sku) ? mappingIndex?.get(`sku:${item.sku}`) : undefined);
     if (mappedSubproduct) {
       const mapped = this.mapSubproductName(mappedSubproduct);
