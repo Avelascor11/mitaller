@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { ThrottlerModule } from '@nestjs/throttler';
 import { ActivityModule } from '../activity/activity.module';
 import { AuthModule } from '../auth/auth.module';
 import { KlaviyoModule } from '../klaviyo/klaviyo.module';
@@ -13,7 +14,8 @@ import { ReturnsController } from './returns.controller';
 import { ReturnsService } from './returns.service';
 
 @Module({
-  imports: [PrismaModule, SendcloudModule, ShopifyModule, ActivityModule, AuthModule, KlaviyoModule, OrdersModule],
+  imports: [PrismaModule, SendcloudModule, ShopifyModule, ActivityModule, AuthModule, KlaviyoModule, OrdersModule,
+    ThrottlerModule.forRoot([{ ttl: 60000, limit: 20 }])],
   controllers: [ReturnsController, MobileReturnsController],
   providers: [ReturnsService, ReturnsConfigService, ReturnsExceptionsService],
   exports: [ReturnsService, ReturnsConfigService, ReturnsExceptionsService]

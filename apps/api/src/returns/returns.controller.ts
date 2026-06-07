@@ -1,4 +1,5 @@
 import { Body, Controller, Delete, Get, Header, Param, Patch, Post, Put, Res, UseGuards } from '@nestjs/common';
+import { Throttle, ThrottlerGuard } from '@nestjs/throttler';
 import type { Response } from 'express';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { ShopifyAdapter } from '../shopify/shopify.adapter';
@@ -55,20 +56,26 @@ export class ReturnsController {
     return this.exceptionsService.remove(id);
   }
 
-  /** Public — customer looks up their order */
+  /** Public — customer looks up their order (rate-limited: anti-enumeration) */
   @Post('lookup')
+  @UseGuards(ThrottlerGuard)
+  @Throttle({ default: { ttl: 60000, limit: 8 } })
   lookup(@Body() dto: LookupOrderDto) {
     return this.returnsService.lookupOrder(dto);
   }
 
-  /** Public — Shopify product catalog for exchange picker */
+  /** Public — Shopify product catalog for exchange picker (rate-limited) */
   @Get('catalog')
+  @UseGuards(ThrottlerGuard)
+  @Throttle({ default: { ttl: 60000, limit: 30 } })
   catalog() {
     return this.shopify.getProductCatalog();
   }
 
-  /** Public — customer creates return/exchange request */
+  /** Public — customer creates return/exchange request (rate-limited: anti-spam) */
   @Post()
+  @UseGuards(ThrottlerGuard)
+  @Throttle({ default: { ttl: 60000, limit: 5 } })
   create(@Body() dto: CreateReturnDto) {
     return this.returnsService.createReturn(dto);
   }
@@ -125,32 +132,10 @@ export class ReturnsController {
     return this.returnsService.findAll();
   }
 
-  /** iOS app — list returns (no JWT, internal use) */
-  @Get('admin/list')
-  findAllAlias() {
-    return this.returnsService.findAll();
-  }
-
-  /** iOS app — find return by tracking number */
-  @Get('admin/by-tracking/:tracking')
-  findByTracking(@Param('tracking') tracking: string) {
-    return this.returnsService.findByTracking(tracking);
-  }
-
-  /** iOS app — mark received */
-  @Post(':id/received')
-  markReceivedPost(@Param('id') id: string) {
-    return this.returnsService.markReceived(id);
-  }
-
-  /** iOS app — verify */
-  @Post(':id/verify')
-  verifyReturnPost(
-    @Param('id') id: string,
-    @Body() body: { verificationStatus: 'OK' | 'ISSUE'; verificationNotes?: string }
-  ) {
-    return this.returnsService.verifyReturn(id, body);
-  }
+  // NOTE: the unauthenticated /returns/admin/list, /returns/admin/by-tracking,
+  // POST /returns/:id/received and POST /returns/:id/verify aliases were removed
+  // (they leaked all return data / allowed unauthenticated writes). The iOS app
+  // uses the /mobile-returns/* controller instead.
 
   /** Admin — get return detail */
   @Get(':id')

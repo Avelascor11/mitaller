@@ -1,6 +1,8 @@
 import { BadGatewayException, BadRequestException, Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 
+const SENDCLOUD_TIMEOUT_MS = 15000;
+
 @Injectable()
 export class SendcloudAdapter {
   constructor(private readonly config: ConfigService) {}
@@ -285,7 +287,8 @@ export class SendcloudAdapter {
     if (!this.hasCredentials()) throw new BadRequestException('Sendcloud no esta configurado.');
     const url = `${this.apiV3BaseURL}/parcels/${parcelId}/documents/label`;
     const response = await fetch(url, {
-      headers: { Authorization: `Basic ${Buffer.from(`${this.publicKey}:${this.secretKey}`).toString('base64')}` }
+      headers: { Authorization: `Basic ${Buffer.from(`${this.publicKey}:${this.secretKey}`).toString('base64')}` },
+      signal: AbortSignal.timeout(SENDCLOUD_TIMEOUT_MS)
     });
     if (!response.ok) {
       throw new BadGatewayException(`Sendcloud label download error ${response.status}`);
@@ -324,14 +327,23 @@ export class SendcloudAdapter {
   }
 
   private async requestAbsolute<T = unknown>(url: string, init: RequestInit): Promise<T> {
-    const response = await fetch(url, {
-      ...init,
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Basic ${Buffer.from(`${this.publicKey}:${this.secretKey}`).toString('base64')}`,
-        ...init.headers
-      }
-    });
+    let response: Response;
+    try {
+      response = await fetch(url, {
+        ...init,
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Basic ${Buffer.from(`${this.publicKey}:${this.secretKey}`).toString('base64')}`,
+          ...init.headers
+        },
+        signal: init.signal ?? AbortSignal.timeout(SENDCLOUD_TIMEOUT_MS)
+      });
+    } catch (error) {
+      const timedOut = error instanceof Error && error.name === 'TimeoutError';
+      throw new BadGatewayException(timedOut
+        ? `SendCloud tardó demasiado en responder (>${SENDCLOUD_TIMEOUT_MS / 1000}s). Inténtalo de nuevo.`
+        : 'No se pudo conectar con SendCloud.');
+    }
     const json = await response.json().catch(() => ({}));
     if (!response.ok) {
       const message = this.sendcloudErrorMessage(response.status, json);
