@@ -860,14 +860,14 @@ final class WorkshopStore {
         }
     }
 
-    func createInfluencer(handle: String, name: String, notes: String, lastMessage: String = "") async {
-        guard let client = apiClient else { return }
+    func createInfluencer(handle: String, name: String, notes: String, lastMessage: String = "") async throws -> InfluencerProfile {
+        guard let client = apiClient else { throw APIClientError.invalidURL }
         isInfluencerActionRunning = true
         syncError = nil
         defer { isInfluencerActionRunning = false }
         let cleanedMessage = lastMessage.trimmingCharacters(in: .whitespacesAndNewlines)
         do {
-            _ = try await client.createInfluencer(InfluencerSaveRequest(
+            let influencer = try await client.createInfluencer(InfluencerSaveRequest(
                 igHandle: handle,
                 fullName: name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : name,
                 followers: nil,
@@ -885,8 +885,10 @@ final class WorkshopStore {
                 lastInboundAt: cleanedMessage.isEmpty ? nil : ISO8601DateFormatter().string(from: Date())
             ))
             await loadInfluencers()
+            return influencer
         } catch {
             syncError = "No se pudo crear influ: \(error.localizedDescription)"
+            throw error
         }
     }
 
@@ -6582,7 +6584,11 @@ struct InfluencersView: View {
                 }
             }
             .sheet(isPresented: $showingCreate) {
-                CreateInfluencerSheet()
+                CreateInfluencerSheet {
+                    stage = .all
+                    query = ""
+                    Task { await reload() }
+                }
                     .environment(store)
             }
             .task { await reload() }
@@ -6983,10 +6989,13 @@ struct InfluencerSubmissionStatusBadge: View {
 struct CreateInfluencerSheet: View {
     @Environment(WorkshopStore.self) private var store
     @Environment(\.dismiss) private var dismiss
+    let onCreated: () -> Void
     @State private var handle = ""
     @State private var name = ""
     @State private var lastMessage = ""
     @State private var notes = ""
+    @State private var feedback: String?
+    @State private var isError = false
 
     var body: some View {
         NavigationStack {
@@ -7010,6 +7019,14 @@ struct CreateInfluencerSheet: View {
                     Label("Se guardara como prospecto seleccionado por ti desde DM.", systemImage: "checkmark.seal.fill")
                         .font(.footnote.weight(.semibold))
                 }
+
+                if let feedback {
+                    Section {
+                        Label(feedback, systemImage: isError ? "exclamationmark.triangle.fill" : "checkmark.circle.fill")
+                            .font(.footnote.weight(.semibold))
+                            .foregroundStyle(isError ? AppTheme.red : AppTheme.green)
+                    }
+                }
             }
             .navigationTitle("Nueva influ")
             .toolbar {
@@ -7018,14 +7035,27 @@ struct CreateInfluencerSheet: View {
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Crear") {
-                        Task {
-                            await store.createInfluencer(handle: handle, name: name, notes: notes, lastMessage: lastMessage)
-                            dismiss()
-                        }
+                        Task { await create() }
                     }
                     .disabled(handle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || store.isInfluencerActionRunning)
                 }
             }
+        }
+    }
+
+    private func create() async {
+        feedback = nil
+        isError = false
+        do {
+            let influencer = try await store.createInfluencer(handle: handle, name: name, notes: notes, lastMessage: lastMessage)
+            feedback = "Guardada @\(influencer.igHandle)."
+            isError = false
+            onCreated()
+            try? await Task.sleep(for: .milliseconds(450))
+            dismiss()
+        } catch {
+            feedback = "No se pudo guardar: \(error.localizedDescription)"
+            isError = true
         }
     }
 }
