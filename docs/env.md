@@ -101,6 +101,8 @@ La tarjeta "Pagos Shopify" usa los endpoints oficiales de Shopify Payments (`/sh
 - `META_API_VERSION`: version Graph API. Por defecto `v21.0`.
 - `META_WEBHOOK_VERIFY_TOKEN`: texto secreto que Meta pedira al verificar el webhook.
 - `META_APP_SECRET`: app secret de Meta. Si esta definido, la API valida `X-Hub-Signature-256` en cada webhook entrante.
+- `META_PAYMENT_LIMIT_EUR`: limite de acumulacion de facturacion Meta que quieres evitar. Por defecto `200`.
+- `META_PAYMENT_WARNING_EUR`: umbral desde el que la app avisa para pagar antes de llegar al limite. Por defecto `150`.
 
 Webhook para detectar influs desde chats de Instagram:
 

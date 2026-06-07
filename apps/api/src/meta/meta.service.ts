@@ -675,6 +675,55 @@ export class MetaService {
     return { date: day, spend: +spend.toFixed(2), currency: 'EUR' };
   }
 
+  async billingStatus() {
+    if (!this.hasCredentials()) {
+      return {
+        configured: false,
+        currency: 'EUR',
+        balanceDue: 0,
+        amountSpent: 0,
+        spendCap: null,
+        paymentLimit: this.metaPaymentLimit(),
+        warningThreshold: this.metaPaymentWarningThreshold(),
+        status: 'INFO',
+        headline: 'Meta Ads no configurado',
+        action: 'Configura META_ACCESS_TOKEN y META_AD_ACCOUNT_ID para ver el saldo pendiente.'
+      };
+    }
+    const account = await this.graphGet<{
+      id?: string;
+      name?: string;
+      account_status?: number;
+      currency?: string;
+      balance?: string | number;
+      amount_spent?: string | number;
+      spend_cap?: string | number;
+    }>(this.adAccount, {
+      fields: 'id,name,account_status,currency,balance,amount_spent,spend_cap'
+    });
+    const balanceDue = this.parseMetaMoney(account.balance);
+    const amountSpent = this.parseMetaMoney(account.amount_spent);
+    const spendCap = account.spend_cap == null ? null : this.parseMetaMoney(account.spend_cap);
+    const paymentLimit = this.metaPaymentLimit();
+    const warningThreshold = this.metaPaymentWarningThreshold();
+    const status = balanceDue >= paymentLimit ? 'BAD' : balanceDue >= warningThreshold ? 'WATCH' : balanceDue > 0 ? 'GOOD' : 'INFO';
+    return {
+      configured: true,
+      accountId: account.id ?? this.adAccount,
+      accountName: account.name ?? 'Meta Ads',
+      accountStatus: account.account_status ?? null,
+      currency: account.currency ?? 'EUR',
+      balanceDue,
+      amountSpent,
+      spendCap,
+      paymentLimit,
+      warningThreshold,
+      status,
+      headline: this.billingHeadline(status, balanceDue, paymentLimit),
+      action: this.billingAction(status)
+    };
+  }
+
   /** Total spend for a range. Safe: returns 0 if not configured. */
   async spendForRange(from: string, to: string): Promise<number> {
     if (!this.hasCredentials()) return 0;
@@ -950,6 +999,42 @@ export class MetaService {
     const salesPct = Number(this.config.get<string>('META_WEEKEND_MAX_AD_SPEND_PCT') ?? 18);
     const pctCap = salesRevenue > 0 ? salesRevenue * (salesPct / 100) : hardCap * 0.5;
     return +Math.max(20, Math.min(hardCap, pctCap)).toFixed(2);
+  }
+
+  private metaPaymentLimit() {
+    const value = Number(this.config.get<string>('META_PAYMENT_LIMIT_EUR') ?? 200);
+    return Number.isFinite(value) && value > 0 ? value : 200;
+  }
+
+  private metaPaymentWarningThreshold() {
+    const configured = Number(this.config.get<string>('META_PAYMENT_WARNING_EUR') ?? 150);
+    const limit = this.metaPaymentLimit();
+    const value = Number.isFinite(configured) && configured > 0 ? configured : limit * 0.75;
+    return +Math.min(value, limit).toFixed(2);
+  }
+
+  private parseMetaMoney(value?: string | number | null) {
+    if (value == null) return 0;
+    const parsed = Number(value);
+    if (!Number.isFinite(parsed)) return 0;
+    // Some Meta ad-account monetary fields arrive in minor units. If it is a large integer,
+    // normalize it to euros so the mobile app does not show 15000 € instead of 150 €.
+    const isLargeInteger = Number.isInteger(parsed) && Math.abs(parsed) >= 1000;
+    return +(isLargeInteger ? parsed / 100 : parsed).toFixed(2);
+  }
+
+  private billingHeadline(status: string, balanceDue: number, paymentLimit: number) {
+    if (status === 'BAD') return `Paga Meta hoy: saldo ${this.money(balanceDue)} y limite ${this.money(paymentLimit)}.`;
+    if (status === 'WATCH') return `Saldo Meta cerca del limite: ${this.money(balanceDue)} pendientes.`;
+    if (status === 'GOOD') return `Saldo Meta controlado: ${this.money(balanceDue)} pendientes.`;
+    return 'Sin saldo pendiente detectado en Meta.';
+  }
+
+  private billingAction(status: string) {
+    if (status === 'BAD') return 'Entra en facturacion de Meta y paga ahora para que no se acumule ni bloquee campañas.';
+    if (status === 'WATCH') return 'Conviene pagarlo hoy para no pasar el limite de facturacion.';
+    if (status === 'GOOD') return 'Puedes pagarlo al cierre del dia para mantener la cuenta limpia.';
+    return 'Revisa de nuevo al final del dia si hay gasto.';
   }
 
   private weekendCashStatus(isWeekend: boolean, spend: number, salesRevenue: number, maxWeekendSpend: number): 'GOOD' | 'WATCH' | 'BAD' | 'INFO' {

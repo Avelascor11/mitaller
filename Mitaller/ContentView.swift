@@ -9,6 +9,7 @@ import SwiftUI
 import UIKit
 import PDFKit
 import UniformTypeIdentifiers
+import UserNotifications
 @preconcurrency import Vision
 
 enum AppTheme {
@@ -7038,6 +7039,7 @@ struct MetaAdsView: View {
     @State private var learning: MetaLearningSummary?
     @State private var dailyPlan: MetaDailyPlan?
     @State private var weekendCash: MetaWeekendCash?
+    @State private var billing: MetaBillingStatus?
     @State private var loading = false
     @State private var error: String?
     @State private var range: MetaRange = .today
@@ -7165,6 +7167,7 @@ struct MetaAdsView: View {
                                 .glassPanel(padding: 10, accent: AppTheme.amber)
                         }
                         if let health { AdsHealthCard(health: health) }
+                        if let billing { MetaBillingCard(billing: billing) }
                         if let weekendCash { MetaWeekendCashCard(cash: weekendCash) }
                         MetaKpiCard(summary: summary)
                         if let learning { MetaLearningCard(learning: learning) }
@@ -7271,11 +7274,13 @@ struct MetaAdsView: View {
             async let l = client.metaLearning(from: r.from, to: r.to)
             async let p = client.metaDailyPlan(from: r.from, to: r.to)
             async let w = client.metaWeekendCash(from: r.from, to: r.to)
+            async let b = client.metaBilling()
             summary = try await s
             health = try? await h
             learning = try? await l
             dailyPlan = try? await p
             weekendCash = try? await w
+            billing = try? await b
         } catch {
             self.error = error.localizedDescription
         }
@@ -7382,6 +7387,113 @@ struct MetaLearningCard: View {
                 .fixedSize(horizontal: false, vertical: true)
         }
         .glassPanel(padding: 16, accent: AppTheme.purple)
+    }
+}
+
+struct MetaBillingCard: View {
+    let billing: MetaBillingStatus
+    @State private var notificationMessage: String?
+    @State private var notificationBusy = false
+
+    private var color: Color {
+        switch billing.status {
+        case "BAD": AppTheme.red
+        case "WATCH": AppTheme.amber
+        case "GOOD": AppTheme.green
+        default: AppTheme.blue
+        }
+    }
+
+    private var icon: String {
+        switch billing.status {
+        case "BAD": "creditcard.trianglebadge.exclamationmark.fill"
+        case "WATCH": "bell.badge.fill"
+        case "GOOD": "creditcard.fill"
+        default: "creditcard"
+        }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 10) {
+                Image(systemName: icon)
+                    .font(.title2.weight(.bold))
+                    .foregroundStyle(color)
+                    .frame(width: 30)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("SALDO META")
+                        .font(.caption.weight(.black))
+                        .foregroundStyle(color)
+                    Text(billing.headline)
+                        .font(.subheadline.weight(.heavy))
+                        .foregroundStyle(AppTheme.ink)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                Spacer()
+            }
+
+            HStack(spacing: 10) {
+                MetaStat(title: "Pendiente", value: euro(billing.balanceDue), accent: color)
+                MetaStat(title: "Aviso", value: euro(billing.warningThreshold), accent: AppTheme.amber)
+                MetaStat(title: "Limite", value: euro(billing.paymentLimit), accent: AppTheme.red)
+            }
+
+            Label(billing.action, systemImage: "arrow.turn.down.right")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(AppTheme.muted)
+                .fixedSize(horizontal: false, vertical: true)
+
+            Button {
+                Task { await enableDailyReminder() }
+            } label: {
+                Label(notificationBusy ? "Activando..." : "Avisarme cada dia para pagar", systemImage: "bell.and.waves.left.and.right.fill")
+                    .font(.caption.weight(.heavy))
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 10)
+                    .background(color.opacity(0.15), in: Capsule())
+                    .foregroundStyle(color)
+            }
+            .buttonStyle(.plain)
+            .disabled(notificationBusy)
+
+            if let notificationMessage {
+                Text(notificationMessage)
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(AppTheme.muted)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .glassPanel(padding: 16, accent: color)
+    }
+
+    private func enableDailyReminder() async {
+        notificationBusy = true
+        defer { notificationBusy = false }
+        do {
+            let granted = try await UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound, .badge])
+            guard granted else {
+                notificationMessage = "No has dado permiso de notificaciones. Activalo en Ajustes de iOS."
+                return
+            }
+            UNUserNotificationCenter.current().removePendingNotificationRequests(withIdentifiers: ["meta.billing.daily"])
+            var date = DateComponents()
+            date.hour = 20
+            date.minute = 0
+            let content = UNMutableNotificationContent()
+            content.title = "Revisa el saldo de Meta Ads"
+            content.body = "Paga el saldo pendiente hoy para que no se acumule hasta el limite de \(euro(billing.paymentLimit))."
+            content.sound = .default
+            let trigger = UNCalendarNotificationTrigger(dateMatching: date, repeats: true)
+            let request = UNNotificationRequest(identifier: "meta.billing.daily", content: content, trigger: trigger)
+            try await UNUserNotificationCenter.current().add(request)
+            notificationMessage = "Aviso diario activado a las 20:00. Abre Meta Ads para ver el saldo actualizado."
+        } catch {
+            notificationMessage = "No se pudo activar el aviso: \(error.localizedDescription)"
+        }
+    }
+
+    private func euro(_ value: Double) -> String {
+        String(format: "%.0f €", value)
     }
 }
 

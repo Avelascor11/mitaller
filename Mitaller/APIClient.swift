@@ -298,6 +298,9 @@ struct APIClient {
         let f = DateFormatter.apiDay
         return try await get("/meta/spend/daily?date=\(f.string(from: date))")
     }
+    func metaBilling() async throws -> MetaBillingStatus {
+        try await get("/meta/billing")
+    }
     func metaCampaignDetail(id: String, from: Date, to: Date) async throws -> MetaCampaignDetail {
         let f = DateFormatter.apiDay
         return try await get("/meta/campaigns/\(Self.pathSegment(id))?from=\(f.string(from: from))&to=\(f.string(from: to))")
@@ -619,6 +622,22 @@ struct MetaDailyPlan: Decodable {
     let headline: String
     let items: [MetaDailyPlanItem]
     let totals: MetaDailyPlanTotals
+}
+
+struct MetaBillingStatus: Decodable {
+    let configured: Bool
+    let accountId: String?
+    let accountName: String?
+    let accountStatus: Int?
+    let currency: String
+    let balanceDue: Double
+    let amountSpent: Double
+    let spendCap: Double?
+    let paymentLimit: Double
+    let warningThreshold: Double
+    let status: String
+    let headline: String
+    let action: String
 }
 
 struct MetaWeekendCash: Decodable {

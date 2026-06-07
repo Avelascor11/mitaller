@@ -12,6 +12,11 @@ export class MetaController {
     return this.meta.dailySpend(date);
   }
 
+  @Get('billing')
+  billing() {
+    return this.meta.billingStatus();
+  }
+
   @Get('summary')
   summary(@Query('from') from?: string, @Query('to') to?: string) {
     return this.meta.summary(from, to);
