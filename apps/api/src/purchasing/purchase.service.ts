@@ -353,7 +353,7 @@ export class PurchaseService {
         key: groupKey,
         garmentType: kind,
         color,
-        title: `${kind === 'SUDADERA' ? 'SUDADERAS' : 'CAMISETAS'} ${this.colorLabel(color)}`,
+        title: `${kind === 'SUDADERA' ? 'SUDADERAS' : kind === 'BAÑADOR' ? 'BAÑADORES' : 'CAMISETAS'} ${this.colorLabel(color)}`,
         theme: this.colorTheme(color),
         sizes: []
       };
