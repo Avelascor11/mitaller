@@ -860,6 +860,14 @@ struct InfluencerSaveRequest: Encodable {
     let stage: String?
     let tags: [String]?
     let notes: String?
+    let source: String?
+    let detectionScore: Int?
+    let detectionReason: String?
+    let suggestedAction: String?
+    let lastMessage: String?
+    let lastMessageAt: String?
+    let firstDetectedAt: String?
+    let lastInboundAt: String?
 }
 
 struct InfluencerUpdateRequest: Encodable {

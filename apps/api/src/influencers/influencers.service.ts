@@ -265,7 +265,11 @@ export class InfluencersService {
       source: this.clean(input.source),
       detectionScore: this.optionalNumber(input.detectionScore) ?? 0,
       detectionReason: this.clean(input.detectionReason),
-      suggestedAction: this.clean(input.suggestedAction)
+      suggestedAction: this.clean(input.suggestedAction),
+      lastMessage: this.clean(input.lastMessage),
+      lastMessageAt: this.optionalDate(input.lastMessageAt),
+      firstDetectedAt: this.optionalDate(input.firstDetectedAt) ?? (input.source ? new Date() : undefined),
+      lastInboundAt: this.optionalDate(input.lastInboundAt)
     };
   }
 
@@ -297,7 +301,15 @@ export class InfluencersService {
   }
 
   private handle(value?: string) {
-    return value?.trim().replace(/^@+/, '').toLowerCase() ?? '';
+    const raw = value?.trim();
+    if (!raw) return '';
+    const urlMatch = raw.match(/instagram\.com\/(?:reel\/|p\/|stories\/)?@?([a-zA-Z0-9._]+)/i);
+    const atMatch = raw.match(/@([a-zA-Z0-9._]+)/);
+    const fallback = raw.replace(/^https?:\/\/(www\.)?instagram\.com\//i, '').split(/[/?#\s]/)[0];
+    return (urlMatch?.[1] ?? atMatch?.[1] ?? fallback)
+      .replace(/^@+/, '')
+      .replace(/[^a-zA-Z0-9._]/g, '')
+      .toLowerCase();
   }
 
   private clean(value?: string | null) {

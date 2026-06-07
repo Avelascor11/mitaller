@@ -79,6 +79,10 @@ export interface CreateInfluencerBody {
   detectionScore?: number;
   detectionReason?: string;
   suggestedAction?: string;
+  lastMessage?: string;
+  lastMessageAt?: string;
+  firstDetectedAt?: string;
+  lastInboundAt?: string;
 }
 
 export interface UpdateInfluencerBody extends Partial<CreateInfluencerBody> {

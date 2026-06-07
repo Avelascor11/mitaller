@@ -859,11 +859,12 @@ final class WorkshopStore {
         }
     }
 
-    func createInfluencer(handle: String, name: String, notes: String) async {
+    func createInfluencer(handle: String, name: String, notes: String, lastMessage: String = "") async {
         guard let client = apiClient else { return }
         isInfluencerActionRunning = true
         syncError = nil
         defer { isInfluencerActionRunning = false }
+        let cleanedMessage = lastMessage.trimmingCharacters(in: .whitespacesAndNewlines)
         do {
             _ = try await client.createInfluencer(InfluencerSaveRequest(
                 igHandle: handle,
@@ -871,8 +872,16 @@ final class WorkshopStore {
                 followers: nil,
                 email: nil,
                 stage: "PROSPECT",
-                tags: nil,
-                notes: notes.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : notes
+                tags: ["manual", "dm"],
+                notes: notes.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : notes,
+                source: "manual_dm_review",
+                detectionScore: 100,
+                detectionReason: "Seleccionado manualmente desde conversaciones de Instagram",
+                suggestedAction: "Revisar perfil y decidir colaboracion",
+                lastMessage: cleanedMessage.isEmpty ? nil : cleanedMessage,
+                lastMessageAt: cleanedMessage.isEmpty ? nil : ISO8601DateFormatter().string(from: Date()),
+                firstDetectedAt: ISO8601DateFormatter().string(from: Date()),
+                lastInboundAt: cleanedMessage.isEmpty ? nil : ISO8601DateFormatter().string(from: Date())
             ))
             await loadInfluencers()
         } catch {
@@ -6483,10 +6492,10 @@ struct InfluencersView: View {
                                 .font(.title3.weight(.black))
                                 .foregroundStyle(AppTheme.purple)
                             VStack(alignment: .leading, spacing: 3) {
-                                Text(store.isInfluencerActionRunning ? "Buscando conversaciones..." : "Buscar candidatos en DMs")
+                                Text(store.isInfluencerActionRunning ? "Buscando conversaciones..." : "Probar busqueda automatica")
                                     .font(.headline.weight(.black))
                                     .foregroundStyle(AppTheme.ink)
-                                Text("Importa conversaciones claras y dudosas para revisarlas aqui.")
+                                Text("Si Meta no entrega el historico, anade las influs manualmente con +.")
                                     .font(.caption.weight(.semibold))
                                     .foregroundStyle(AppTheme.muted)
                             }
@@ -6975,18 +6984,30 @@ struct CreateInfluencerSheet: View {
     @Environment(\.dismiss) private var dismiss
     @State private var handle = ""
     @State private var name = ""
+    @State private var lastMessage = ""
     @State private var notes = ""
 
     var body: some View {
         NavigationStack {
             Form {
                 Section("Perfil") {
-                    TextField("@instagram", text: $handle)
+                    TextField("@usuario o enlace de Instagram", text: $handle)
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
-                    TextField("Nombre", text: $name)
-                    TextField("Notas", text: $notes, axis: .vertical)
+                    TextField("Nombre si lo sabes", text: $name)
+                }
+
+                Section("Conversacion") {
+                    TextField("Pega aqui el mensaje clave del DM", text: $lastMessage, axis: .vertical)
+                        .textInputAutocapitalization(.sentences)
+                        .lineLimit(3...7)
+                    TextField("Notas internas", text: $notes, axis: .vertical)
                         .lineLimit(3...6)
+                }
+
+                Section {
+                    Label("Se guardara como prospecto seleccionado por ti desde DM.", systemImage: "checkmark.seal.fill")
+                        .font(.footnote.weight(.semibold))
                 }
             }
             .navigationTitle("Nueva influ")
@@ -6997,7 +7018,7 @@ struct CreateInfluencerSheet: View {
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Crear") {
                         Task {
-                            await store.createInfluencer(handle: handle, name: name, notes: notes)
+                            await store.createInfluencer(handle: handle, name: name, notes: notes, lastMessage: lastMessage)
                             dismiss()
                         }
                     }
