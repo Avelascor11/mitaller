@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Patch, Post } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Patch, Post } from '@nestjs/common';
 import { StockReceiptsService } from './stock-receipts.service';
 import { StockService } from './stock.service';
 
@@ -44,6 +44,11 @@ export class StockController {
   @Patch(':sku')
   updateItem(@Param('sku') sku: string, @Body() body: { minStock?: number; name?: string; color?: string; size?: string; supplierSku?: string; barcode?: string }) {
     return this.stock.updateItem(sku, body);
+  }
+
+  @Delete(':sku')
+  deleteItem(@Param('sku') sku: string) {
+    return this.stock.deleteItem(sku);
   }
 
   @Post('move')

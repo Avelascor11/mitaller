@@ -870,11 +870,14 @@ export class PurchaseService {
       ['NEGRA', /\b(negro|negra|black|blk)\b/],
       ['SAND', /\b(sand|arena)\b/],
       ['CHARCOAL', /\b(charcoal|carbon|gris)\b/],
-      ['TANGERINE', /\b(tangerine|naranja|orange)\b/],
+      ['VERDE', /\b(verde|green)\b/],
+      ['ROJO', /\b(rojo|red)\b/],
+      ['NARANJA', /\b(naranja|orange)\b/],
+      ['TANGERINE', /\b(tangerine)\b/],
+      ['NAVY', /\b(navy|marino)\b/],
       ['AZUL', /\b(azul|blue)\b/],
       ['MARRON', /\b(marron|brown)\b/],
-      ['ROSA', /\b(rosa|pink)\b/],
-      ['NAVY', /\b(navy|marino)\b/]
+      ['ROSA', /\b(rosa|pink)\b/]
     ];
     return rules.find(([, pattern]) => pattern.test(normalized))?.[0] ?? null;
   }
@@ -905,7 +908,10 @@ export class PurchaseService {
       AZUL: 'Azul',
       MARRON: 'Marron',
       ROSA: 'Rosa',
-      NAVY: 'Navy'
+      NAVY: 'Navy',
+      VERDE: 'Verde',
+      ROJO: 'Rojo',
+      NARANJA: 'Naranja'
     };
     return labels[color] ?? color;
   }
@@ -920,7 +926,10 @@ export class PurchaseService {
       AZUL: { background: '#3E8BC4', foreground: '#111111' },
       MARRON: { background: '#7A3F00', foreground: '#111111' },
       ROSA: { background: '#D5A4BC', foreground: '#111111' },
-      NAVY: { background: '#0B416A', foreground: '#FFFFFF' }
+      NAVY: { background: '#0B416A', foreground: '#FFFFFF' },
+      VERDE: { background: '#2E9E5B', foreground: '#FFFFFF' },
+      ROJO: { background: '#D7263D', foreground: '#FFFFFF' },
+      NARANJA: { background: '#FF7A1A', foreground: '#111111' }
     };
     return themes[color] ?? { background: '#F2F2F7', foreground: '#111111' };
   }

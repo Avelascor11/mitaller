@@ -47,6 +47,12 @@ export class StockService {
     });
   }
 
+  async deleteItem(sku: string) {
+    const item = await this.prisma.stockItem.findUniqueOrThrow({ where: { sku } });
+    await this.prisma.stockItem.delete({ where: { id: item.id } });
+    return { ok: true, sku };
+  }
+
   private slugSku(name: string) {
     return name.normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-zA-Z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 40) || `ITEM-${Date.now()}`;
   }
