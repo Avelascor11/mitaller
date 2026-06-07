@@ -335,6 +335,10 @@ struct APIClient {
         let f = DateFormatter.apiDay
         return try await get("/meta/daily-plan?from=\(f.string(from: from))&to=\(f.string(from: to))")
     }
+    func metaWeekendCash(from: Date, to: Date) async throws -> MetaWeekendCash {
+        let f = DateFormatter.apiDay
+        return try await get("/meta/weekend-cash?from=\(f.string(from: from))&to=\(f.string(from: to))")
+    }
     func metaApplyDailyPlan(_ body: MetaApplyDailyPlanRequest) async throws -> MetaApplyDailyPlanResult {
         let request = try jsonRequest(path: "/meta/daily-plan/apply", method: "POST", body: body)
         return try await perform(request)
@@ -615,6 +619,24 @@ struct MetaDailyPlan: Decodable {
     let headline: String
     let items: [MetaDailyPlanItem]
     let totals: MetaDailyPlanTotals
+}
+
+struct MetaWeekendCash: Decodable {
+    let from: String
+    let to: String
+    let currency: String
+    let isWeekend: Bool
+    let status: String
+    let headline: String
+    let spend: Double
+    let salesRevenue: Double
+    let pendingShopifyPayout: Double
+    let maxWeekendSpend: Double
+    let remainingWeekendSpend: Double
+    let spendToSalesPct: Double?
+    let activeCampaigns: Int
+    let shouldScale: Bool
+    let actions: [String]
 }
 
 struct MetaDailyPlanItem: Decodable, Identifiable {

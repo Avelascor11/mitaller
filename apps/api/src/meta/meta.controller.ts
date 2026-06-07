@@ -100,6 +100,11 @@ export class MetaController {
     return this.meta.dailyPlan(from, to);
   }
 
+  @Get('weekend-cash')
+  weekendCash(@Query('from') from?: string, @Query('to') to?: string) {
+    return this.meta.weekendCash(from, to);
+  }
+
   @Post('daily-plan/apply')
   applyDailyPlan(@Body() body: ApplyMetaDailyPlanDto) {
     return this.meta.applyDailyPlan(body);

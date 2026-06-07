@@ -7037,6 +7037,7 @@ struct MetaAdsView: View {
     @State private var health: AdsHealth?
     @State private var learning: MetaLearningSummary?
     @State private var dailyPlan: MetaDailyPlan?
+    @State private var weekendCash: MetaWeekendCash?
     @State private var loading = false
     @State private var error: String?
     @State private var range: MetaRange = .today
@@ -7164,6 +7165,7 @@ struct MetaAdsView: View {
                                 .glassPanel(padding: 10, accent: AppTheme.amber)
                         }
                         if let health { AdsHealthCard(health: health) }
+                        if let weekendCash { MetaWeekendCashCard(cash: weekendCash) }
                         MetaKpiCard(summary: summary)
                         if let learning { MetaLearningCard(learning: learning) }
                         if let dailyPlan {
@@ -7268,10 +7270,12 @@ struct MetaAdsView: View {
             async let h = client.adsHealth(from: r.from, to: r.to)
             async let l = client.metaLearning(from: r.from, to: r.to)
             async let p = client.metaDailyPlan(from: r.from, to: r.to)
+            async let w = client.metaWeekendCash(from: r.from, to: r.to)
             summary = try await s
             health = try? await h
             learning = try? await l
             dailyPlan = try? await p
+            weekendCash = try? await w
         } catch {
             self.error = error.localizedDescription
         }
@@ -7378,6 +7382,85 @@ struct MetaLearningCard: View {
                 .fixedSize(horizontal: false, vertical: true)
         }
         .glassPanel(padding: 16, accent: AppTheme.purple)
+    }
+}
+
+struct MetaWeekendCashCard: View {
+    let cash: MetaWeekendCash
+
+    private var color: Color {
+        switch cash.status {
+        case "GOOD": AppTheme.green
+        case "WATCH": AppTheme.amber
+        case "BAD": AppTheme.red
+        default: AppTheme.blue
+        }
+    }
+
+    private var icon: String {
+        switch cash.status {
+        case "GOOD": "checkmark.shield.fill"
+        case "WATCH": "exclamationmark.triangle.fill"
+        case "BAD": "xmark.shield.fill"
+        default: "calendar.badge.clock"
+        }
+    }
+
+    private var title: String {
+        cash.isWeekend ? "Modo Finde / Caja" : "Caja Ads"
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 10) {
+                Image(systemName: icon)
+                    .font(.title2.weight(.bold))
+                    .foregroundStyle(color)
+                    .frame(width: 30)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(title.uppercased())
+                        .font(.caption.weight(.black))
+                        .foregroundStyle(color)
+                    Text(cash.headline)
+                        .font(.subheadline.weight(.heavy))
+                        .foregroundStyle(AppTheme.ink)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                Spacer()
+            }
+
+            HStack(spacing: 10) {
+                MetaStat(title: "Gasto finde", value: euro(cash.spend), accent: AppTheme.red)
+                MetaStat(title: "Cobro pendiente", value: euro(cash.pendingShopifyPayout), accent: AppTheme.amber)
+                MetaStat(title: "Limite prudente", value: euro(cash.maxWeekendSpend), accent: color)
+            }
+
+            if let pct = cash.spendToSalesPct {
+                Label("Ads consumen el \(String(format: "%.1f", pct))% de las ventas del periodo.", systemImage: "percent")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(AppTheme.muted)
+            } else if cash.isWeekend {
+                Label("Sin ventas registradas en el periodo: evita que Meta gaste por inercia.", systemImage: "hand.raised.fill")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(AppTheme.muted)
+            }
+
+            Divider().background(AppTheme.line)
+
+            VStack(alignment: .leading, spacing: 7) {
+                ForEach(Array(cash.actions.enumerated()), id: \.offset) { _, action in
+                    Label(action, systemImage: "arrow.turn.down.right")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(AppTheme.muted)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+        }
+        .glassPanel(padding: 16, accent: color)
+    }
+
+    private func euro(_ value: Double) -> String {
+        String(format: "%.0f €", value)
     }
 }
 

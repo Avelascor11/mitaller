@@ -860,6 +860,10 @@ export class MetaService {
     ]);
     const revenue = campaigns.reduce((s, c) => s + c.purchaseValue, 0);
     const purchases = campaigns.reduce((s, c) => s + c.purchases, 0);
+    const recommendations = this.applyWeekendRecommendationPolicy(
+      this.buildCampaignRecommendations(campaigns, spend > 0 ? revenue / spend : null),
+      this.rangeTouchesWeekend(f, t)
+    );
     return {
       from: f,
       to: t,
@@ -871,9 +875,167 @@ export class MetaService {
       roas: spend > 0 ? +(revenue / spend).toFixed(2) : null,
       activeCampaigns: campaigns.filter((c) => c.status === 'ACTIVE').length,
       campaigns,
-      recommendations: this.buildCampaignRecommendations(campaigns, spend > 0 ? revenue / spend : null),
+      recommendations,
       bestSellers
     };
+  }
+
+  async weekendCash(from?: string, to?: string) {
+    const today = new Date().toISOString().slice(0, 10);
+    const f = from ?? today;
+    const t = to ?? today;
+    const [spend, salesRevenue, campaigns] = await Promise.all([
+      this.spendForRange(f, t),
+      this.salesRevenueForRange(f, t),
+      this.hasCredentials() ? this.campaigns(f, t) : Promise.resolve<CampaignInsight[]>([])
+    ]);
+    const activeCampaigns = campaigns.filter((campaign) => campaign.status === 'ACTIVE');
+    const isWeekend = this.rangeTouchesWeekend(f, t);
+    const pendingShopifyPayout = isWeekend ? salesRevenue : 0;
+    const spendToSalesPct = salesRevenue > 0 ? (spend / salesRevenue) * 100 : null;
+    const maxWeekendSpend = this.maxWeekendAdSpend(salesRevenue);
+    const remainingWeekendSpend = Math.max(0, maxWeekendSpend - spend);
+    const status = this.weekendCashStatus(isWeekend, spend, salesRevenue, maxWeekendSpend);
+    const recommendation = this.weekendCashRecommendation(status, isWeekend, spend, salesRevenue, maxWeekendSpend);
+
+    return {
+      from: f,
+      to: t,
+      currency: 'EUR',
+      isWeekend,
+      status,
+      headline: recommendation.headline,
+      spend,
+      salesRevenue,
+      pendingShopifyPayout,
+      maxWeekendSpend,
+      remainingWeekendSpend: +remainingWeekendSpend.toFixed(2),
+      spendToSalesPct: spendToSalesPct == null ? null : +spendToSalesPct.toFixed(1),
+      activeCampaigns: activeCampaigns.length,
+      shouldScale: status === 'GOOD' && !isWeekend,
+      actions: recommendation.actions
+    };
+  }
+
+  private async salesRevenueForRange(from: string, to: string) {
+    const start = new Date(`${from}T00:00:00.000`);
+    const end = new Date(`${to}T23:59:59.999`);
+    const orders = await this.prisma.order.findMany({
+      where: {
+        orderedAt: { gte: start, lte: end },
+        operationalStatus: { not: 'CANCELLED' }
+      },
+      select: { totalPrice: true, subtotalPrice: true, totalShipping: true, totalDiscount: true, items: { select: { unitPrice: true, quantity: true } } }
+    });
+    return +orders.reduce((sum, order) => {
+      if (order.totalPrice != null) return sum + order.totalPrice;
+      const itemRevenue = order.subtotalPrice
+        ?? order.items.reduce((lineSum, item) => lineSum + (item.unitPrice ?? 0) * item.quantity, 0);
+      return sum + itemRevenue + (order.totalShipping ?? 0) - (order.totalDiscount ?? 0);
+    }, 0).toFixed(2);
+  }
+
+  private rangeTouchesWeekend(from: string, to: string) {
+    const start = new Date(`${from}T12:00:00.000Z`);
+    const end = new Date(`${to}T12:00:00.000Z`);
+    for (let day = new Date(start); day <= end; day.setUTCDate(day.getUTCDate() + 1)) {
+      const weekDay = day.getUTCDay();
+      if (weekDay === 0 || weekDay === 6) return true;
+    }
+    return false;
+  }
+
+  private maxWeekendAdSpend(salesRevenue: number) {
+    const hardCap = Number(this.config.get<string>('META_WEEKEND_MAX_AD_SPEND_EUR') ?? 120);
+    const salesPct = Number(this.config.get<string>('META_WEEKEND_MAX_AD_SPEND_PCT') ?? 18);
+    const pctCap = salesRevenue > 0 ? salesRevenue * (salesPct / 100) : hardCap * 0.5;
+    return +Math.max(20, Math.min(hardCap, pctCap)).toFixed(2);
+  }
+
+  private weekendCashStatus(isWeekend: boolean, spend: number, salesRevenue: number, maxWeekendSpend: number): 'GOOD' | 'WATCH' | 'BAD' | 'INFO' {
+    if (!isWeekend) return 'INFO';
+    if (spend > maxWeekendSpend) return 'BAD';
+    if (salesRevenue <= 0 && spend >= 25) return 'BAD';
+    if (spend > maxWeekendSpend * 0.75) return 'WATCH';
+    if (salesRevenue > 0 && spend / salesRevenue > 0.22) return 'WATCH';
+    return 'GOOD';
+  }
+
+  private weekendCashRecommendation(status: 'GOOD' | 'WATCH' | 'BAD' | 'INFO', isWeekend: boolean, spend: number, salesRevenue: number, maxWeekendSpend: number) {
+    if (!isWeekend) {
+      return {
+        headline: 'Hoy no es modo finde. Puedes tomar decisiones normales, revisando margen y ROAS.',
+        actions: [
+          'El modo caja se activara para sabado/domingo.',
+          'El lunes puedes restaurar presupuesto si el finde dejo ventas sanas.'
+        ]
+      };
+    }
+    if (status === 'BAD') {
+      return {
+        headline: 'Modo defensa: el gasto del finde esta por encima de lo prudente para caja.',
+        actions: [
+          'No escales ninguna campana hoy.',
+          'Pausa pruebas y campanas sin compras atribuidas.',
+          `Intenta cerrar el finde por debajo de ${this.money(maxWeekendSpend)} de gasto Meta.`,
+          'Revisa el lunes cuando Shopify libere cobros antes de volver a subir presupuesto.'
+        ]
+      };
+    }
+    if (status === 'WATCH') {
+      return {
+        headline: 'Modo prudente: mantendria ganadoras, pero sin subir presupuesto.',
+        actions: [
+          'No apliques recomendaciones de escalar durante el finde.',
+          'Baja presupuesto en campanas con ROAS bajo o cero compras.',
+          `Quedan aproximadamente ${this.money(Math.max(0, maxWeekendSpend - spend))} de margen de gasto prudente.`,
+          'Compara este sabado/domingo contra otros findes, no contra dias laborables.'
+        ]
+      };
+    }
+    return {
+      headline: salesRevenue > 0
+        ? 'Finde controlado: hay ventas y el gasto aun esta dentro del limite de caja.'
+        : 'Finde tranquilo: gasto bajo, pero sin ventas confirmadas aun.',
+      actions: [
+        'Mantén presupuesto, sin escalar.',
+        'Deja vivas solo las campanas que ya sabes que convierten.',
+        'Si una campana gasta sin compras, bajala antes de que consuma caja.',
+        'Prepara la decision fuerte para el lunes.'
+      ]
+    };
+  }
+
+  private applyWeekendRecommendationPolicy(recommendations: MetaRecommendation[], isWeekend: boolean) {
+    if (!isWeekend) return recommendations;
+    const guarded = recommendations.map((item) => {
+      if (item.severity !== 'SCALE') return item;
+      return {
+        ...item,
+        id: `${item.id}-weekend-guard`,
+        severity: 'WATCH' as const,
+        title: `No escalaria ahora: ${item.targetName}`,
+        reason: `${item.reason} Pero el rango toca fin de semana y Shopify no libera caja hasta dia habil.`,
+        action: 'Mantén o revisa el lunes. Durante el finde protege caja y no subas presupuesto automaticamente.',
+        metricLabel: `Finde · ${item.metricLabel}`,
+        priority: Math.max(60, item.priority - 15),
+        suggestedDailyBudget: null
+      };
+    });
+    if (!guarded.some((item) => item.id === 'account-weekend-cash-guard')) {
+      guarded.unshift(this.recommendation({
+        targetType: 'ACCOUNT',
+        targetId: null,
+        targetName: 'Cuenta Meta Ads',
+        severity: 'WATCH',
+        title: 'Modo finde: proteger caja',
+        reason: 'El rango toca sabado/domingo y Shopify no paga hasta dia habil.',
+        action: 'No escales presupuesto. Baja o pausa lo que gaste sin compras y vuelve a escalar el lunes si los datos aguantan.',
+        metricLabel: 'Finde · caja',
+        priority: 94
+      }));
+    }
+    return this.rankRecommendations(guarded);
   }
 
   private buildCampaignRecommendations(campaigns: CampaignInsight[], accountRoas: number | null): MetaRecommendation[] {
