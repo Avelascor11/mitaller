@@ -33,6 +33,13 @@ const REASON_LABELS: Record<string, { label: string; color: string }> = {
   OTHER:            { label: 'Otro',                color: '#8A8A96' },
 };
 
+const STAGE_META: Record<string, { label: string; color: string }> = {
+  BROWSING:   { label: 'Navegando',        color: '#8A8A96' },
+  LOOKED_UP:  { label: 'Pedido encontrado', color: '#5b9bd5' },
+  SELECTING:  { label: 'Eligiendo',        color: '#f0b429' },
+  SUBMITTING: { label: 'A punto de enviar', color: '#34B27B' },
+};
+
 const AV = ['#34B27B', '#5b9bd5', '#9b8cdb', '#e0995a', '#e06a6a'];
 const GRAIN = "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.5'/%3E%3C/svg%3E\")";
 
@@ -167,6 +174,7 @@ export default function AdminDevolucionesPage() {
   const [exceptions, setExceptions] = useState<any[]>([]);
   const [showNewEx, setShowNewEx] = useState(false);
   const [newEx, setNewEx] = useState<{ orderNumber: string; customerEmail: string; extraDays: number; notes: string; expiresAt: string; opts: Record<string, boolean> }>({ orderNumber: '', customerEmail: '', extraDays: 7, notes: '', expiresAt: '', opts: { EXTEND_WINDOW: false, FREE_LABEL: true, ACCEPT_EXPIRED: false, BLOCK: false } });
+  const [live, setLive] = useState<{ total: number; byStage: Record<string, number>; visitors: any[] }>({ total: 0, byStage: {}, visitors: [] });
 
   const t = makeTheme(dark);
 
@@ -182,6 +190,22 @@ export default function AdminDevolucionesPage() {
   useEffect(() => { localStorage.setItem('admin-theme', dark ? 'dark' : 'light'); }, [dark]);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => { if (token) loadAll(token, tab); }, [tab]);
+
+  // Live visitors — poll while on the list tab
+  useEffect(() => {
+    if (!token || tab !== 'list') return;
+    let alive = true;
+    const poll = async () => {
+      try {
+        const r = await fetch(`${API}/returns/admin/live`, { headers: auth(token) });
+        if (r.ok && alive) setLive(await r.json());
+      } catch { /* ignore */ }
+    };
+    poll();
+    const iv = setInterval(poll, 5000);
+    return () => { alive = false; clearInterval(iv); };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [token, tab]);
 
   function auth(tk: string) { return { Authorization: `Bearer ${tk}` }; }
   function logout() { ['token', 'mitaller_token'].forEach(k => localStorage.removeItem(k)); document.cookie = 'admin-token=; path=/; max-age=0'; window.location.href = '/login'; }
@@ -503,6 +527,48 @@ export default function AdminDevolucionesPage() {
             {/* ── LIST ── */}
             {tab === 'list' && (
               <motion.div key="list" variants={tabVariants} initial="initial" animate="animate" exit="exit">
+                {/* ── EN VIVO ── */}
+                <motion.div variants={cardItem} initial="initial" animate="animate"
+                  style={{ borderRadius: 16, background: t.card, border: `1px solid ${live.total > 0 ? ACCENT + '44' : t.border}`, boxShadow: t.shadow, backdropFilter: 'blur(14px)', marginBottom: 14, overflow: 'hidden' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '13px 20px', borderBottom: live.total > 0 ? `1px solid ${t.border}` : 'none' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                      <span style={{ position: 'relative', display: 'flex', width: 9, height: 9 }}>
+                        <span style={{ position: 'absolute', inset: 0, borderRadius: '50%', background: live.total > 0 ? '#e06a6a' : t.faint, animation: live.total > 0 ? 'lvping 1.6s ease-out infinite' : 'none' }} />
+                        <span style={{ position: 'relative', width: 9, height: 9, borderRadius: '50%', background: live.total > 0 ? '#e06a6a' : t.faint }} />
+                      </span>
+                      <span style={{ fontSize: 14.5, fontWeight: 650, color: t.text }}>En vivo</span>
+                      <span style={{ fontSize: 12, fontWeight: 600, color: live.total > 0 ? ACCENT : t.dim, background: live.total > 0 ? 'rgba(52,178,123,0.12)' : t.head, padding: '2px 9px', borderRadius: 100 }}>{live.total} {live.total === 1 ? 'visitante' : 'visitantes'}</span>
+                    </div>
+                    <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                      {Object.entries(STAGE_META).map(([k, m]) => (live.byStage?.[k] ?? 0) > 0 && (
+                        <span key={k} style={{ fontSize: 11.5, fontWeight: 600, color: m.color, background: m.color + '18', padding: '3px 9px', borderRadius: 100 }}>{m.label}: {live.byStage[k]}</span>
+                      ))}
+                    </div>
+                  </div>
+                  <style>{`@keyframes lvping{0%{transform:scale(1);opacity:.7}80%,100%{transform:scale(2.4);opacity:0}}`}</style>
+                  {live.total === 0
+                    ? <div style={{ padding: '14px 20px', fontSize: 12.5, color: t.faint }}>Nadie en el portal ahora mismo.</div>
+                    : <div>
+                        {live.visitors.map((v: any) => {
+                          const m = STAGE_META[v.stage] ?? { label: v.stage, color: t.dim };
+                          return (
+                            <div key={v.sessionId} style={{ display: 'grid', gridTemplateColumns: '150px 1fr 110px 90px', alignItems: 'center', gap: 10, padding: '10px 20px', borderTop: `1px solid ${t.borderSoft}` }}>
+                              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 7, fontSize: 12, fontWeight: 600, color: m.color }}>
+                                <span style={{ width: 6, height: 6, borderRadius: '50%', background: m.color }} />{m.label}
+                              </span>
+                              <span style={{ fontSize: 12.5, color: t.text2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                {v.orderNumber ? <b style={{ color: t.text }}>{v.orderNumber}</b> : <span style={{ color: t.faint }}>sin pedido</span>}
+                                {v.customerEmail ? ` · ${v.customerEmail}` : ''}
+                              </span>
+                              <span style={{ fontSize: 11.5, fontWeight: 600, color: v.type === 'EXCHANGE' ? '#9b8cdb' : '#5b9bd5' }}>{v.type === 'EXCHANGE' ? 'Cambio' : 'Devolución'}</span>
+                              <span style={{ fontSize: 11.5, color: t.faint, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{Math.floor(v.secondsOnSite / 60)}m {v.secondsOnSite % 60}s</span>
+                            </div>
+                          );
+                        })}
+                      </div>
+                  }
+                </motion.div>
+
                 <motion.div
                   variants={staggerContainer}
                   initial="initial"

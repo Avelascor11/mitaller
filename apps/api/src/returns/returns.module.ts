@@ -10,6 +10,7 @@ import { ShopifyModule } from '../shopify/shopify.module';
 import { ReturnsConfigService } from './returns-config.service';
 import { ReturnsExceptionsService } from './returns-exceptions.service';
 import { MobileApiKeyGuard } from './mobile-api-key.guard';
+import { ReturnsPresenceService } from './returns-presence.service';
 import { MobileReturnsController } from './mobile-returns.controller';
 import { ReturnsController } from './returns.controller';
 import { ReturnsService } from './returns.service';
@@ -18,7 +19,7 @@ import { ReturnsService } from './returns.service';
   imports: [PrismaModule, SendcloudModule, ShopifyModule, ActivityModule, AuthModule, KlaviyoModule, OrdersModule,
     ThrottlerModule.forRoot([{ ttl: 60000, limit: 20 }])],
   controllers: [ReturnsController, MobileReturnsController],
-  providers: [ReturnsService, ReturnsConfigService, ReturnsExceptionsService, MobileApiKeyGuard],
+  providers: [ReturnsService, ReturnsConfigService, ReturnsExceptionsService, MobileApiKeyGuard, ReturnsPresenceService],
   exports: [ReturnsService, ReturnsConfigService, ReturnsExceptionsService]
 })
 export class ReturnsModule {}

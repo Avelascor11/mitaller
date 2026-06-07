@@ -683,6 +683,40 @@ export default function DevolucionesPage() {
   // After Shopify checkout: poll status
   const [polling, setPolling] = useState(false);
   const [pollStatus, setPollStatus] = useState<StatusResponse | null>(null);
+  const [sessionId] = useState<string>(() => (typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `s_${Math.random().toString(36).slice(2)}_${Date.now()}`));
+
+  // Live presence heartbeat — lets admin see who is on the portal in real time
+  useEffect(() => {
+    const stage = step === 3
+      ? null
+      : step === 1
+        ? 'BROWSING'
+        : termsAccepted
+          ? 'SUBMITTING'
+          : Object.keys(selections).length > 0
+            ? 'SELECTING'
+            : 'LOOKED_UP';
+
+    if (!stage) { // finished — drop presence
+      navigator.sendBeacon?.(`${API_URL}/returns/presence/leave`, new Blob([JSON.stringify({ sessionId })], { type: 'application/json' }));
+      return;
+    }
+
+    const type = Object.values(selections).some((s: any) => s?.replacementVariantId) ? 'EXCHANGE' : 'RETURN';
+    const beat = () => {
+      fetch(`${API_URL}/returns/presence`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sessionId, stage, orderNumber: lookup?.orderNumber || orderNumber || undefined, customerEmail: email || undefined, type }),
+        keepalive: true
+      }).catch(() => {});
+    };
+    beat();
+    const iv = setInterval(beat, 10000);
+    const onLeave = () => navigator.sendBeacon?.(`${API_URL}/returns/presence/leave`, new Blob([JSON.stringify({ sessionId })], { type: 'application/json' }));
+    window.addEventListener('beforeunload', onLeave);
+    return () => { clearInterval(iv); window.removeEventListener('beforeunload', onLeave); };
+  }, [step, selections, termsAccepted, lookup, orderNumber, email, sessionId]);
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);

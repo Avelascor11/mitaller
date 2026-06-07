@@ -7,6 +7,7 @@ import { CreateReturnDto } from './dto/create-return.dto';
 import { LookupOrderDto } from './dto/lookup-order.dto';
 import { ReturnsConfigService } from './returns-config.service';
 import { ReturnsExceptionsService } from './returns-exceptions.service';
+import { ReturnsPresenceService, PresenceStage } from './returns-presence.service';
 import { ReturnsService } from './returns.service';
 
 @Controller('returns')
@@ -15,8 +16,34 @@ export class ReturnsController {
     private readonly returnsService: ReturnsService,
     private readonly shopify: ShopifyAdapter,
     private readonly configService: ReturnsConfigService,
-    private readonly exceptionsService: ReturnsExceptionsService
+    private readonly exceptionsService: ReturnsExceptionsService,
+    private readonly presence: ReturnsPresenceService
   ) {}
+
+  /** Public — portal heartbeat for live visitor tracking */
+  @Post('presence')
+  @UseGuards(ThrottlerGuard)
+  @Throttle({ default: { ttl: 60000, limit: 40 } })
+  presenceHeartbeat(@Body() body: { sessionId: string; stage: PresenceStage; orderNumber?: string; customerEmail?: string; type?: string }) {
+    if (!body?.sessionId || !body?.stage) return { ok: false };
+    return this.presence.heartbeat(body);
+  }
+
+  /** Public — visitor left the portal */
+  @Post('presence/leave')
+  @UseGuards(ThrottlerGuard)
+  @Throttle({ default: { ttl: 60000, limit: 40 } })
+  presenceLeave(@Body() body: { sessionId: string }) {
+    if (!body?.sessionId) return { ok: false };
+    return this.presence.leave(body.sessionId);
+  }
+
+  /** Admin — live visitors on the returns portal */
+  @Get('admin/live')
+  @UseGuards(JwtAuthGuard)
+  liveVisitors() {
+    return this.presence.list();
+  }
 
   // ============ ADMIN: Config ============
   @Get('admin/config')
