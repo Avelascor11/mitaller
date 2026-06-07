@@ -1,8 +1,10 @@
-import { Body, Controller, Get, Param, Post } from '@nestjs/common';
+import { Body, Controller, Get, Param, Post, UseGuards } from '@nestjs/common';
+import { MobileApiKeyGuard } from './mobile-api-key.guard';
 import { ReturnsService } from './returns.service';
 
-/** Mobile app routes — no JWT required (internal Railway URL) */
+/** Mobile app routes — protected by a shared X-API-Key (MOBILE_API_KEY). */
 @Controller('mobile-returns')
+@UseGuards(MobileApiKeyGuard)
 export class MobileReturnsController {
   constructor(private readonly returnsService: ReturnsService) {}
 
