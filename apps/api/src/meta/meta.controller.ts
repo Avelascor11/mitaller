@@ -19,8 +19,10 @@ export class MetaController {
 
   @Get('autopilot')
   async autopilotPreview() {
-    const [plan, currentMode] = await Promise.all([this.meta.autopilotRun(false), this.meta.getAutopilotMode()]);
-    return { ...plan, currentMode };
+    const [plan, currentMode, lastRun] = await Promise.all([
+      this.meta.autopilotRun(false), this.meta.getAutopilotMode(), this.meta.autopilotLastRun()
+    ]);
+    return { ...plan, currentMode, lastRun };
   }
 
   @Post('autopilot/run')

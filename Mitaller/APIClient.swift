@@ -534,9 +534,12 @@ struct MetaAutopilot: Decodable {
     let actions: [MetaAutopilotAction]
     let advice: [MetaAutopilotAdvice]
     let projection: MetaAutopilotProjection?
+    let lastRun: MetaAutopilotLastRun?
 }
 struct MetaAutopilotModeRequest: Encodable { let mode: String }
-struct MetaAutopilotModeResult: Decodable { let mode: String }
+struct MetaAutopilotAppliedNow: Decodable { let applied: Int }
+struct MetaAutopilotModeResult: Decodable { let mode: String; let appliedNow: MetaAutopilotAppliedNow? }
+struct MetaAutopilotLastRun: Decodable { let ranAt: String?; let action: String?; let message: String? }
 
 struct MetaCampaign: Decodable, Identifiable {
     let id: String

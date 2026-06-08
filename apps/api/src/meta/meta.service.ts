@@ -761,7 +761,29 @@ export class MetaService {
     await this.prisma.autopilotConfig.upsert({
       where: { id: 'singleton' }, create: { id: 'singleton', mode: m }, update: { mode: m }
     }).catch(() => undefined);
-    return { mode: m };
+    // When switching ON, run a real pass immediately so changes apply now (not just at the daily cron).
+    let appliedNow: { applied: number; actions: any[] } | undefined;
+    if (m === 'live' && this.hasCredentials()) {
+      try {
+        const run = await this.autopilotRun(true);
+        appliedNow = { applied: run.actions.filter((a: any) => a.applied).length, actions: run.actions };
+      } catch { /* ignore */ }
+    }
+    return { mode: m, appliedNow };
+  }
+
+  /** Last autopilot run from the activity log, so the app can show what was applied + when. */
+  async autopilotLastRun() {
+    try {
+      const log = await this.prisma.activityLog.findFirst({
+        where: { entityType: 'MetaAutopilot', action: { in: ['AUTOPILOT_APPLIED', 'AUTOPILOT_PAUSE_WEAK'] } },
+        orderBy: { createdAt: 'desc' }
+      });
+      if (!log) return { ranAt: null, action: null, message: null, meta: null };
+      return { ranAt: log.createdAt, action: log.action, message: log.message, meta: log.metadataJson };
+    } catch {
+      return { ranAt: null, action: null, message: null, meta: null };
+    }
   }
 
   /** Pause all underperforming active adsets (the "weak" ones the autopilot only advises about). */

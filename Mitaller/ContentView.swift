@@ -7490,6 +7490,11 @@ struct AutopilotCard: View {
                  : "Simulación: calcula los cambios pero no los aplica. Actívalo para que opere solo.")
                 .font(.caption).foregroundStyle(AppTheme.muted)
 
+            if let lr = autopilot.lastRun, let ranAt = lr.ranAt {
+                Label("Última actuación: \(ranAt.prefix(16).replacingOccurrences(of: "T", with: " ")) · \(lr.message ?? "")", systemImage: "clock.arrow.circlepath")
+                    .font(.caption2.weight(.semibold)).foregroundStyle(AppTheme.green).lineLimit(2)
+            }
+
             if !autopilot.actions.isEmpty {
                 Text("SUBIRÍA HOY").font(.system(size: 10, weight: .heavy)).foregroundStyle(AppTheme.muted)
                 ForEach(autopilot.actions) { a in
@@ -7568,7 +7573,12 @@ struct AutopilotCard: View {
     private func toggle() async {
         guard let client = store.apiClient else { return }
         busy = true; defer { busy = false }
-        _ = try? await client.setAutopilotMode(isLive ? "dry" : "live")
+        let goingLive = !isLive
+        if let r = try? await client.setAutopilotMode(goingLive ? "live" : "dry") {
+            if goingLive, let n = r.appliedNow?.applied {
+                pauseMsg = n > 0 ? "Activado y aplicado: \(n) subida(s) ahora ✓" : "Activado ✓ (hoy no había nada que subir; actuará en la próxima pasada)"
+            }
+        }
         onChange()
     }
 }
