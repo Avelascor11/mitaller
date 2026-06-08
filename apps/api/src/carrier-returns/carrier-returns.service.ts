@@ -40,7 +40,7 @@ export class CarrierReturnsService {
     const order = await this.prisma.order.findFirst({
       where: { OR: [{ orderNumber }, { orderNumber: `#${orderNumber.replace(/^#/, '')}` }] }
     });
-    return this.prisma.carrierReturn.create({
+    const created = await this.prisma.carrierReturn.create({
       data: {
         orderId: order?.id ?? null,
         orderNumber: order?.orderNumber ?? orderNumber,
@@ -51,6 +51,8 @@ export class CarrierReturnsService {
         notes: input.notes?.trim() || null
       }
     });
+    await this.ensureEmail(created);
+    return this.prisma.carrierReturn.findUnique({ where: { id: created.id } });
   }
 
   /** Find an order by its tracking/parcel id (Shipment in our DB) and register the carrier return. */
@@ -80,7 +82,9 @@ export class CarrierReturnsService {
         feeAmount: this.fee
       }
     });
-    return { detected: true, alreadyExists: false, carrierReturn: created };
+    await this.ensureEmail(created);
+    const fresh = await this.prisma.carrierReturn.findUnique({ where: { id: created.id } });
+    return { detected: true, alreadyExists: false, carrierReturn: fresh };
   }
 
   async update(id: string, input: { status?: string; customerEmail?: string; reason?: Reason; notes?: string; newAddress?: string }) {
@@ -102,9 +106,27 @@ export class CarrierReturnsService {
     return r;
   }
 
+  /** Backfill customer email/name from Shopify when our DB order lacked it. */
+  private async ensureEmail(ret: { id: string; orderNumber: string; customerEmail: string | null; customerName: string | null }) {
+    if (ret.customerEmail || !this.shopify.hasCredentials()) return ret.customerEmail;
+    try {
+      const o = await this.shopify.fetchOrderByName(ret.orderNumber);
+      if (o?.customerEmail) {
+        await this.prisma.carrierReturn.update({
+          where: { id: ret.id },
+          data: { customerEmail: o.customerEmail, customerName: ret.customerName ?? o.customerName ?? null }
+        });
+        ret.customerEmail = o.customerEmail;
+        return o.customerEmail;
+      }
+    } catch { /* ignore */ }
+    return null;
+  }
+
   /** Create a Shopify checkout link for the reship fee (also collects the corrected address) + email the customer. */
   async requestPayment(id: string) {
     const ret = await this.get(id);
+    await this.ensureEmail(ret);
     if (!ret.customerEmail) throw new BadRequestException('Falta el email del cliente. Añádelo antes de pedir el pago.');
 
     let invoiceUrl = ret.invoiceUrl;
