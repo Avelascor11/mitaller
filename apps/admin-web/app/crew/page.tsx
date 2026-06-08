@@ -27,6 +27,9 @@ export default function CrewPage() {
   const [email, setEmail] = useState('');
   const [name, setName] = useState('');
   const [followers, setFollowers] = useState('');
+  const [phone, setPhone] = useState('');
+  const [address, setAddress] = useState('');
+  const [contentUrl, setContentUrl] = useState('');
   const [picks, setPicks] = useState<Pick[]>([]);
   const [rights, setRights] = useState(false);
   const [submitting, setSubmitting] = useState(false);
@@ -66,7 +69,8 @@ export default function CrewPage() {
     setPicks(picks.map(x => x.productId === productId ? { ...x, size } : x));
   }
 
-  const canSubmit = !!tier && tier.tier !== 'WAITLIST' && handle.trim() && garmentsPicked >= Math.min(1, tier.garments) && rights && !submitting;
+  const canSubmit = !!tier && tier.tier !== 'WAITLIST' && handle.trim() && name.trim() && email.trim() && phone.trim() && address.trim()
+    && garmentsPicked >= Math.min(1, tier.garments) && rights && !submitting;
 
   async function submit() {
     if (!tier) return;
@@ -76,6 +80,7 @@ export default function CrewPage() {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           igHandle: handle, email, fullName: name, followers: Number(followers),
+          phone, shippingAddress: address, contentUrl,
           products: picks, acceptedRights: rights
         })
       });
@@ -105,22 +110,32 @@ export default function CrewPage() {
   return (
     <main style={wrap}>
       <div style={{ maxWidth: 640, margin: '0 auto', width: '100%' }}>
-        <header style={{ textAlign: 'center', marginBottom: 28 }}>
-          <div style={{ color: C.accent, fontWeight: 800, letterSpacing: 2, fontSize: 13 }}>SPEEDWEAR CREW</div>
-          <h1 style={{ color: C.ink, fontSize: 34, fontWeight: 900, margin: '8px 0' }}>Únete a la Crew</h1>
-          <p style={{ color: C.muted, fontSize: 15 }}>Recibe producto gratis y tu código de referido. Crea contenido, crece con nosotros.</p>
+        <header style={{ textAlign: 'center', marginBottom: 24 }}>
+          <div style={{ color: C.accent, fontWeight: 800, letterSpacing: 2, fontSize: 13 }}>SPEEDWEAR CREW 🏁🔥</div>
+          <h1 style={{ color: C.ink, fontSize: 32, fontWeight: 900, margin: '8px 0' }}>Nos hace ilusión tenerte en el crew</h1>
+          <p style={{ color: C.muted, fontSize: 15, lineHeight: 1.5 }}>
+            Para prepararte tu <b style={{ color: C.ink }}>pack personalizado</b>, déjanos tus datos. Te toma 1 minuto ⚡<br />
+            En cuanto lo tengamos, preparamos el envío y te avisamos cuando salga 🚚
+          </p>
         </header>
 
         {/* Datos */}
         <section style={card}>
           <Label>Tu Instagram</Label>
           <Input value={handle} onChange={setHandle} placeholder="@tuusuario" />
+          <Label>Nombre completo</Label>
+          <Input value={name} onChange={setName} placeholder="Nombre y apellidos" />
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
-            <div><Label>Nombre</Label><Input value={name} onChange={setName} placeholder="Nombre" /></div>
             <div><Label>Email</Label><Input value={email} onChange={setEmail} placeholder="tu@email.com" /></div>
+            <div><Label>Teléfono</Label><Input value={phone} onChange={setPhone} placeholder="600 000 000" /></div>
           </div>
+          <Label>Dirección de envío</Label>
+          <textarea value={address} onChange={e => setAddress(e.target.value)} placeholder="Calle, número, piso, CP, ciudad, provincia"
+            style={{ ...inp, minHeight: 70, resize: 'vertical', fontFamily: 'inherit' }} />
           <Label>Nº de seguidores en Instagram</Label>
           <Input value={followers} onChange={setFollowers} placeholder="ej. 8500" type="number" />
+          <Label>Enlace a tu mejor contenido (opcional)</Label>
+          <Input value={contentUrl} onChange={setContentUrl} placeholder="Link a un reel/foto tuya — si puedes, mucho mejor 🔥" />
         </section>
 
         {/* Tier */}

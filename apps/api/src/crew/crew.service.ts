@@ -25,6 +25,9 @@ export interface CrewApplyBody {
   email?: string;
   fullName?: string;
   followers: number;
+  phone?: string;
+  shippingAddress?: string;
+  contentUrl?: string;
   products: CrewApplyProduct[];
   acceptedRights?: boolean;
   notes?: string;
@@ -123,6 +126,13 @@ export class CrewService {
     if (body.acceptedRights !== true) {
       throw new BadRequestException('Debes aceptar la cesión de derechos del contenido.');
     }
+    const fullName = body.fullName?.trim();
+    const phone = body.phone?.trim();
+    const shippingAddress = body.shippingAddress?.trim();
+    if (!fullName) throw new BadRequestException('Nombre completo requerido.');
+    if (!body.email?.trim()) throw new BadRequestException('Email requerido.');
+    if (!phone) throw new BadRequestException('Teléfono de contacto requerido.');
+    if (!shippingAddress) throw new BadRequestException('Dirección de envío requerida.');
 
     const influencer = await this.upsertInfluencer(igHandle, body, followers, tier.tier);
 
@@ -138,6 +148,8 @@ export class CrewService {
         productSent: productSummary || null,
         deliverables: '1 reel + 3 stories etiquetando @speedwear.es',
         productsJson: products as any,
+        shippingJson: { fullName, email: body.email.trim(), phone, address: shippingAddress } as any,
+        contentUrl: body.contentUrl?.trim() || null,
         notes: body.notes?.trim() || null
       }
     });
@@ -155,6 +167,7 @@ export class CrewService {
           followers,
           email: body.email?.trim() || existing.email,
           fullName: body.fullName?.trim() || existing.fullName,
+          phone: body.phone?.trim() || existing.phone,
           source: existing.source ?? 'CREW_FORM',
           tags,
           stage: existing.stage === 'PROSPECT' ? 'CONTACTED' : existing.stage
@@ -167,6 +180,7 @@ export class CrewService {
         followers,
         email: body.email?.trim() || null,
         fullName: body.fullName?.trim() || null,
+        phone: body.phone?.trim() || null,
         source: 'CREW_FORM',
         stage: 'CONTACTED',
         tags

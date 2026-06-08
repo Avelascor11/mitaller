@@ -730,6 +730,7 @@ model Influencer {
   manychatId    String?         @unique
   followers     Int?
   email         String?
+  phone         String?
   stage         InfluencerStage @default(PROSPECT)
   tags          String[]
   notes         String?
@@ -764,6 +765,8 @@ model Collaboration {
   referralUrl    String?
   tier           String?
   productsJson   Json?
+  shippingJson   Json?
+  contentUrl     String?
   metaCampaignId String?
   deadline       DateTime?
   openedAt       DateTime        @default(now())
