@@ -13,9 +13,19 @@ describe('PriorityService', () => {
     expect(result.priorityLevel).toBe('CRITICAL');
   });
 
-  it('calcula deadline estandar a 48 horas', () => {
+  it('calcula deadline estandar a 48 horas laborables', () => {
     const deadline = service.calculateDeadline(new Date('2026-05-05T08:00:00Z'), 'Correos Estandar');
     expect(deadline.toISOString()).toBe('2026-05-07T08:00:00.000Z');
+  });
+
+  it('no cuenta sabado ni domingo para deadline estandar', () => {
+    const deadline = service.calculateDeadline(new Date('2026-05-08T16:00:00Z'), 'Correos Estandar');
+    expect(deadline.toISOString()).toBe('2026-05-12T16:00:00.000Z');
+  });
+
+  it('mueve pedidos creados en fin de semana al siguiente dia laborable antes de sumar plazo', () => {
+    const deadline = service.calculateDeadline(new Date('2026-05-09T10:00:00Z'), 'Correos Estandar');
+    expect(deadline.toISOString()).toBe('2026-05-12T22:00:00.000Z');
   });
 
   it('marca estandar pasado de plazo como CRITICAL', () => {

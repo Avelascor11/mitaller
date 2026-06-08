@@ -56,10 +56,52 @@ export class PriorityService {
   calculateDeadline(orderedAt: Date, shippingMethod: string) {
     const method = shippingMethod.toLowerCase();
     const hours = method.includes('express') || method.includes('urgente') ? 8 : method.includes('premium') ? 24 : method.includes('recogida') ? 72 : 48;
-    return new Date(orderedAt.getTime() + hours * 60 * 60 * 1000);
+    return this.addBusinessHours(orderedAt, hours);
   }
 
   private isSameBusinessDay(left: Date, right: Date) {
     return left.getFullYear() === right.getFullYear() && left.getMonth() === right.getMonth() && left.getDate() === right.getDate();
+  }
+
+  private addBusinessHours(start: Date, hours: number) {
+    let remainingMs = hours * 60 * 60 * 1000;
+    let cursor = new Date(start);
+
+    while (remainingMs > 0) {
+      if (this.isWeekend(cursor)) {
+        cursor = this.nextBusinessDayStart(cursor);
+        continue;
+      }
+
+      const nextWeekendStart = this.nextWeekendStart(cursor);
+      const availableMs = nextWeekendStart.getTime() - cursor.getTime();
+      const step = Math.min(remainingMs, availableMs);
+      cursor = new Date(cursor.getTime() + step);
+      remainingMs -= step;
+    }
+
+    return cursor;
+  }
+
+  private isWeekend(date: Date) {
+    const day = date.getDay();
+    return day === 0 || day === 6;
+  }
+
+  private nextWeekendStart(date: Date) {
+    const result = new Date(date);
+    result.setHours(0, 0, 0, 0);
+    const daysUntilSaturday = (6 - result.getDay() + 7) % 7;
+    result.setDate(result.getDate() + daysUntilSaturday);
+    return result;
+  }
+
+  private nextBusinessDayStart(date: Date) {
+    const result = new Date(date);
+    result.setHours(0, 0, 0, 0);
+    do {
+      result.setDate(result.getDate() + 1);
+    } while (this.isWeekend(result));
+    return result;
   }
 }
