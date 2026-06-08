@@ -815,6 +815,12 @@ model UgcSubmission {
   @@index([storageProvider])
 }
 
+model AutopilotConfig {
+  id        String   @id @default("singleton")
+  mode      String   @default("dry") // off | dry | live
+  updatedAt DateTime @updatedAt
+}
+
 model PortalConfig {
   id             String   @id @default("singleton")
   logoUrl        String?

@@ -337,6 +337,12 @@ struct APIClient {
         let request = try jsonRequest(path: "/meta/campaigns", method: "POST", body: body)
         return try await perform(request)
     }
+    func metaAutopilot() async throws -> MetaAutopilot { try await get("/meta/autopilot") }
+    func setAutopilotMode(_ mode: String) async throws -> MetaAutopilotModeResult {
+        let request = try jsonRequest(path: "/meta/autopilot/mode", method: "POST", body: MetaAutopilotModeRequest(mode: mode))
+        return try await perform(request)
+    }
+
     func metaSetCampaignStatus(_ id: String, status: String) async throws {
         let request = try jsonRequest(path: "/meta/campaigns/\(Self.pathSegment(id))/status", method: "POST", body: MetaStatusRequest(status: status))
         let _: EmptyResponse = try await perform(request)
@@ -485,6 +491,35 @@ struct MetaDailySpend: Decodable {
     let spend: Double
     let currency: String
 }
+
+struct MetaAutopilotAction: Decodable, Identifiable {
+    let adsetId: String?
+    let name: String
+    let campaign: String?
+    let from: Double
+    let to: Double
+    let roas: Double?
+    let purchases: Int
+    var id: String { adsetId ?? name }
+}
+struct MetaAutopilotAdvice: Decodable, Identifiable {
+    let name: String
+    let campaign: String?
+    let severity: String?
+    let msg: String
+    var id: String { name + msg }
+}
+struct MetaAutopilot: Decodable {
+    let mode: String
+    let currentMode: String
+    let ceiling: Double?
+    let minRoas: Double?
+    let totalDailyAfter: Double
+    let actions: [MetaAutopilotAction]
+    let advice: [MetaAutopilotAdvice]
+}
+struct MetaAutopilotModeRequest: Encodable { let mode: String }
+struct MetaAutopilotModeResult: Decodable { let mode: String }
 
 struct MetaCampaign: Decodable, Identifiable {
     let id: String

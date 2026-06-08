@@ -18,13 +18,19 @@ export class MetaController {
   }
 
   @Get('autopilot')
-  autopilotPreview() {
-    return this.meta.autopilotRun(false);
+  async autopilotPreview() {
+    const [plan, currentMode] = await Promise.all([this.meta.autopilotRun(false), this.meta.getAutopilotMode()]);
+    return { ...plan, currentMode };
   }
 
   @Post('autopilot/run')
   autopilotRun(@Body() body?: { apply?: boolean }) {
     return this.meta.autopilotRun(Boolean(body?.apply));
+  }
+
+  @Post('autopilot/mode')
+  setAutopilotMode(@Body() body: { mode: 'off' | 'dry' | 'live' }) {
+    return this.meta.setAutopilotMode(body?.mode);
   }
 
   @Get('summary')

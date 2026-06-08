@@ -7190,6 +7190,7 @@ struct MetaAdsView: View {
     @Environment(WorkshopStore.self) private var store
     @State private var summary: MetaSummary?
     @State private var health: AdsHealth?
+    @State private var autopilot: MetaAutopilot?
     @State private var learning: MetaLearningSummary?
     @State private var dailyPlan: MetaDailyPlan?
     @State private var weekendCash: MetaWeekendCash?
@@ -7321,6 +7322,7 @@ struct MetaAdsView: View {
                                 .glassPanel(padding: 10, accent: AppTheme.amber)
                         }
                         if let health { AdsHealthCard(health: health) }
+                        if let autopilot { AutopilotCard(autopilot: autopilot, onChange: { Task { await reload() } }) }
                         if let billing { MetaBillingCard(billing: billing) }
                         if let weekendCash { MetaWeekendCashCard(cash: weekendCash) }
                         MetaKpiCard(summary: summary)
@@ -7425,12 +7427,14 @@ struct MetaAdsView: View {
             let r = dateRange
             async let s = client.metaSummary(from: r.from, to: r.to)
             async let h = client.adsHealth(from: r.from, to: r.to)
+            async let ap = client.metaAutopilot()
             async let l = client.metaLearning(from: r.from, to: r.to)
             async let p = client.metaDailyPlan(from: r.from, to: r.to)
             async let w = client.metaWeekendCash(from: r.from, to: r.to)
             async let b = client.metaBilling()
             summary = try await s
             health = try? await h
+            autopilot = try? await ap
             learning = try? await l
             dailyPlan = try? await p
             weekendCash = try? await w
@@ -7451,6 +7455,78 @@ struct MetaAdsView: View {
         } catch {
             self.error = error.localizedDescription
         }
+    }
+}
+
+struct AutopilotCard: View {
+    @Environment(WorkshopStore.self) private var store
+    let autopilot: MetaAutopilot
+    let onChange: () -> Void
+    @State private var busy = false
+
+    private var isLive: Bool { autopilot.currentMode == "live" }
+    private var modeLabel: String {
+        switch autopilot.currentMode { case "live": "EN VIVO"; case "off": "APAGADO"; default: "SIMULACIÓN" }
+    }
+    private var modeColor: Color {
+        switch autopilot.currentMode { case "live": AppTheme.green; case "off": AppTheme.muted; default: AppTheme.amber }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Label("Autopilot", systemImage: "wand.and.stars").font(.headline.weight(.heavy)).foregroundStyle(AppTheme.ink)
+                Spacer()
+                Text(modeLabel).font(.caption2.weight(.black))
+                    .padding(.horizontal, 8).padding(.vertical, 4)
+                    .background(modeColor.opacity(0.18), in: Capsule()).foregroundStyle(modeColor)
+            }
+            Text(isLive
+                 ? "Cada mañana sube +15% el presupuesto de los anuncios rentables, solo."
+                 : "Simulación: calcula los cambios pero no los aplica. Actívalo para que opere solo.")
+                .font(.caption).foregroundStyle(AppTheme.muted)
+
+            if !autopilot.actions.isEmpty {
+                Text("SUBIRÍA HOY").font(.system(size: 10, weight: .heavy)).foregroundStyle(AppTheme.muted)
+                ForEach(autopilot.actions) { a in
+                    HStack(spacing: 8) {
+                        Image(systemName: "arrow.up.right.circle.fill").foregroundStyle(AppTheme.green)
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text(a.name).font(.caption.weight(.bold)).foregroundStyle(AppTheme.ink).lineLimit(1)
+                            Text("\(euro(a.from)) → \(euro(a.to)) · ROAS \(a.roas.map { String(format: "%.1fx", $0) } ?? "—") · \(a.purchases) ventas")
+                                .font(.caption2).foregroundStyle(AppTheme.muted)
+                        }
+                        Spacer()
+                    }
+                }
+            } else {
+                Text("Hoy no subiría nada (sin anuncios que cumplan el criterio).").font(.caption2).foregroundStyle(AppTheme.muted)
+            }
+
+            if !autopilot.advice.isEmpty {
+                Text("AVISOS").font(.system(size: 10, weight: .heavy)).foregroundStyle(AppTheme.muted)
+                ForEach(autopilot.advice.prefix(4)) { a in
+                    Text("• \(a.name): \(a.msg)").font(.caption2).foregroundStyle(AppTheme.amber).fixedSize(horizontal: false, vertical: true)
+                }
+            }
+
+            Button {
+                Task { await toggle() }
+            } label: {
+                if busy { ProgressView().frame(maxWidth: .infinity) }
+                else { Label(isLive ? "Pausar autopilot" : "Activar autopilot", systemImage: isLive ? "pause.fill" : "bolt.fill").font(.subheadline.weight(.heavy)).frame(maxWidth: .infinity) }
+            }
+            .buttonStyle(.borderedProminent).tint(isLive ? AppTheme.amber : AppTheme.green).disabled(busy)
+        }
+        .glassPanel(padding: 16, accent: modeColor)
+    }
+
+    private func euro(_ v: Double) -> String { String(format: "%.2f €", v) }
+    private func toggle() async {
+        guard let client = store.apiClient else { return }
+        busy = true; defer { busy = false }
+        _ = try? await client.setAutopilotMode(isLive ? "dry" : "live")
+        onChange()
     }
 }
 

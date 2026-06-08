@@ -743,18 +743,34 @@ export class MetaService {
 
   // ---------- campaigns + insights ----------
   // ---------- Autopilot ----------
-  private get autopilotMode() { return (this.config.get<string>('META_AUTOPILOT_MODE') ?? 'dry').toLowerCase(); } // off | dry | live
   private cfgNum(key: string, fallback: number) {
     const n = Number((this.config.get<string>(key) ?? '').replace(',', '.'));
     return Number.isFinite(n) && n > 0 ? n : fallback;
   }
 
+  async getAutopilotMode(): Promise<string> {
+    try {
+      const cfg = await this.prisma.autopilotConfig.findUnique({ where: { id: 'singleton' } });
+      if (cfg?.mode) return cfg.mode;
+    } catch { /* table may not exist yet */ }
+    return (this.config.get<string>('META_AUTOPILOT_MODE') ?? 'dry').toLowerCase();
+  }
+
+  async setAutopilotMode(mode: string) {
+    const m = ['off', 'dry', 'live'].includes(mode) ? mode : 'dry';
+    await this.prisma.autopilotConfig.upsert({
+      where: { id: 'singleton' }, create: { id: 'singleton', mode: m }, update: { mode: m }
+    }).catch(() => undefined);
+    return { mode: m };
+  }
+
   @Cron('0 8 * * *', { timeZone: 'Europe/Madrid' })
   async autopilotCron() {
-    if (this.autopilotMode === 'off' || !this.hasCredentials()) return;
+    const mode = await this.getAutopilotMode();
+    if (mode === 'off' || !this.hasCredentials()) return;
     try {
-      const r = await this.autopilotRun(this.autopilotMode === 'live');
-      this.logger.log(`Autopilot (${this.autopilotMode}): ${r.actions.length} subidas, ${r.advice.length} avisos`);
+      const r = await this.autopilotRun(mode === 'live');
+      this.logger.log(`Autopilot (${mode}): ${r.actions.length} subidas, ${r.advice.length} avisos`);
     } catch (e) {
       this.logger.warn(`Autopilot failed: ${(e as Error).message}`);
     }
