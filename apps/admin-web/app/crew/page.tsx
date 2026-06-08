@@ -37,7 +37,10 @@ export default function CrewPage() {
   const [name, setName] = useState('');
   const [followers, setFollowers] = useState('');
   const [phone, setPhone] = useState('');
-  const [address, setAddress] = useState('');
+  const [address1, setAddress1] = useState('');
+  const [postalCode, setPostalCode] = useState('');
+  const [city, setCity] = useState('');
+  const [province, setProvince] = useState('');
   const [contentUrl, setContentUrl] = useState('');
   const [desiredCode, setDesiredCode] = useState('');
   const [picks, setPicks] = useState<Pick[]>([]);
@@ -86,7 +89,8 @@ export default function CrewPage() {
     setPicks(picks.map(x => x.productId === productId ? { ...x, size, variantId: variant?.id ?? x.variantId, sku: variant?.sku ?? x.sku } : x));
   }
 
-  const canSubmit = !!tier && tier.tier !== 'WAITLIST' && handle.trim() && name.trim() && email.trim() && phone.trim() && address.trim()
+  const canSubmit = !!tier && tier.tier !== 'WAITLIST' && handle.trim() && name.trim() && email.trim() && phone.trim()
+    && address1.trim() && postalCode.trim() && city.trim() && province.trim()
     && garmentsPicked >= Math.min(1, tier.garments) && rights && !submitting;
 
   async function submit() {
@@ -97,7 +101,9 @@ export default function CrewPage() {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           igHandle: handle, email, fullName: name, followers: Number(followers),
-          phone, shippingAddress: address, contentUrl, desiredCode,
+          phone, address1, postalCode, city, province,
+          shippingAddress: `${address1}, ${postalCode} ${city} (${province})`,
+          contentUrl, desiredCode,
           products: picks, acceptedRights: rights
         })
       });
@@ -146,9 +152,14 @@ export default function CrewPage() {
             <div><Label>Email</Label><Input value={email} onChange={setEmail} placeholder="tu@email.com" /></div>
             <div><Label>Teléfono</Label><Input value={phone} onChange={setPhone} placeholder="600 000 000" /></div>
           </div>
-          <Label>Dirección de envío</Label>
-          <textarea value={address} onChange={e => setAddress(e.target.value)} placeholder="Calle, número, piso, CP, ciudad, provincia"
-            style={{ ...inp, minHeight: 70, resize: 'vertical', fontFamily: 'inherit' }} />
+          <Label>Dirección (calle, número, piso)</Label>
+          <Input value={address1} onChange={setAddress1} placeholder="Calle Ejemplo 4, 2ºB" />
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1.4fr', gap: 10 }}>
+            <div><Label>Código postal</Label><Input value={postalCode} onChange={setPostalCode} placeholder="45530" /></div>
+            <div><Label>Ciudad</Label><Input value={city} onChange={setCity} placeholder="Santa Olalla" /></div>
+          </div>
+          <Label>Provincia</Label>
+          <Input value={province} onChange={setProvince} placeholder="Toledo" />
           <Label>Nº de seguidores en Instagram</Label>
           <Input value={followers} onChange={setFollowers} placeholder="ej. 8500" type="number" />
           <Label>Enlace a tu mejor contenido (opcional)</Label>
@@ -172,9 +183,10 @@ export default function CrewPage() {
           <>
             <Section title={`Prendas (${garmentsPicked}/${tier.garments})`} />
             <Grid products={catalog.prendas} picks={picks} sizeSel={sizeSel} onToggle={togglePick} onSize={setPickSize} loading={loadingCatalog} />
-            {tier.accessories > 0 && (
+            {tier.accessories > 0 && garmentsPicked > 0 && (
               <>
                 <Section title={`Accesorios (${accessoriesPicked}/${tier.accessories})`} />
+                <div style={{ color: C.accent, fontSize: 12, fontWeight: 700, margin: '0 2px 8px' }}>¡Tu nivel incluye accesorio! Elige uno 👇</div>
                 <Grid products={catalog.accesorios} picks={picks} sizeSel={sizeSel} onToggle={togglePick} onSize={setPickSize} loading={loadingCatalog} />
               </>
             )}

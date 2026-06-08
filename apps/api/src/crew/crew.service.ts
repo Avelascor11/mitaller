@@ -32,6 +32,10 @@ export interface CrewApplyBody {
   followers: number;
   phone?: string;
   shippingAddress?: string;
+  address1?: string;
+  postalCode?: string;
+  city?: string;
+  province?: string;
   contentUrl?: string;
   desiredCode?: string;
   products: CrewApplyProduct[];
@@ -196,11 +200,18 @@ export class CrewService {
     }
     const fullName = body.fullName?.trim();
     const phone = body.phone?.trim();
-    const shippingAddress = body.shippingAddress?.trim();
+    const address1 = body.address1?.trim();
+    const postalCode = body.postalCode?.trim();
+    const city = body.city?.trim();
+    const province = body.province?.trim();
     if (!fullName) throw new BadRequestException('Nombre completo requerido.');
     if (!body.email?.trim()) throw new BadRequestException('Email requerido.');
     if (!phone) throw new BadRequestException('Teléfono de contacto requerido.');
-    if (!shippingAddress) throw new BadRequestException('Dirección de envío requerida.');
+    if (!address1) throw new BadRequestException('Dirección (calle y número) requerida.');
+    if (!postalCode) throw new BadRequestException('Código postal requerido.');
+    if (!city) throw new BadRequestException('Ciudad requerida.');
+    if (!province) throw new BadRequestException('Provincia requerida.');
+    const shippingAddress = body.shippingAddress?.trim() || `${address1}, ${postalCode} ${city} (${province})`;
 
     const influencer = await this.upsertInfluencer(igHandle, body, followers, tier.tier);
 
@@ -216,7 +227,7 @@ export class CrewService {
         productSent: productSummary || null,
         deliverables: '1 reel + 3 stories etiquetando @speedwear.es',
         productsJson: products as any,
-        shippingJson: { fullName, email: body.email.trim(), phone, address: shippingAddress } as any,
+        shippingJson: { fullName, email: body.email.trim(), phone, address1, postalCode, city, province, address: shippingAddress } as any,
         contentUrl: body.contentUrl?.trim() || null,
         requestedCode: normalizeCode(body.desiredCode) ?? normalizeCode(igHandle),
         notes: body.notes?.trim() || null
@@ -226,7 +237,7 @@ export class CrewService {
     // Create a €0 Shopify order with the influencer's name so the pack flows into picking.
     let orderName: string | null = null;
     try {
-      orderName = await this.createGiftOrder({ fullName, email: body.email.trim(), phone, address: shippingAddress, igHandle, products }, collab.id);
+      orderName = await this.createGiftOrder({ fullName, email: body.email.trim(), phone, address1, postalCode, city, province, igHandle, products }, collab.id);
     } catch (e) {
       this.logger.warn(`Crew gift order failed for @${igHandle}: ${(e as Error).message}`);
     }
@@ -263,7 +274,7 @@ export class CrewService {
   }
 
   private async createGiftOrder(
-    input: { fullName: string; email: string; phone: string; address: string; igHandle: string; products: CrewApplyProduct[] },
+    input: { fullName: string; email: string; phone: string; address1: string; postalCode: string; city: string; province: string; igHandle: string; products: CrewApplyProduct[] },
     collaborationId: string
   ) {
     if (!this.shopify.hasCredentials()) return null;
@@ -282,7 +293,10 @@ export class CrewService {
       shippingAddress: {
         firstName: firstName || input.fullName,
         lastName: rest.join(' ') || '.',
-        address1: input.address,
+        address1: input.address1,
+        city: input.city,
+        province: input.province,
+        zip: input.postalCode,
         countryCode: 'ES',
         phone: input.phone
       },
