@@ -520,6 +520,23 @@ export class ShopifyAdapter {
     return { id: draft.id, invoiceUrl: draft.invoiceUrl, totalPrice: Number(draft.totalPrice) };
   }
 
+  /** Ask Shopify to email the draft-order invoice (payment link) to the customer — transactional, reliable. */
+  async sendDraftOrderInvoice(draftOrderId: string, customMessage?: string): Promise<boolean> {
+    this.assertConfigured();
+    const data = await this.graphql<{ draftOrderInvoiceSend: { draftOrder: { id: string } | null; userErrors: Array<{ field: string; message: string }> } }>(`
+      mutation SendInvoice($id: ID!, $email: EmailInput) {
+        draftOrderInvoiceSend(id: $id, email: $email) {
+          draftOrder { id }
+          userErrors { field message }
+        }
+      }
+    `, { id: draftOrderId, email: customMessage ? { customMessage } : undefined });
+    if (data.draftOrderInvoiceSend.userErrors?.length) {
+      throw new BadGatewayException(`Shopify draftOrderInvoiceSend: ${data.draftOrderInvoiceSend.userErrors.map((e) => e.message).join('; ')}`);
+    }
+    return Boolean(data.draftOrderInvoiceSend.draftOrder);
+  }
+
   /** Complete a draft order into a real (paid) order — used for $0 exchanges so the warehouse can fulfil it. */
   async completeDraftOrder(draftOrderId: string): Promise<{ orderId: string | null; orderName: string | null; adminUrl: string | null }> {
     this.assertConfigured();
