@@ -148,7 +148,7 @@ export class BankService {
       let currentBalance: number | null = null;
       let availableBalance: number | null = null;
       try {
-        const response = await this.gocardless.accountBalances(account.providerAccountId);
+        const response = await this.accountBalancesWithRetry(account.providerAccountId);
         balances = response.balances ?? [];
         currentBalance = this.pickBalance(balances, ['interimBooked', 'closingBooked', 'expected']);
         availableBalance = this.pickBalance(balances, ['interimAvailable', 'forwardAvailable', 'nonInvoiced']);
@@ -171,10 +171,12 @@ export class BankService {
       };
     }));
 
+    const balanceAvailable = enriched.some(account => account.currentBalance != null);
     const totalBalance = enriched.reduce((sum, account) => sum + (account.currentBalance ?? 0), 0);
     return {
       currency: enriched[0]?.currency ?? 'EUR',
       totalBalance,
+      balanceAvailable,
       accounts: enriched
     };
   }
@@ -247,6 +249,7 @@ export class BankService {
 
     const accounts = await this.accounts();
     const currentBalance = accounts.totalBalance;
+    const balanceAvailable = Boolean((accounts as any).balanceAvailable);
     const safetyBuffer = this.cashSafetyBuffer();
     const projectedBalance = currentBalance - amount;
     const freeAfterBuffer = projectedBalance - safetyBuffer;
@@ -262,10 +265,14 @@ export class BankService {
       verdict = 'REJECTED';
       reasons.push('No hay ninguna cuenta bancaria conectada todavia.');
     }
-    if (projectedBalance < safetyBuffer) {
+    if (accounts.accounts.length && !balanceAvailable) {
+      verdict = 'REJECTED';
+      reasons.push('No he podido leer el saldo real de N26 ahora mismo. Sin saldo fiable no apruebo gastos.');
+    }
+    if (balanceAvailable && projectedBalance < safetyBuffer) {
       verdict = 'REJECTED';
       reasons.push(`Despues del gasto quedarias por debajo del colchon minimo de ${this.money(safetyBuffer, accounts.currency)}.`);
-    } else if (freeAfterBuffer < amount * 0.75 || shortRecent.net < 0) {
+    } else if (balanceAvailable && (freeAfterBuffer < amount * 0.75 || shortRecent.net < 0)) {
       verdict = verdict === 'REJECTED' ? verdict : 'WATCH';
       reasons.push('Se puede hacer, pero deja poco margen respecto al ritmo reciente de caja.');
     }
@@ -292,6 +299,7 @@ export class BankService {
       projectedBalance,
       safetyBuffer,
       freeAfterBuffer,
+      balanceAvailable,
       recent30Days: recent,
       recent14Days: shortRecent,
       isWeekend,
@@ -352,6 +360,15 @@ export class BankService {
     }
     const fallback = Number(balances[0]?.balanceAmount?.amount);
     return Number.isFinite(fallback) ? fallback : null;
+  }
+
+  private async accountBalancesWithRetry(accountId: string) {
+    try {
+      return await this.gocardless.accountBalances(accountId);
+    } catch (error) {
+      await new Promise(resolve => setTimeout(resolve, 300));
+      return this.gocardless.accountBalances(accountId);
+    }
   }
 
   private async recentCashStats(days: number) {

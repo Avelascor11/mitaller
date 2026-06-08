@@ -1248,6 +1248,7 @@ struct BankSyncResponse: Decodable {
 struct BankAccountsSummary: Decodable {
     let currency: String
     let totalBalance: Double
+    let balanceAvailable: Bool?
     let accounts: [BankAccountSummary]
 }
 
@@ -1277,6 +1278,7 @@ struct BankExpenseAdvice: Decodable {
     let projectedBalance: Double
     let safetyBuffer: Double
     let freeAfterBuffer: Double
+    let balanceAvailable: Bool?
     let recent30Days: BankCashStats
     let recent14Days: BankCashStats
     let isWeekend: Bool

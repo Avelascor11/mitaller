@@ -10313,6 +10313,15 @@ struct BankBalanceCard: View {
                     .foregroundStyle(summary.totalBalance >= 0 ? AppTheme.green : AppTheme.red)
             }
 
+            if summary.balanceAvailable == false {
+                Text("No se pudo leer el saldo real ahora mismo. Sincroniza otra vez antes de tomar decisiones de gasto.")
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(AppTheme.amber)
+                    .padding(10)
+                    .background(AppTheme.amber.opacity(0.12))
+                    .clipShape(RoundedRectangle(cornerRadius: 12))
+            }
+
             ForEach(summary.accounts) { account in
                 VStack(alignment: .leading, spacing: 8) {
                     HStack(alignment: .top, spacing: 10) {
