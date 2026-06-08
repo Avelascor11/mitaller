@@ -29,7 +29,64 @@ const C = {
   accent: '#51DE9A', accent2: '#736BF7', danger: '#FB6877', amber: '#FBBF49'
 };
 
+type Lang = 'es' | 'en';
+const STR = {
+  es: {
+    kicker: 'SPEEDWEAR CREW 🏁🔥',
+    title: 'Nos hace ilusión tenerte en el crew',
+    intro1: 'Para prepararte tu pack personalizado, déjanos tus datos. Te toma 1 minuto ⚡',
+    intro2: 'En cuanto lo tengamos, preparamos el envío y te avisamos cuando salga 🚚',
+    ig: 'Tu Instagram', fullName: 'Nombre completo', email: 'Email', phone: 'Teléfono',
+    address1: 'Dirección (calle, número, piso)', postal: 'Código postal', city: 'Ciudad', province: 'Provincia',
+    followers: 'Nº de seguidores en Instagram', content: 'Enlace a tu mejor contenido (opcional)',
+    contentPh: 'Link a un reel/foto tuya — si puedes, mucho mejor 🔥',
+    code: 'Tu código de descuento de referido', codePh: 'Ej. JULIA10 — el que darás a tus seguidores',
+    codeHint: '3–20 letras/números. Será tu código y tu enlace de referido.',
+    waitlist: 'Aún no llegas a 1.000 seguidores — entra en lista de espera 👇',
+    levelYou: 'Nivel', levelCan: '· puedes elegir',
+    garments: 'Prendas', accessories: 'Accesorios', accNote: '¡Tu nivel incluye accesorio! Elige uno 👇',
+    rights: 'Autorizo a Speedwear a usar mi contenido (reels, stories, fotos) en sus anuncios y redes.',
+    join: 'Unirme a la Crew', joinWait: 'Entrar en lista de espera', sending: 'Enviando…',
+    loading: 'Cargando catálogo…', noProducts: 'Sin productos disponibles.', choose: 'Elegir', chosen: '✓ Elegido',
+    pickSize: 'Elige una talla primero.', tooMany: (l: string) => `Tu nivel permite ${l}.`,
+    doneWaitTitle: 'En lista de espera', doneTitle: '¡Bienvenido a la Crew!', willCreate: 'Se creará',
+    doneMsg: '¡Solicitud recibida! Preparamos tu pack y te avisamos cuando salga el envío 🚚',
+    doneWaitMsg: 'Te has unido a la lista de espera. Te avisamos cuando crezcas un poco más.',
+    tierLabels: { ELITE: '2 prendas + 1 accesorio', PRO: '2 prendas', PLUS: '1 prenda + 1 accesorio', BASE: '1 prenda', WAITLIST: 'Lista de espera' } as Record<string, string>
+  },
+  en: {
+    kicker: 'SPEEDWEAR CREW 🏁🔥',
+    title: 'We’d love you in the crew',
+    intro1: 'To prep your personalized pack, leave us your details. Takes 1 minute ⚡',
+    intro2: 'Once we have it, we’ll prepare your shipment and let you know when it’s out 🚚',
+    ig: 'Your Instagram', fullName: 'Full name', email: 'Email', phone: 'Phone',
+    address1: 'Address (street, number, floor)', postal: 'Postal code', city: 'City', province: 'Province / State',
+    followers: 'Instagram followers', content: 'Link to your best content (optional)',
+    contentPh: 'Link to a reel/photo of yours — even better if you can 🔥',
+    code: 'Your referral discount code', codePh: 'e.g. JULIA10 — the one you’ll give your followers',
+    codeHint: '3–20 letters/numbers. This will be your code and referral link.',
+    waitlist: 'You’re not at 1,000 followers yet — join the waitlist 👇',
+    levelYou: 'Level', levelCan: '· you can choose',
+    garments: 'Garments', accessories: 'Accessories', accNote: 'Your level includes an accessory! Pick one 👇',
+    rights: 'I authorize Speedwear to use my content (reels, stories, photos) in its ads and socials.',
+    join: 'Join the Crew', joinWait: 'Join the waitlist', sending: 'Sending…',
+    loading: 'Loading catalog…', noProducts: 'No products available.', choose: 'Choose', chosen: '✓ Chosen',
+    pickSize: 'Pick a size first.', tooMany: (l: string) => `Your level allows ${l}.`,
+    doneWaitTitle: 'On the waitlist', doneTitle: 'Welcome to the Crew!', willCreate: 'Will create',
+    doneMsg: 'Request received! We’re prepping your pack and will let you know when it ships 🚚',
+    doneWaitMsg: 'You’ve joined the waitlist. We’ll reach out when you grow a bit more.',
+    tierLabels: { ELITE: '2 garments + 1 accessory', PRO: '2 garments', PLUS: '1 garment + 1 accessory', BASE: '1 garment', WAITLIST: 'Waitlist' } as Record<string, string>
+  }
+} as const;
+
 export default function CrewPage() {
+  const [lang, setLang] = useState<Lang>('es');
+  const t = STR[lang];
+  useEffect(() => {
+    if (typeof navigator !== 'undefined' && navigator.language?.toLowerCase().startsWith('en')) setLang('en');
+  }, []);
+  const tierLabel = (tk: string) => t.tierLabels[tk] ?? tk;
+
   const [catalog, setCatalog] = useState<Catalog>({ prendas: [], accesorios: [] });
   const [loadingCatalog, setLoadingCatalog] = useState(true);
   const [handle, setHandle] = useState('');
@@ -74,9 +131,9 @@ export default function CrewPage() {
     if (!tier) return;
     const limit = p.category === 'PRENDA' ? tier.garments : tier.accessories;
     const current = p.category === 'PRENDA' ? garmentsPicked : accessoriesPicked;
-    if (current >= limit) { setError(`Tu nivel permite ${tier.label}.`); return; }
+    if (current >= limit) { setError(t.tooMany(tierLabel(tier.tier))); return; }
     const size = sizeSel[p.id];
-    if (p.sizes.length && !size) { setError('Elige una talla primero.'); return; }
+    if (p.sizes.length && !size) { setError(t.pickSize); return; }
     const variant = resolveVariant(p, size);
     setPicks([...picks, { productId: p.id, title: p.title, variantId: variant?.id, sku: variant?.sku, size, category: p.category, imageUrl: p.imageUrl ?? undefined }]);
   }
@@ -120,11 +177,11 @@ export default function CrewPage() {
       <main style={{ ...wrap, alignItems: 'center', justifyContent: 'center', textAlign: 'center' }}>
         <div style={{ fontSize: 56 }}>{done.status === 'WAITLIST' ? '⏳' : '🎉'}</div>
         <h1 style={{ color: C.ink, fontSize: 28, margin: '12px 0' }}>
-          {done.status === 'WAITLIST' ? 'En lista de espera' : '¡Bienvenido a la Crew!'}
+          {done.status === 'WAITLIST' ? t.doneWaitTitle : t.doneTitle}
         </h1>
-        <p style={{ color: C.muted, maxWidth: 420 }}>{done.message}</p>
+        <p style={{ color: C.muted, maxWidth: 420 }}>{done.status === 'WAITLIST' ? t.doneWaitMsg : t.doneMsg}</p>
         {done.status !== 'WAITLIST' && (
-          <p style={{ color: C.accent, marginTop: 16, fontWeight: 700 }}>Nivel {done.tier.tier} · {done.tier.label}</p>
+          <p style={{ color: C.accent, marginTop: 16, fontWeight: 700 }}>{t.levelYou} {done.tier.tier} · {tierLabel(done.tier.tier)}</p>
         )}
       </main>
     );
@@ -133,61 +190,66 @@ export default function CrewPage() {
   return (
     <main style={wrap}>
       <div style={{ maxWidth: 640, margin: '0 auto', width: '100%' }}>
+        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 6, marginBottom: 8 }}>
+          {(['es', 'en'] as Lang[]).map(l => (
+            <button key={l} onClick={() => setLang(l)} style={{
+              border: `1px solid ${lang === l ? C.accent : C.line}`, background: lang === l ? C.accent : 'transparent',
+              color: lang === l ? '#0B0B0F' : C.muted, borderRadius: 8, padding: '4px 10px', fontSize: 12, fontWeight: 800, cursor: 'pointer'
+            }}>{l.toUpperCase()}</button>
+          ))}
+        </div>
         <header style={{ textAlign: 'center', marginBottom: 24 }}>
-          <div style={{ color: C.accent, fontWeight: 800, letterSpacing: 2, fontSize: 13 }}>SPEEDWEAR CREW 🏁🔥</div>
-          <h1 style={{ color: C.ink, fontSize: 32, fontWeight: 900, margin: '8px 0' }}>Nos hace ilusión tenerte en el crew</h1>
-          <p style={{ color: C.muted, fontSize: 15, lineHeight: 1.5 }}>
-            Para prepararte tu <b style={{ color: C.ink }}>pack personalizado</b>, déjanos tus datos. Te toma 1 minuto ⚡<br />
-            En cuanto lo tengamos, preparamos el envío y te avisamos cuando salga 🚚
-          </p>
+          <div style={{ color: C.accent, fontWeight: 800, letterSpacing: 2, fontSize: 13 }}>{t.kicker}</div>
+          <h1 style={{ color: C.ink, fontSize: 32, fontWeight: 900, margin: '8px 0' }}>{t.title}</h1>
+          <p style={{ color: C.muted, fontSize: 15, lineHeight: 1.5 }}>{t.intro1}<br />{t.intro2}</p>
         </header>
 
         {/* Datos */}
         <section style={card}>
-          <Label>Tu Instagram</Label>
-          <Input value={handle} onChange={setHandle} placeholder="@tuusuario" />
-          <Label>Nombre completo</Label>
-          <Input value={name} onChange={setName} placeholder="Nombre y apellidos" />
+          <Label>{t.ig}</Label>
+          <Input value={handle} onChange={setHandle} placeholder="@usuario" />
+          <Label>{t.fullName}</Label>
+          <Input value={name} onChange={setName} placeholder={t.fullName} />
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
-            <div><Label>Email</Label><Input value={email} onChange={setEmail} placeholder="tu@email.com" /></div>
-            <div><Label>Teléfono</Label><Input value={phone} onChange={setPhone} placeholder="600 000 000" /></div>
+            <div><Label>{t.email}</Label><Input value={email} onChange={setEmail} placeholder="tu@email.com" /></div>
+            <div><Label>{t.phone}</Label><Input value={phone} onChange={setPhone} placeholder="600 000 000" /></div>
           </div>
-          <Label>Dirección (calle, número, piso)</Label>
+          <Label>{t.address1}</Label>
           <Input value={address1} onChange={setAddress1} placeholder="Calle Ejemplo 4, 2ºB" />
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1.4fr', gap: 10 }}>
-            <div><Label>Código postal</Label><Input value={postalCode} onChange={setPostalCode} placeholder="45530" /></div>
-            <div><Label>Ciudad</Label><Input value={city} onChange={setCity} placeholder="Santa Olalla" /></div>
+            <div><Label>{t.postal}</Label><Input value={postalCode} onChange={setPostalCode} placeholder="45530" /></div>
+            <div><Label>{t.city}</Label><Input value={city} onChange={setCity} placeholder="Santa Olalla" /></div>
           </div>
-          <Label>Provincia</Label>
+          <Label>{t.province}</Label>
           <Input value={province} onChange={setProvince} placeholder="Toledo" />
-          <Label>Nº de seguidores en Instagram</Label>
-          <Input value={followers} onChange={setFollowers} placeholder="ej. 8500" type="number" />
-          <Label>Enlace a tu mejor contenido (opcional)</Label>
-          <Input value={contentUrl} onChange={setContentUrl} placeholder="Link a un reel/foto tuya — si puedes, mucho mejor 🔥" />
-          <Label>Tu código de descuento de referido</Label>
-          <Input value={desiredCode} onChange={(v) => setDesiredCode(v.toUpperCase().replace(/[^A-Z0-9]/g, ''))} placeholder="Ej. JULIA10 — el que darás a tus seguidores" />
-          <div style={{ color: C.muted, fontSize: 11, margin: '2px 2px 0' }}>3–20 letras/números. Será tu código y tu enlace de referido.</div>
+          <Label>{t.followers}</Label>
+          <Input value={followers} onChange={setFollowers} placeholder="8500" type="number" />
+          <Label>{t.content}</Label>
+          <Input value={contentUrl} onChange={setContentUrl} placeholder={t.contentPh} />
+          <Label>{t.code}</Label>
+          <Input value={desiredCode} onChange={(v) => setDesiredCode(v.toUpperCase().replace(/[^A-Z0-9]/g, ''))} placeholder={t.codePh} />
+          <div style={{ color: C.muted, fontSize: 11, margin: '2px 2px 0' }}>{t.codeHint}</div>
         </section>
 
         {/* Tier */}
         {tier && (
           <div style={{ ...tierBanner, borderColor: tier.tier === 'WAITLIST' ? C.amber : C.accent }}>
             {tier.tier === 'WAITLIST'
-              ? <span style={{ color: C.amber }}>Aún no llegas a 1.000 seguidores — entra en lista de espera 👇</span>
-              : <span style={{ color: C.ink }}>Nivel <b style={{ color: C.accent }}>{tier.tier}</b> · puedes elegir <b>{tier.label}</b></span>}
+              ? <span style={{ color: C.amber }}>{t.waitlist}</span>
+              : <span style={{ color: C.ink }}>{t.levelYou} <b style={{ color: C.accent }}>{tier.tier}</b> {t.levelCan} <b>{tierLabel(tier.tier)}</b></span>}
           </div>
         )}
 
         {/* Catálogo */}
         {tier && tier.tier !== 'WAITLIST' && (
           <>
-            <Section title={`Prendas (${garmentsPicked}/${tier.garments})`} />
-            <Grid products={catalog.prendas} picks={picks} sizeSel={sizeSel} onToggle={togglePick} onSize={setPickSize} loading={loadingCatalog} />
+            <Section title={`${t.garments} (${garmentsPicked}/${tier.garments})`} />
+            <Grid products={catalog.prendas} picks={picks} sizeSel={sizeSel} onToggle={togglePick} onSize={setPickSize} loading={loadingCatalog} t={t} />
             {tier.accessories > 0 && garmentsPicked > 0 && (
               <>
-                <Section title={`Accesorios (${accessoriesPicked}/${tier.accessories})`} />
-                <div style={{ color: C.accent, fontSize: 12, fontWeight: 700, margin: '0 2px 8px' }}>¡Tu nivel incluye accesorio! Elige uno 👇</div>
-                <Grid products={catalog.accesorios} picks={picks} sizeSel={sizeSel} onToggle={togglePick} onSize={setPickSize} loading={loadingCatalog} />
+                <Section title={`${t.accessories} (${accessoriesPicked}/${tier.accessories})`} />
+                <div style={{ color: C.accent, fontSize: 12, fontWeight: 700, margin: '0 2px 8px' }}>{t.accNote}</div>
+                <Grid products={catalog.accesorios} picks={picks} sizeSel={sizeSel} onToggle={togglePick} onSize={setPickSize} loading={loadingCatalog} t={t} />
               </>
             )}
           </>
@@ -197,7 +259,7 @@ export default function CrewPage() {
         {tier && tier.tier !== 'WAITLIST' && (
           <label style={{ display: 'flex', gap: 10, alignItems: 'flex-start', color: C.muted, fontSize: 13, margin: '18px 2px' }}>
             <input type="checkbox" checked={rights} onChange={e => setRights(e.target.checked)} style={{ marginTop: 3 }} />
-            <span>Autorizo a Speedwear a usar mi contenido (reels, stories, fotos) en sus anuncios y redes.</span>
+            <span>{t.rights}</span>
           </label>
         )}
 
@@ -212,7 +274,7 @@ export default function CrewPage() {
         <div style={{ maxWidth: 640, margin: '0 auto', width: '100%' }}>
           <button onClick={submit} disabled={tier?.tier === 'WAITLIST' ? submitting : !canSubmit}
             style={{ ...btn, marginTop: 0, background: tier?.tier === 'WAITLIST' ? C.amber : C.accent, opacity: (tier?.tier === 'WAITLIST' ? !submitting : canSubmit) ? 1 : 0.4 }}>
-            {submitting ? 'Enviando…' : tier?.tier === 'WAITLIST' ? 'Entrar en lista de espera' : 'Unirme a la Crew'}
+            {submitting ? t.sending : tier?.tier === 'WAITLIST' ? t.joinWait : t.join}
           </button>
         </div>
       </div>
@@ -220,11 +282,11 @@ export default function CrewPage() {
   );
 }
 
-function Grid({ products, picks, sizeSel, onToggle, onSize, loading }: {
-  products: Product[]; picks: Pick[]; sizeSel: Record<string, string>; onToggle: (p: Product) => void; onSize: (id: string, s: string) => void; loading: boolean;
+function Grid({ products, picks, sizeSel, onToggle, onSize, loading, t }: {
+  products: Product[]; picks: Pick[]; sizeSel: Record<string, string>; onToggle: (p: Product) => void; onSize: (id: string, s: string) => void; loading: boolean; t: { loading: string; noProducts: string; choose: string; chosen: string };
 }) {
-  if (loading) return <p style={{ color: C.muted }}>Cargando catálogo…</p>;
-  if (!products.length) return <p style={{ color: C.muted, fontSize: 13 }}>Sin productos disponibles.</p>;
+  if (loading) return <p style={{ color: C.muted }}>{t.loading}</p>;
+  if (!products.length) return <p style={{ color: C.muted, fontSize: 13 }}>{t.noProducts}</p>;
   return (
     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(150px, 1fr))', gap: 12 }}>
       {products.map(p => {
@@ -248,7 +310,7 @@ function Grid({ products, picks, sizeSel, onToggle, onSize, loading }: {
             )}
             <button onClick={() => onToggle(p)}
               style={{ ...pickBtn, background: selected ? C.accent : 'transparent', color: selected ? '#0B0B0F' : C.ink, borderColor: selected ? C.accent : C.line }}>
-              {selected ? '✓ Elegido' : 'Elegir'}
+              {selected ? t.chosen : t.choose}
             </button>
           </div>
         );
