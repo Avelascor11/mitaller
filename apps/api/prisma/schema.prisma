@@ -769,6 +769,7 @@ model Collaboration {
   contentUrl     String?
   shopifyOrderId String?
   shopifyOrderName String?
+  driveFolderUrl String?
   metaCampaignId String?
   deadline       DateTime?
   openedAt       DateTime        @default(now())

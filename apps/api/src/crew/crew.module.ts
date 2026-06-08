@@ -5,11 +5,12 @@ import { ShopifyModule } from '../shopify/shopify.module';
 import { CrewController } from './crew.controller';
 import { CrewService } from './crew.service';
 import { GoAffProAdapter } from './goaffpro.adapter';
+import { GoogleDriveAdapter } from './google-drive.adapter';
 
 @Module({
   imports: [PrismaModule, ShopifyModule, KlaviyoModule],
   controllers: [CrewController],
-  providers: [CrewService, GoAffProAdapter],
+  providers: [CrewService, GoAffProAdapter, GoogleDriveAdapter],
   exports: [CrewService]
 })
 export class CrewModule {}

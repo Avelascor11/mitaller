@@ -4,6 +4,7 @@ import { KlaviyoService } from '../klaviyo/klaviyo.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { ShopifyAdapter } from '../shopify/shopify.adapter';
 import { GoAffProAdapter } from './goaffpro.adapter';
+import { GoogleDriveAdapter } from './google-drive.adapter';
 
 export interface CrewTier {
   tier: string;
@@ -44,6 +45,7 @@ export class CrewService {
     private readonly shopify: ShopifyAdapter,
     private readonly goaffpro: GoAffProAdapter,
     private readonly klaviyo: KlaviyoService,
+    private readonly drive: GoogleDriveAdapter,
     private readonly config: ConfigService
   ) {}
 
@@ -168,7 +170,20 @@ export class CrewService {
       this.logger.warn(`Crew gift order failed for @${igHandle}: ${(e as Error).message}`);
     }
 
-    // Welcome email (Klaviyo flow "Crew Welcome") with the content brief + where to upload.
+    // Per-influencer Google Drive folder for their UGC.
+    let uploadUrl = this.config.get<string>('CREW_UPLOAD_URL')
+      ?? (this.drive.parentId ? `https://drive.google.com/drive/folders/${this.drive.parentId}` : 'https://drive.google.com/');
+    try {
+      const folder = await this.drive.createInfluencerFolder(`@${igHandle} — ${fullName}`);
+      if (folder) {
+        uploadUrl = folder;
+        await this.prisma.collaboration.update({ where: { id: collab.id }, data: { driveFolderUrl: folder } }).catch(() => undefined);
+      }
+    } catch (e) {
+      this.logger.warn(`Crew drive folder failed for @${igHandle}: ${(e as Error).message}`);
+    }
+
+    // Welcome email (Klaviyo flow "Crew Welcome") with the content brief + their upload folder.
     try {
       await this.klaviyo.trackCrewWelcome({
         email: body.email.trim(),
@@ -177,7 +192,7 @@ export class CrewService {
         tier: tier.tier,
         products: productSummary,
         orderName,
-        uploadUrl: this.config.get<string>('CREW_UPLOAD_URL') ?? 'https://drive.google.com/'
+        uploadUrl
       });
     } catch (e) {
       this.logger.warn(`Crew welcome email failed for @${igHandle}: ${(e as Error).message}`);
