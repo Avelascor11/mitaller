@@ -9010,6 +9010,7 @@ struct EconomicsView: View {
     @State private var today: EconomicsSummary?
     @State private var month: EconomicsSummary?
     @State private var custom: EconomicsSummary?
+    @State private var growth: GrowthControlSummary?
     @State private var products: [ProductMarginRow] = []
     @State private var loading = false
     @State private var error: String?
@@ -9061,6 +9062,10 @@ struct EconomicsView: View {
                         )
                     }
 
+                    if let growth {
+                        GrowthControlCard(summary: growth)
+                    }
+
                     if loading && current == nil {
                         ProgressView().frame(maxWidth: .infinity)
                     } else if let summary = current {
@@ -9108,10 +9113,12 @@ struct EconomicsView: View {
             async let m = client.economicsMonth()
             async let c = client.economicsRange(from: customFrom, to: customTo)
             async let p = client.economicsProducts()
+            async let g = client.economicsGrowthControl()
             today = try await t
             month = try await m
             custom = try await c
             products = try await p
+            growth = try await g
         } catch let err {
             error = err.localizedDescription
         }
@@ -9792,6 +9799,7 @@ extension ReturnRecord: Hashable {
 struct CashflowView: View {
     @Environment(WorkshopStore.self) private var store
     @State private var summary: CashflowSummary?
+    @State private var growth: GrowthControlSummary?
     @State private var loading = false
     @State private var error: String?
 
@@ -9806,6 +9814,10 @@ struct CashflowView: View {
                         Text("Cobros de Shopify y qué separar cada día.")
                             .font(.subheadline.weight(.medium))
                             .foregroundStyle(AppTheme.muted)
+                    }
+
+                    if let growth {
+                        GrowthControlCard(summary: growth)
                     }
 
                     if loading {
@@ -9832,7 +9844,12 @@ struct CashflowView: View {
         guard let client = store.apiClient else { error = "API no configurada"; return }
         loading = true
         defer { loading = false }
-        do { summary = try await client.cashflow() }
+        do {
+            async let s = client.cashflow()
+            async let g = client.economicsGrowthControl()
+            summary = try await s
+            growth = try await g
+        }
         catch { self.error = error.localizedDescription }
     }
 
@@ -10707,6 +10724,142 @@ struct ShopifyPayoutLineRow: View {
         .padding(10)
         .background(AppTheme.surface)
         .clipShape(RoundedRectangle(cornerRadius: 12))
+    }
+}
+
+struct GrowthControlCard: View {
+    let summary: GrowthControlSummary
+
+    private var color: Color {
+        switch summary.status {
+        case "SCALE": AppTheme.green
+        case "HOLD": AppTheme.amber
+        default: AppTheme.red
+        }
+    }
+
+    private var icon: String {
+        switch summary.status {
+        case "SCALE": "chart.line.uptrend.xyaxis"
+        case "HOLD": "pause.circle.fill"
+        default: "shield.fill"
+        }
+    }
+
+    private var label: String {
+        switch summary.status {
+        case "SCALE": "Escalar"
+        case "HOLD": "Aguantar"
+        default: "Proteger"
+        }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(alignment: .top, spacing: 12) {
+                Image(systemName: icon)
+                    .font(.title2.weight(.black))
+                    .foregroundStyle(color)
+                    .frame(width: 40, height: 40)
+                    .background(color.opacity(0.14))
+                    .clipShape(RoundedRectangle(cornerRadius: 12))
+
+                VStack(alignment: .leading, spacing: 5) {
+                    HStack(spacing: 8) {
+                        Text("Control de crecimiento")
+                            .font(.headline.weight(.heavy))
+                            .foregroundStyle(AppTheme.ink)
+                        Tag(text: label, systemImage: icon)
+                    }
+                    Text(summary.headline)
+                        .font(.title3.weight(.black))
+                        .foregroundStyle(AppTheme.ink)
+                    Text(summary.recommendation)
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(AppTheme.muted)
+                }
+            }
+
+            LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 10) {
+                GrowthMetricTile(title: "Caja libre", value: formatMoney(summary.bank.freeCash, currency: summary.currency), color: summary.bank.balanceAvailable ? AppTheme.green : AppTheme.red)
+                GrowthMetricTile(title: "Tras compras", value: formatMoney(summary.scale.freeAfterMandatory, currency: summary.currency), color: summary.scale.freeAfterMandatory > 0 ? AppTheme.blue : AppTheme.red)
+                GrowthMetricTile(title: "Compra oblig.", value: formatMoney(summary.purchases.estimatedCost, currency: summary.currency), color: summary.purchases.units > 0 ? AppTheme.amber : AppTheme.green)
+                GrowthMetricTile(title: "Ads hoy", value: formatMoney(summary.today.adSpend, currency: summary.currency), color: AppTheme.purple)
+            }
+
+            if summary.scale.recommendedAdsBudget > 0 {
+                HStack {
+                    Image(systemName: "bolt.fill").foregroundStyle(AppTheme.green)
+                    Text("Margen para subir Ads hoy: \(formatMoney(summary.scale.recommendedAdsBudget, currency: summary.currency))")
+                        .font(.subheadline.weight(.heavy))
+                        .foregroundStyle(AppTheme.ink)
+                    Spacer()
+                }
+                .padding(12)
+                .background(AppTheme.green.opacity(0.12))
+                .clipShape(RoundedRectangle(cornerRadius: 14))
+            }
+
+            if !summary.actions.isEmpty {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Qué haría ahora")
+                        .font(.caption.weight(.black))
+                        .foregroundStyle(AppTheme.muted)
+                    ForEach(summary.actions.prefix(4)) { action in
+                        HStack(alignment: .top, spacing: 8) {
+                            Image(systemName: action.icon)
+                                .foregroundStyle(action.priority == "REQUIRED" || action.priority == "HIGH" ? AppTheme.amber : AppTheme.blue)
+                                .frame(width: 22)
+                            Text(action.title)
+                                .font(.subheadline.weight(.semibold))
+                                .foregroundStyle(AppTheme.ink)
+                            Spacer()
+                        }
+                    }
+                }
+            }
+
+            if !summary.risks.isEmpty {
+                VStack(alignment: .leading, spacing: 6) {
+                    ForEach(summary.risks.prefix(3), id: \.self) { risk in
+                        HStack(alignment: .top, spacing: 7) {
+                            Image(systemName: "exclamationmark.triangle.fill")
+                                .foregroundStyle(AppTheme.amber)
+                            Text(risk)
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(AppTheme.muted)
+                        }
+                    }
+                }
+            }
+        }
+        .glassPanel(padding: 16, accent: color)
+    }
+}
+
+struct GrowthMetricTile: View {
+    let title: String
+    let value: String
+    let color: Color
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            Text(title.uppercased())
+                .font(.caption2.weight(.black))
+                .foregroundStyle(AppTheme.muted)
+                .lineLimit(1)
+                .minimumScaleFactor(0.75)
+            Text(value)
+                .font(.headline.weight(.black))
+                .foregroundStyle(color)
+                .lineLimit(1)
+                .minimumScaleFactor(0.70)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(12)
+        .background(AppTheme.surfaceSoft)
+        .overlay(RoundedRectangle(cornerRadius: 14).stroke(AppTheme.line))
+        .clipShape(RoundedRectangle(cornerRadius: 14))
     }
 }
 

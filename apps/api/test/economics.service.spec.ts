@@ -2,7 +2,14 @@ import { describe, expect, it } from 'vitest';
 import { EconomicsService } from '../src/economics/economics.service';
 
 function service(config: Record<string, string> = {}) {
-  return new EconomicsService({} as never, { get: (key: string) => config[key] } as never, {} as never, { spendForRange: async () => 0 } as never) as unknown as {
+  return new EconomicsService(
+    {} as never,
+    { get: (key: string) => config[key] } as never,
+    {} as never,
+    { spendForRange: async () => 0 } as never,
+    { accounts: async () => ({ currency: 'EUR', totalBalance: 0, balanceAvailable: false, accounts: [] }) } as never,
+    { getPurchaseMatrix: async () => ({ groups: [] }) } as never
+  ) as unknown as {
     computeOrderBreakdown: (order: unknown) => {
       shippingRevenue: number;
       shippingCost: number;

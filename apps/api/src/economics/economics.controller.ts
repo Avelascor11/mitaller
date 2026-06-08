@@ -32,6 +32,11 @@ export class EconomicsController {
     return this.economics.adsHealth(from, to);
   }
 
+  @Get('growth-control')
+  growthControl() {
+    return this.economics.growthControl();
+  }
+
   @Get('cashflow')
   cashflow() {
     return this.economics.cashflow();

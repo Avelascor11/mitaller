@@ -1,7 +1,10 @@
 import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { OperationalStatus } from '@prisma/client';
+import { BankService } from '../bank/bank.service';
 import { MetaService } from '../meta/meta.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { PurchaseService } from '../purchasing/purchase.service';
 import { ShopifyAdapter, ShopifyBalanceTransaction } from '../shopify/shopify.adapter';
 
 const SHOPIFY_FEE_RATE = 0.024; // 2.4 % comisión Shopify Payments
@@ -53,13 +56,22 @@ interface OrderBreakdown {
   hasItemPrices: boolean;
 }
 
+interface GrowthAction {
+  type: string;
+  title: string;
+  priority: 'REQUIRED' | 'HIGH' | 'MEDIUM' | 'LOW';
+  icon: string;
+}
+
 @Injectable()
 export class EconomicsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly config: ConfigService,
     private readonly shopify: ShopifyAdapter,
-    private readonly meta: MetaService
+    private readonly meta: MetaService,
+    private readonly bank: BankService,
+    private readonly purchases: PurchaseService
   ) {}
 
   async today() {
@@ -163,6 +175,116 @@ export class EconomicsService {
     };
   }
 
+  async growthControl() {
+    const today = new Date();
+    const start = new Date(today); start.setHours(0, 0, 0, 0);
+    const end = new Date(today); end.setHours(23, 59, 59, 999);
+    const todayKey = today.toISOString().slice(0, 10);
+
+    const [bankAccounts, economics, purchaseMatrix, pendingOrders, metaSummary] = await Promise.all([
+      this.bank.accounts().catch(() => ({ currency: 'EUR', totalBalance: 0, balanceAvailable: false, accounts: [] as any[] })),
+      this.summary(start, end),
+      this.purchases.getPurchaseMatrix().catch(() => ({ groups: [] as any[] })),
+      this.pendingWorkshopOrders(),
+      this.meta.summary(todayKey, todayKey).catch(() => null)
+    ]);
+
+    const currency = bankAccounts.currency ?? economics.currency ?? 'EUR';
+    const balanceAvailable = Boolean((bankAccounts as any).balanceAvailable);
+    const bankBalance = Number(bankAccounts.totalBalance ?? 0);
+    const safetyBuffer = this.cashSafetyBuffer();
+    const freeCash = balanceAvailable ? Math.max(0, bankBalance - safetyBuffer) : 0;
+    const purchase = this.purchaseExposure(purchaseMatrix);
+    const mandatorySpend = purchase.estimatedCost;
+    const freeAfterMandatory = Math.max(0, freeCash - mandatorySpend);
+    const metaSpend = Number((metaSummary as any)?.spend ?? economics.adSpend ?? 0);
+    const metaRoas = (metaSummary as any)?.roas ?? null;
+    const pendingRevenue = await this.pendingRevenueEstimate();
+    const capacityRisk = pendingOrders.total >= this.maxPendingOrdersBeforeScaling();
+
+    let status: 'SCALE' | 'HOLD' | 'PROTECT' = 'SCALE';
+    const actions: GrowthAction[] = [];
+    const risks: string[] = [];
+
+    if (!balanceAvailable) {
+      status = 'PROTECT';
+      risks.push('No hay saldo bancario fiable ahora mismo. Sin saldo real, no escalar.');
+      actions.push(this.growthAction('PROTECT_CASH', 'Sincroniza N26 antes de decidir gastos', 'REQUIRED', 'building.columns.fill'));
+    }
+
+    if (balanceAvailable && bankBalance < safetyBuffer) {
+      status = 'PROTECT';
+      risks.push(`La caja esta por debajo del colchon de ${this.formatMoney(safetyBuffer, currency)}.`);
+      actions.push(this.growthAction('PROTECT_CASH', 'No gastar salvo pedidos bloqueados', 'REQUIRED', 'shield.fill'));
+    } else if (balanceAvailable && freeAfterMandatory < Math.max(100, freeCash * 0.25)) {
+      status = status === 'PROTECT' ? status : 'HOLD';
+      risks.push('Despues de comprar lo obligatorio queda poca caja libre.');
+    }
+
+    if (purchase.units > 0) {
+      actions.push(this.growthAction(
+        'BUY_MANDATORY_STOCK',
+        `Comprar ropa obligatoria: ${purchase.units} uds aprox. (${this.formatMoney(purchase.estimatedCost, currency)})`,
+        'HIGH',
+        'cart.badge.plus'
+      ));
+    }
+
+    if (capacityRisk) {
+      status = status === 'PROTECT' ? status : 'HOLD';
+      risks.push(`Hay ${pendingOrders.total} pedidos pendientes. Escalar ads puede saturar taller.`);
+      actions.push(this.growthAction('CLEAR_WORKSHOP', 'Prioriza terminar pedidos antes de subir anuncios', 'HIGH', 'shippingbox.fill'));
+    }
+
+    const adsBudget = this.recommendedAdsBudget({ freeAfterMandatory, metaRoas, status, capacityRisk });
+    if (adsBudget > 0) {
+      actions.push(this.growthAction('SCALE_ADS', `Puedes subir Meta hasta ${this.formatMoney(adsBudget, currency)} hoy`, 'MEDIUM', 'chart.line.uptrend.xyaxis'));
+    } else if (metaSpend > 0 && status !== 'SCALE') {
+      actions.push(this.growthAction('HOLD_ADS', 'Mantener o bajar Ads hasta proteger caja/taller', 'MEDIUM', 'pause.circle.fill'));
+    }
+
+    const headline = this.growthHeadline(status, balanceAvailable, freeAfterMandatory, currency);
+    const recommendation = this.growthRecommendation(status, adsBudget, purchase.units, currency);
+
+    return {
+      date: todayKey,
+      currency,
+      status,
+      headline,
+      recommendation,
+      bank: {
+        balanceAvailable,
+        balance: bankBalance,
+        safetyBuffer,
+        freeCash
+      },
+      today: {
+        revenue: economics.grossRevenue,
+        marginAfterAds: economics.netMargin,
+        orders: economics.orderCount,
+        adSpend: metaSpend,
+        roas: metaRoas
+      },
+      pending: {
+        orders: pendingOrders.total,
+        blocked: pendingOrders.blocked,
+        estimatedRevenue: pendingRevenue
+      },
+      purchases: {
+        units: purchase.units,
+        estimatedCost: purchase.estimatedCost,
+        topItems: purchase.topItems
+      },
+      scale: {
+        freeAfterMandatory,
+        recommendedAdsBudget: adsBudget,
+        capacityRisk
+      },
+      risks,
+      actions
+    };
+  }
+
   async productMargins() {
     const orders = await this.prisma.order.findMany({
       where: { items: { some: {} } },
@@ -189,6 +311,111 @@ export class EconomicsService {
         marginPct: row.revenue > 0 ? ((row.revenue - row.cost) / row.revenue) * 100 : null
       }))
       .sort((a, b) => b.margin - a.margin);
+  }
+
+  private async pendingWorkshopOrders() {
+    const pendingStatuses: OperationalStatus[] = [
+      OperationalStatus.NEW,
+      OperationalStatus.WAITING_STOCK,
+      OperationalStatus.WAITING_PRODUCTION,
+      OperationalStatus.IN_PRODUCTION,
+      OperationalStatus.PRODUCED,
+      OperationalStatus.WAITING_PICKING,
+      OperationalStatus.PICKED,
+      OperationalStatus.BLOCKED
+    ];
+    const [total, blocked] = await Promise.all([
+      this.prisma.order.count({ where: { operationalStatus: { in: pendingStatuses } } }),
+      this.prisma.order.count({ where: { operationalStatus: OperationalStatus.BLOCKED } })
+    ]);
+    return { total, blocked };
+  }
+
+  private async pendingRevenueEstimate() {
+    const pendingStatuses: OperationalStatus[] = [
+      OperationalStatus.NEW,
+      OperationalStatus.WAITING_STOCK,
+      OperationalStatus.WAITING_PRODUCTION,
+      OperationalStatus.IN_PRODUCTION,
+      OperationalStatus.PRODUCED,
+      OperationalStatus.WAITING_PICKING,
+      OperationalStatus.PICKED,
+      OperationalStatus.BLOCKED
+    ];
+    const orders = await this.prisma.order.findMany({
+      where: { operationalStatus: { in: pendingStatuses } },
+      include: { items: true, shipments: true }
+    });
+    return +orders.reduce((sum, order) => sum + this.computeOrderBreakdown(order).grossRevenue, 0).toFixed(2);
+  }
+
+  private purchaseExposure(matrix: any) {
+    const entries = (matrix.groups ?? [])
+      .flatMap((group: any) => (group.sizes ?? []).map((entry: any) => ({ group, entry })))
+      .filter(({ entry }: any) => Number(entry.recommendedPurchaseQuantity ?? 0) > 0);
+    const items = entries.map(({ group, entry }: any) => {
+      const quantity = Number(entry.recommendedPurchaseQuantity ?? 0);
+      const unitCost = this.estimatedBlankCost(group.garmentType, group.color, entry.subproductName);
+      return {
+        title: entry.subproductName ?? group.title,
+        quantity,
+        estimatedCost: +(quantity * unitCost).toFixed(2)
+      };
+    });
+    return {
+      units: items.reduce((sum: number, item: any) => sum + item.quantity, 0),
+      estimatedCost: +items.reduce((sum: number, item: any) => sum + item.estimatedCost, 0).toFixed(2),
+      topItems: items.sort((a: any, b: any) => b.estimatedCost - a.estimatedCost).slice(0, 5)
+    };
+  }
+
+  private estimatedBlankCost(garmentType?: string, color?: string, name?: string) {
+    const text = this.normalize(`${garmentType ?? ''} ${color ?? ''} ${name ?? ''}`);
+    if (/sudadera/.test(text)) return this.moneyConfig('GROWTH_SWEATSHIRT_UNIT_COST', 8.05);
+    if (/camiseta|shirt/.test(text)) return this.moneyConfig(/marron|rosa|azalea|chocolate/.test(text) ? 'GROWTH_GILDAN_TSHIRT_UNIT_COST' : 'GROWTH_TSHIRT_UNIT_COST', /marron|rosa|azalea|chocolate/.test(text) ? 2.84 : 3.19);
+    return this.moneyConfig('GROWTH_OTHER_PURCHASE_UNIT_COST', 0);
+  }
+
+  private recommendedAdsBudget(input: { freeAfterMandatory: number; metaRoas: number | null; status: 'SCALE' | 'HOLD' | 'PROTECT'; capacityRisk: boolean }) {
+    if (input.status === 'PROTECT' || input.capacityRisk || input.freeAfterMandatory < 150) return 0;
+    const base = Math.min(input.freeAfterMandatory * 0.2, this.moneyConfig('GROWTH_MAX_DAILY_ADS_SCALE_EUR', 50));
+    if (input.metaRoas != null && input.metaRoas < 1.4) return 0;
+    if (input.metaRoas != null && input.metaRoas > 2.2) return +Math.max(10, base).toFixed(2);
+    return +Math.min(base, 20).toFixed(2);
+  }
+
+  private growthHeadline(status: 'SCALE' | 'HOLD' | 'PROTECT', balanceAvailable: boolean, freeAfterMandatory: number, currency: string) {
+    if (!balanceAvailable) return 'Sin saldo fiable: primero sincroniza N26.';
+    if (status === 'PROTECT') return 'Proteger caja: hoy no toca escalar.';
+    if (status === 'HOLD') return 'Aguantar: vender si, pero sin acelerar fuerte.';
+    return `Puedes escalar con cabeza: quedan ${this.formatMoney(freeAfterMandatory, currency)} libres tras compras obligatorias.`;
+  }
+
+  private growthRecommendation(status: 'SCALE' | 'HOLD' | 'PROTECT', adsBudget: number, purchaseUnits: number, currency: string) {
+    if (status === 'PROTECT') return 'Prioriza caja y pedidos bloqueados. No metas gasto opcional.';
+    if (status === 'HOLD') return purchaseUnits > 0 ? 'Compra lo necesario para producir, termina pedidos y reevalua mañana.' : 'Mantén ads, no subas presupuesto hasta ver mas caja o menos cola.';
+    if (adsBudget > 0) return `Compra lo obligatorio y puedes probar una subida de Ads de hasta ${this.formatMoney(adsBudget, currency)}.`;
+    return 'Caja sana, pero sin señal clara para subir Ads. Mantener y observar.';
+  }
+
+  private growthAction(type: string, title: string, priority: GrowthAction['priority'], icon: string): GrowthAction {
+    return { type, title, priority, icon };
+  }
+
+  private cashSafetyBuffer(): number {
+    const raw = this.config.get<string>('CASH_SAFETY_BUFFER_EUR');
+    const parsed = Number(raw?.replace(',', '.'));
+    return Number.isFinite(parsed) && parsed >= 0 ? parsed : 500;
+  }
+
+  private maxPendingOrdersBeforeScaling(): number {
+    const raw = this.config.get<string>('GROWTH_MAX_PENDING_ORDERS_BEFORE_HOLD');
+    const parsed = Number(raw);
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : 35;
+  }
+
+  private formatMoney(value: number, currency: string) {
+    return new Intl.NumberFormat('es-ES', { style: 'currency', currency }).format(value);
   }
 
   async orderBreakdown(orderId: string): Promise<OrderBreakdown | null> {

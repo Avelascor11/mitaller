@@ -42,6 +42,16 @@ http://localhost:3001
 - `GET /purchase-needs/matrix`
 - `POST /purchase-needs/generate`
 
+## Economics
+
+- `GET /economics/today`
+- `GET /economics/month`
+- `GET /economics/range?from=YYYY-MM-DD&to=YYYY-MM-DD`
+- `GET /economics/products`
+- `GET /economics/growth-control`
+- `GET /economics/ads-health?from=YYYY-MM-DD&to=YYYY-MM-DD`
+- `GET /economics/cashflow`
+
 ## Sendcloud
 
 - `POST /shipments/:orderId/create-label`

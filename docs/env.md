@@ -77,6 +77,11 @@ Mitaller usa GoCardless Bank Account Data para conectar N26 por Open Banking/PSD
 - `PUBLIC_API_URL`: URL publica de la API en Railway.
 - `BANK_REDIRECT_URL`: callback publico que usara el banco tras autorizar, normalmente `${PUBLIC_API_URL}/bank/callback`.
 - `CASH_SAFETY_BUFFER_EUR`: colchon minimo que el gestor intenta proteger antes de aprobar gastos. Por defecto `500`.
+- `GROWTH_MAX_PENDING_ORDERS_BEFORE_HOLD`: pedidos pendientes a partir de los que el control de crecimiento recomienda no escalar Ads. Por defecto `35`.
+- `GROWTH_MAX_DAILY_ADS_SCALE_EUR`: subida maxima diaria recomendada para Ads. Por defecto `50`.
+- `GROWTH_TSHIRT_UNIT_COST`: coste estimado de camiseta para decisiones de caja. Por defecto `3.19`.
+- `GROWTH_GILDAN_TSHIRT_UNIT_COST`: coste estimado de camisetas Gildan marron/rosa. Por defecto `2.84`.
+- `GROWTH_SWEATSHIRT_UNIT_COST`: coste estimado de sudadera para decisiones de caja. Por defecto `8.05`.
 
 ## UGC / videos de influencers
 

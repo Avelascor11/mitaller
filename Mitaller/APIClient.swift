@@ -231,6 +231,7 @@ struct APIClient {
         return try await get("/economics/range?from=\(formatter.string(from: from))&to=\(formatter.string(from: to))")
     }
     func economicsProducts() async throws -> [ProductMarginRow] { try await get("/economics/products") }
+    func economicsGrowthControl() async throws -> GrowthControlSummary { try await get("/economics/growth-control") }
     func economicsPayouts() async throws -> ShopifyPayoutsSummary { try await get("/economics/payouts") }
     func economicsForOrder(_ id: String) async throws -> OrderBreakdown {
         try await get("/economics/order/\(Self.pathSegment(id))")
@@ -1170,6 +1171,69 @@ struct EconomicsSummary: Decodable {
     let adsReserve: Double?
     let orderCount: Int
     let orders: [OrderBreakdown]
+}
+
+struct GrowthControlSummary: Decodable {
+    let date: String
+    let currency: String
+    let status: String
+    let headline: String
+    let recommendation: String
+    let bank: GrowthBankSummary
+    let today: GrowthTodaySummary
+    let pending: GrowthPendingSummary
+    let purchases: GrowthPurchaseSummary
+    let scale: GrowthScaleSummary
+    let risks: [String]
+    let actions: [GrowthAction]
+}
+
+struct GrowthBankSummary: Decodable {
+    let balanceAvailable: Bool
+    let balance: Double
+    let safetyBuffer: Double
+    let freeCash: Double
+}
+
+struct GrowthTodaySummary: Decodable {
+    let revenue: Double
+    let marginAfterAds: Double
+    let orders: Int
+    let adSpend: Double
+    let roas: Double?
+}
+
+struct GrowthPendingSummary: Decodable {
+    let orders: Int
+    let blocked: Int
+    let estimatedRevenue: Double
+}
+
+struct GrowthPurchaseSummary: Decodable {
+    let units: Int
+    let estimatedCost: Double
+    let topItems: [GrowthPurchaseItem]
+}
+
+struct GrowthPurchaseItem: Decodable, Identifiable {
+    var id: String { title }
+    let title: String
+    let quantity: Int
+    let estimatedCost: Double
+}
+
+struct GrowthScaleSummary: Decodable {
+    let freeAfterMandatory: Double
+    let recommendedAdsBudget: Double
+    let capacityRisk: Bool
+}
+
+struct GrowthAction: Decodable, Identifiable {
+    var id: String { type + title }
+    let type: String
+    let title: String
+    let priority: String
+    let icon: String
 }
 
 struct OrderBreakdown: Decodable, Identifiable {
