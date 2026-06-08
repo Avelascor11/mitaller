@@ -2,13 +2,22 @@ import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 
 const CUSTOMER_DOMAIN = 'devoluciones.speedwear.es';
+const CREW_DOMAIN = 'crew.speedwear.es';
 
 // Routes that don't require auth
-const PUBLIC_PATHS = ['/login', '/devoluciones'];
+const PUBLIC_PATHS = ['/login', '/devoluciones', '/crew'];
 
 export function middleware(request: NextRequest) {
   const host = request.headers.get('host') ?? '';
   const { pathname } = request.nextUrl;
+
+  // ── Crew recruitment domain (public form) ──
+  if (host === CREW_DOMAIN) {
+    if (pathname === '/crew') return NextResponse.next();
+    const url = request.nextUrl.clone();
+    url.pathname = '/crew';
+    return NextResponse.redirect(url);
+  }
 
   // ── Customer-facing domain ──
   if (host === CUSTOMER_DOMAIN) {

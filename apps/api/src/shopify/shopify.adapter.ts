@@ -145,7 +145,20 @@ export class ShopifyAdapter {
     return (data.products?.nodes ?? []).map((p: any) => {
       const type = `${p.productType ?? ''} ${p.title ?? ''}`.toLowerCase();
       const isAccessory = /gorra|cap|tote|bolsa|gorro|calcet|accesori|rinonera|riñonera|sticker|toalla|funda|llaver/.test(type);
-      const sizeOption = (p.options ?? []).find((o: any) => /talla|size/i.test(o.name));
+      const sizeOption = (p.options ?? []).find((o: any) => /talla|size|tama/i.test(o.name));
+      const variants = (p.variants?.nodes ?? []).map((v: any) => ({ id: v.id, title: v.title, sku: v.sku, available: v.availableForSale }));
+      let sizes: string[] = sizeOption?.values ?? [];
+      if (!sizes.length) {
+        // Fallback: derive from variant titles (e.g. "M", "Negro / L")
+        const known = ['XS', 'S', 'M', 'L', 'XL', 'XXL', '2XL', '3XL'];
+        const found = new Set<string>();
+        for (const v of variants) {
+          for (const part of `${v.title}`.split(/[\/|,-]/).map((s: string) => s.trim().toUpperCase())) {
+            if (known.includes(part)) found.add(part === '2XL' ? 'XXL' : part);
+          }
+        }
+        sizes = [...found];
+      }
       return {
         id: p.id,
         title: p.title,
@@ -153,8 +166,8 @@ export class ShopifyAdapter {
         handle: p.handle,
         imageUrl: p.featuredImage?.url ?? null,
         category: isAccessory ? 'ACCESORIO' : 'PRENDA',
-        sizes: sizeOption?.values ?? [],
-        variants: (p.variants?.nodes ?? []).map((v: any) => ({ id: v.id, title: v.title, sku: v.sku, available: v.availableForSale }))
+        sizes,
+        variants
       };
     });
   }
