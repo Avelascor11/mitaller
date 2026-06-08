@@ -192,6 +192,10 @@ struct APIClient {
         let request = try jsonRequest(path: "/carrier-returns/\(Self.pathSegment(id))", method: "PATCH", body: body)
         return try await perform(request)
     }
+    func carrierReturnByTracking(tracking: String, reason: String) async throws -> CarrierDetectResult {
+        let request = try jsonRequest(path: "/carrier-returns/by-tracking", method: "POST", body: CarrierByTrackingRequest(tracking: tracking, reason: reason))
+        return try await perform(request)
+    }
     func requestCarrierReturnPayment(_ id: String) async throws -> CarrierReturn {
         let request = try jsonRequest(path: "/carrier-returns/\(Self.pathSegment(id))/request-payment", method: "POST", body: EmptyBody())
         return try await perform(request)
@@ -1089,6 +1093,15 @@ struct CreateCarrierReturnRequest: Encodable {
     let orderNumber: String
     let reason: String
     let notes: String?
+}
+struct CarrierByTrackingRequest: Encodable {
+    let tracking: String
+    let reason: String
+}
+struct CarrierDetectResult: Decodable {
+    let detected: Bool
+    let alreadyExists: Bool
+    let carrierReturn: CarrierReturn
 }
 struct UpdateCarrierReturnRequest: Encodable {
     var status: String?

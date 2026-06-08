@@ -7206,6 +7206,10 @@ struct CarrierReturnsView: View {
     @State private var loading = false
     @State private var error: String?
     @State private var showCreate = false
+    @State private var showScanner = false
+    @State private var detected: CarrierReturn?
+    @State private var detectMsg: String?
+    @State private var sending = false
 
     private var pending: [CarrierReturn] { items.filter { $0.status != "RESHIPPED" && $0.status != "CANCELLED" } }
     private var done: [CarrierReturn] { items.filter { $0.status == "RESHIPPED" || $0.status == "CANCELLED" } }
@@ -7221,6 +7225,11 @@ struct CarrierReturnsView: View {
                         Text("Pedidos que Correos nos devolvió. Cobra el reenvío (\(eur(4.95))) con dirección corregida.")
                             .font(.subheadline.weight(.medium)).foregroundStyle(AppTheme.muted)
                     }
+                    Button { showScanner = true } label: {
+                        Label("Escanear tracking", systemImage: "barcode.viewfinder").font(.headline.weight(.heavy)).frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.borderedProminent).tint(AppTheme.blue).controlSize(.large)
+
                     LazyVGrid(columns: [GridItem(.adaptive(minimum: 104), spacing: 10)], spacing: 10) {
                         MetricTile(title: "Pendientes", value: pending.count, color: AppTheme.amber, icon: "clock.fill")
                         MetricTile(title: "Pagados", value: paidCount, color: AppTheme.green, icon: "creditcard.fill")
@@ -7250,9 +7259,49 @@ struct CarrierReturnsView: View {
                 ToolbarItem(placement: .topBarLeading) { Button { Task { await reload() } } label: { Image(systemName: "arrow.clockwise") }.disabled(loading) }
             }
             .sheet(isPresented: $showCreate) { CarrierReturnCreateSheet(onCreated: { Task { await reload() } }).environment(store) }
+            .sheet(isPresented: $showScanner) {
+                NavigationStack {
+                    BarcodeScannerView { code, _ in
+                        showScanner = false
+                        Task { await detect(code) }
+                    }
+                    .ignoresSafeArea()
+                    .navigationTitle("Escanear tracking")
+                    .toolbar { Button("Cerrar") { showScanner = false } }
+                }
+            }
+            .sheet(item: $detected) { d in
+                DetectedReturnSheet(item: d, sending: sending, onSend: { Task { await sendEmail(d) } }, onClose: { detected = nil; Task { await reload() } })
+                    .presentationDetents([.medium])
+            }
+            .overlay(alignment: .top) {
+                if let m = detectMsg {
+                    Text(m).font(.caption.weight(.bold)).padding(10).background(AppTheme.red.opacity(0.95), in: Capsule()).foregroundStyle(.white).padding(.top, 8)
+                }
+            }
             .task { await reload() }
             .refreshable { await reload() }
         }
+    }
+
+    private func detect(_ code: String) async {
+        guard let client = store.apiClient else { return }
+        detectMsg = nil
+        do {
+            let r = try await client.carrierReturnByTracking(tracking: code, reason: "ABSENT")
+            detected = r.carrierReturn
+            await reload()
+        } catch {
+            detectMsg = error.localizedDescription
+            DispatchQueue.main.asyncAfter(deadline: .now() + 4) { detectMsg = nil }
+        }
+    }
+    private func sendEmail(_ d: CarrierReturn) async {
+        guard let client = store.apiClient else { return }
+        sending = true; defer { sending = false }
+        _ = try? await client.requestCarrierReturnPayment(d.id)
+        detected = nil
+        await reload()
     }
 
     private func eur(_ v: Double) -> String { String(format: "%.2f €", v) }
@@ -7336,6 +7385,36 @@ struct CarrierReturnRow: View {
         guard let client = store.apiClient else { return }
         _ = try? await client.updateCarrierReturn(item.id, body: UpdateCarrierReturnRequest(customerEmail: emailEdit))
         onChange()
+    }
+}
+
+struct DetectedReturnSheet: View {
+    let item: CarrierReturn
+    let sending: Bool
+    let onSend: () -> Void
+    let onClose: () -> Void
+
+    var body: some View {
+        VStack(spacing: 16) {
+            Image(systemName: "checkmark.seal.fill").font(.system(size: 48)).foregroundStyle(AppTheme.green)
+            Text("Pedido detectado").font(.title2.weight(.heavy)).foregroundStyle(AppTheme.ink)
+            VStack(spacing: 4) {
+                Text(item.orderNumber).font(.title3.weight(.black)).foregroundStyle(AppTheme.ink)
+                if let n = item.customerName { Text(n).foregroundStyle(AppTheme.muted) }
+                if let e = item.customerEmail { Text(e).font(.caption).foregroundStyle(AppTheme.muted) }
+                else { Text("⚠️ Sin email — añádelo en la lista antes de cobrar").font(.caption).foregroundStyle(AppTheme.red) }
+            }
+            Button(action: onSend) {
+                if sending { ProgressView().frame(maxWidth: .infinity) }
+                else { Label("Enviar email de pago (\(String(format: "%.2f €", item.feeAmount)))", systemImage: "envelope.fill").frame(maxWidth: .infinity) }
+            }
+            .buttonStyle(.borderedProminent).tint(AppTheme.green).controlSize(.large)
+            .disabled(sending || item.customerEmail == nil)
+            Button("Cerrar", action: onClose).foregroundStyle(AppTheme.muted)
+        }
+        .padding(24)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(AppTheme.surface)
     }
 }
 

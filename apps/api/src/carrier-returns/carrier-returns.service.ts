@@ -53,6 +53,36 @@ export class CarrierReturnsService {
     });
   }
 
+  /** Find an order by its tracking/parcel id (Shipment in our DB) and register the carrier return. */
+  async createFromTracking(input: { tracking: string; reason?: Reason }) {
+    const t = input.tracking?.trim();
+    if (!t) throw new BadRequestException('Tracking requerido');
+    const shipment = await this.prisma.shipment.findFirst({
+      where: { OR: [{ trackingNumber: t }, { sendcloudParcelId: t }, { trackingNumber: { contains: t } }] },
+      include: { order: true },
+      orderBy: { createdAt: 'desc' }
+    });
+    if (!shipment?.order) {
+      throw new NotFoundException(`No encontré ningún pedido con el tracking ${t}. Métele el nº de pedido a mano.`);
+    }
+    const order = shipment.order;
+    const existing = await this.prisma.carrierReturn.findFirst({
+      where: { orderNumber: order.orderNumber, status: { notIn: ['RESHIPPED', 'CANCELLED'] } }
+    });
+    if (existing) return { detected: true, alreadyExists: true, carrierReturn: existing };
+    const created = await this.prisma.carrierReturn.create({
+      data: {
+        orderId: order.id,
+        orderNumber: order.orderNumber,
+        customerName: order.customerName,
+        customerEmail: order.customerEmail,
+        reason: (input.reason ?? 'OTHER') as any,
+        feeAmount: this.fee
+      }
+    });
+    return { detected: true, alreadyExists: false, carrierReturn: created };
+  }
+
   async update(id: string, input: { status?: string; customerEmail?: string; reason?: Reason; notes?: string; newAddress?: string }) {
     await this.get(id);
     const data: any = {};

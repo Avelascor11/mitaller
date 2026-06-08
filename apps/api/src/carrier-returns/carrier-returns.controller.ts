@@ -20,6 +20,11 @@ export class CarrierReturnsController {
     return this.service.create(body);
   }
 
+  @Post('by-tracking')
+  byTracking(@Body() body: { tracking: string; reason?: any }) {
+    return this.service.createFromTracking(body);
+  }
+
   @Patch(':id')
   update(@Param('id') id: string, @Body() body: any) {
     return this.service.update(id, body);
