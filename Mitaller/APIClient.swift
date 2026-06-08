@@ -1421,6 +1421,7 @@ struct CashflowAllocation: Decodable {
     let taxReserve: Double
     let production: Double
     let shipping: Double
+    let adsReserve: Double
     let cashFree: Double
 }
 
@@ -1507,6 +1508,7 @@ struct AllocationBreakdown: Decodable {
     let taxReserve: Double
     let production: Double
     let shipping: Double
+    let adsReserve: Double?
     let cashFree: Double
 }
 

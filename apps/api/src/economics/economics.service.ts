@@ -511,6 +511,7 @@ export class EconomicsService {
         byDate.set(key, group);
       }
       const salesDays = [...byDate.values()].sort((a, b) => a.date.localeCompare(b.date));
+      const adsReserve = await this.adsReserveForSalesDays(salesDays.map(day => day.date));
 
       const gross = amount / (1 - shopifyFeeRate);
       return {
@@ -527,7 +528,8 @@ export class EconomicsService {
           taxReserve: +(gross * taxRate).toFixed(2),
           production: +(gross * productionRate).toFixed(2),
           shipping: +(gross * shippingRate).toFixed(2),
-          cashFree: +(amount - gross * taxRate - gross * productionRate - gross * shippingRate).toFixed(2)
+          adsReserve,
+          cashFree: +(amount - gross * taxRate - gross * productionRate - gross * shippingRate - adsReserve).toFixed(2)
         }
       };
     };
@@ -538,6 +540,7 @@ export class EconomicsService {
       taxReserve: +todayPayouts.reduce((s, p) => s + p.allocation.taxReserve, 0).toFixed(2),
       production: +todayPayouts.reduce((s, p) => s + p.allocation.production, 0).toFixed(2),
       shipping: +todayPayouts.reduce((s, p) => s + p.allocation.shipping, 0).toFixed(2),
+      adsReserve: +todayPayouts.reduce((s, p) => s + p.allocation.adsReserve, 0).toFixed(2),
       cashFree: +todayPayouts.reduce((s, p) => s + p.allocation.cashFree, 0).toFixed(2)
     };
 
@@ -556,6 +559,12 @@ export class EconomicsService {
         payouts: await Promise.all(scheduledSoon.map(enrichPayout))
       }
     };
+  }
+
+  private async adsReserveForSalesDays(days: string[]) {
+    const uniqueDays = [...new Set(days.filter((day) => /^\d{4}-\d{2}-\d{2}$/.test(day)))];
+    const values = await Promise.all(uniqueDays.map((day) => this.meta.spendForRange(day, day).catch(() => 0)));
+    return +values.reduce((sum, value) => sum + value, 0).toFixed(2);
   }
 
   async payouts() {

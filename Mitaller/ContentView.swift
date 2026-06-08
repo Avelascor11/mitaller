@@ -10018,6 +10018,7 @@ struct CashflowAllocationGrid: View {
             CashflowAllocationTile(label: "Hacienda / IVA", amount: allocation.taxReserve, currency: currency, color: AppTheme.red, icon: "building.columns.fill")
             CashflowAllocationTile(label: "Producción", amount: allocation.production, currency: currency, color: AppTheme.amber, icon: "tshirt.fill")
             CashflowAllocationTile(label: "Envíos", amount: allocation.shipping, currency: currency, color: AppTheme.blue, icon: "shippingbox.fill")
+            CashflowAllocationTile(label: "Meta Ads", amount: allocation.adsReserve, currency: currency, color: AppTheme.purple, icon: "megaphone.fill")
             CashflowAllocationTile(label: "Beneficio libre", amount: allocation.cashFree, currency: currency, color: AppTheme.green, icon: "banknote.fill")
         }
     }
@@ -10207,6 +10208,9 @@ struct PayoutAllocationCard: View {
                 AllocationRow(label: "Hacienda / IVA", amount: payout.allocation.taxReserve, currency: currency, color: AppTheme.red)
                 AllocationRow(label: "Producción", amount: payout.allocation.production, currency: currency, color: AppTheme.amber)
                 AllocationRow(label: "Envíos", amount: payout.allocation.shipping, currency: currency, color: AppTheme.blue)
+                if let adsReserve = payout.allocation.adsReserve {
+                    AllocationRow(label: "Meta Ads", amount: adsReserve, currency: currency, color: AppTheme.purple)
+                }
                 AllocationRow(label: "Beneficio libre", amount: payout.allocation.cashFree, currency: currency, color: AppTheme.green)
             }
         }
@@ -10224,10 +10228,12 @@ struct AllocationBar: View {
                 let taxW = geo.size.width * (allocation.taxReserve / total)
                 let prodW = geo.size.width * (allocation.production / total)
                 let shipW = geo.size.width * (allocation.shipping / total)
+                let adsW = geo.size.width * ((allocation.adsReserve ?? 0) / total)
                 let freeW = geo.size.width * max(0, allocation.cashFree / total)
                 RoundedRectangle(cornerRadius: 3).fill(AppTheme.red).frame(width: taxW)
                 RoundedRectangle(cornerRadius: 3).fill(AppTheme.amber).frame(width: prodW)
                 RoundedRectangle(cornerRadius: 3).fill(AppTheme.blue).frame(width: shipW)
+                RoundedRectangle(cornerRadius: 3).fill(AppTheme.purple).frame(width: adsW)
                 RoundedRectangle(cornerRadius: 3).fill(AppTheme.green).frame(width: freeW)
             }
         }
