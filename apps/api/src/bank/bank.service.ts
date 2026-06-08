@@ -2,20 +2,26 @@ import { BadRequestException, Injectable, NotFoundException } from '@nestjs/comm
 import { ConfigService } from '@nestjs/config';
 import { BankTransactionCategory } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
-import { TinkBankAdapter } from './tink-bank.adapter';
+import { GoCardlessBankAdapter } from './gocardless-bank.adapter';
 
 @Injectable()
 export class BankService {
   constructor(
     private readonly prisma: PrismaService,
-    private readonly gocardless: TinkBankAdapter,
+    private readonly gocardless: GoCardlessBankAdapter,
     private readonly config: ConfigService
   ) {}
 
-  status() {
+  async status() {
+    const [connections, accounts] = await Promise.all([
+      this.prisma.bankConnection.count(),
+      this.prisma.bankAccount.count()
+    ]);
     return {
-      provider: 'TINK',
-      configured: this.gocardless.configured
+      provider: 'GOCARDLESS',
+      configured: this.gocardless.configured,
+      connections,
+      accounts
     };
   }
 
@@ -58,7 +64,7 @@ export class BankService {
   async refreshConnection(id: string, code?: string) {
     const connection = await this.prisma.bankConnection.findUnique({ where: { id } });
     if (!connection) throw new NotFoundException('Conexion bancaria no encontrada');
-    const requisition = await this.gocardless.requisition(connection.requisitionId, code);
+    const requisition = await this.gocardless.requisition(connection.requisitionId);
     const accounts = Array.isArray(requisition.accounts) ? requisition.accounts : [];
 
     const updated = await this.prisma.bankConnection.update({
@@ -130,6 +136,47 @@ export class BankService {
       include: { account: true },
       orderBy: { bookingDate: 'desc' }
     });
+  }
+
+  async accounts() {
+    const accounts = await this.prisma.bankAccount.findMany({
+      include: { connection: true },
+      orderBy: { createdAt: 'desc' }
+    });
+    const enriched = await Promise.all(accounts.map(async account => {
+      let balances: any[] = [];
+      let currentBalance: number | null = null;
+      let availableBalance: number | null = null;
+      try {
+        const response = await this.gocardless.accountBalances(account.providerAccountId);
+        balances = response.balances ?? [];
+        currentBalance = this.pickBalance(balances, ['interimBooked', 'closingBooked', 'expected']);
+        availableBalance = this.pickBalance(balances, ['interimAvailable', 'forwardAvailable', 'nonInvoiced']);
+      } catch {
+        balances = [];
+      }
+      return {
+        id: account.id,
+        providerAccountId: account.providerAccountId,
+        institutionName: account.connection.institutionName,
+        iban: this.maskIban(account.iban),
+        name: account.name ?? account.connection.institutionName ?? 'Cuenta bancaria',
+        currency: account.currency ?? balances[0]?.balanceAmount?.currency ?? 'EUR',
+        ownerName: account.ownerName,
+        product: account.product,
+        currentBalance,
+        availableBalance,
+        connectedAt: account.connection.connectedAt,
+        lastSyncedAt: account.connection.lastSyncedAt
+      };
+    }));
+
+    const totalBalance = enriched.reduce((sum, account) => sum + (account.currentBalance ?? 0), 0);
+    return {
+      currency: enriched[0]?.currency ?? 'EUR',
+      totalBalance,
+      accounts: enriched
+    };
   }
 
   async allocation() {
@@ -235,6 +282,23 @@ export class BankService {
         rawDataJson: transaction
       }
     });
+  }
+
+  private pickBalance(balances: any[], preferredTypes: string[]): number | null {
+    for (const type of preferredTypes) {
+      const match = balances.find(balance => balance.balanceType === type);
+      const amount = Number(match?.balanceAmount?.amount);
+      if (Number.isFinite(amount)) return amount;
+    }
+    const fallback = Number(balances[0]?.balanceAmount?.amount);
+    return Number.isFinite(fallback) ? fallback : null;
+  }
+
+  private maskIban(iban?: string | null) {
+    if (!iban) return null;
+    const compact = iban.replace(/\s/g, '');
+    if (compact.length <= 8) return compact;
+    return `${compact.slice(0, 4)} **** ${compact.slice(-4)}`;
   }
 
   private categorize(description: string, amount: number): BankTransactionCategory {

@@ -39,6 +39,11 @@ export class BankController {
     return this.bank.transactions(from, to);
   }
 
+  @Get('accounts')
+  accounts() {
+    return this.bank.accounts();
+  }
+
   @Get('daily')
   daily(@Query('from') from?: string, @Query('to') to?: string) {
     return this.bank.daily(from, to);

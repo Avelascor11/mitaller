@@ -83,6 +83,26 @@ export class GoCardlessBankAdapter {
     return this.request<any>(`/accounts/${accountId}/transactions/${query}`);
   }
 
+  async accountBalances(accountId: string) {
+    if (!this.configured || accountId === 'mock-bank-account') {
+      return {
+        balances: [
+          {
+            balanceAmount: { amount: '1240.56', currency: 'EUR' },
+            balanceType: 'interimBooked',
+            referenceDate: new Date().toISOString().slice(0, 10)
+          },
+          {
+            balanceAmount: { amount: '1198.10', currency: 'EUR' },
+            balanceType: 'interimAvailable',
+            referenceDate: new Date().toISOString().slice(0, 10)
+          }
+        ]
+      };
+    }
+    return this.request<any>(`/accounts/${accountId}/balances/`);
+  }
+
   private async request<T>(path: string, init: RequestInit = {}): Promise<T> {
     const access = await this.accessToken();
     const base = this.config.get<string>('GOCARDLESS_BANK_API_BASE_URL') ?? 'https://bankaccountdata.gocardless.com/api/v2';

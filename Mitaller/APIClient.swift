@@ -35,6 +35,8 @@ struct APISnapshot {
 struct APIClient {
     var baseURL: URL
     var token: String? = nil
+    /// Shared secret for the internal mobile routes. Must match MOBILE_API_KEY on the API.
+    var mobileApiKey: String? = Bundle.main.object(forInfoDictionaryKey: "MOBILE_API_KEY") as? String
 
     static let shared: URLSession = {
         let config = URLSessionConfiguration.default
@@ -261,6 +263,7 @@ struct APIClient {
         return try await perform(request)
     }
 
+    func bankAccounts() async throws -> BankAccountsSummary { try await get("/bank/accounts") }
     func bankAllocation() async throws -> AllocationPlan { try await get("/bank/allocation") }
     func cashflow() async throws -> CashflowSummary { try await get("/economics/cashflow") }
     func markPayout(_ id: String) async throws {
@@ -411,6 +414,9 @@ struct APIClient {
         request.timeoutInterval = timeout
         if let token {
             request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        }
+        if let mobileApiKey, !mobileApiKey.isEmpty {
+            request.setValue(mobileApiKey, forHTTPHeaderField: "X-API-Key")
         }
         return request
     }
@@ -1199,6 +1205,8 @@ struct OrderItemBreakdown: Decodable, Identifiable {
 struct BankStatus: Decodable {
     let provider: String
     let configured: Bool
+    let connections: Int?
+    let accounts: Int?
 }
 
 struct BankInstitution: Decodable, Identifiable {
@@ -1222,6 +1230,27 @@ struct BankConnection: Decodable, Identifiable {
 struct BankSyncResponse: Decodable {
     let imported: Int
     let accounts: Int
+}
+
+struct BankAccountsSummary: Decodable {
+    let currency: String
+    let totalBalance: Double
+    let accounts: [BankAccountSummary]
+}
+
+struct BankAccountSummary: Decodable, Identifiable {
+    let id: String
+    let providerAccountId: String
+    let institutionName: String?
+    let iban: String?
+    let name: String
+    let currency: String
+    let ownerName: String?
+    let product: String?
+    let currentBalance: Double?
+    let availableBalance: Double?
+    let connectedAt: Date?
+    let lastSyncedAt: Date?
 }
 
 struct BankDailySummary: Decodable {

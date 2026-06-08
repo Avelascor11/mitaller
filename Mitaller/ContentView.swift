@@ -9178,6 +9178,7 @@ struct BankView: View {
     @State private var status: BankStatus?
     @State private var institutions: [BankInstitution] = []
     @State private var selectedInstitutionID: String?
+    @State private var accounts: BankAccountsSummary?
     @State private var daily: BankDailySummary?
     @State private var allocation: AllocationPlan?
     @State private var selectedDay = Calendar.current.startOfDay(for: Date())
@@ -9210,6 +9211,10 @@ struct BankView: View {
                         onConnect: { Task { await connectBank() } },
                         onRefreshBanks: { Task { await loadInstitutions() } }
                     )
+
+                    if let accounts {
+                        BankBalanceCard(summary: accounts)
+                    }
 
                     if let allocation, !allocation.payouts.isEmpty {
                         BankAllocationSection(plan: allocation)
@@ -9272,6 +9277,7 @@ struct BankView: View {
         await loadStatus()
         await loadInstitutions()
         await withTaskGroup(of: Void.self) { group in
+            group.addTask { await self.loadAccounts() }
             group.addTask { await self.loadDaily() }
             group.addTask { await self.loadAllocation() }
         }
@@ -9323,9 +9329,19 @@ struct BankView: View {
         do {
             let response = try await client.bankSync(from: selectedDay, to: selectedDay)
             info = "Sincronizados \(response.imported) movimientos de \(response.accounts) cuenta(s)."
+            await loadAccounts()
             await loadDaily()
         } catch {
             self.error = error.localizedDescription
+        }
+    }
+
+    private func loadAccounts() async {
+        guard let client = store.apiClient else { return }
+        do {
+            accounts = try await client.bankAccounts()
+        } catch {
+            // El saldo es contexto extra; no bloquea los movimientos diarios.
         }
     }
 
@@ -10246,6 +10262,70 @@ struct BankConnectionCard: View {
                 .foregroundStyle(AppTheme.muted)
         }
         .glassPanel(padding: 16, accent: status?.configured == true ? AppTheme.green : AppTheme.amber)
+    }
+}
+
+struct BankBalanceCard: View {
+    let summary: BankAccountsSummary
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .top) {
+                VStack(alignment: .leading, spacing: 5) {
+                    Label("Saldo banco", systemImage: "building.columns.fill")
+                        .font(.headline.weight(.heavy))
+                        .foregroundStyle(AppTheme.ink)
+                    Text("\(summary.accounts.count) cuenta(s) conectada(s)")
+                        .font(.caption.weight(.bold))
+                        .foregroundStyle(AppTheme.muted)
+                }
+                Spacer()
+                Text(formatMoney(summary.totalBalance, currency: summary.currency))
+                    .font(.system(size: 30, weight: .black, design: .rounded))
+                    .foregroundStyle(summary.totalBalance >= 0 ? AppTheme.green : AppTheme.red)
+            }
+
+            ForEach(summary.accounts) { account in
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack(alignment: .top, spacing: 10) {
+                        Image(systemName: "creditcard.fill")
+                            .foregroundStyle(AppTheme.blue)
+                            .frame(width: 24)
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text(account.institutionName ?? account.name)
+                                .font(.subheadline.weight(.heavy))
+                                .foregroundStyle(AppTheme.ink)
+                            if let iban = account.iban {
+                                Text(iban)
+                                    .font(.caption.weight(.bold))
+                                    .foregroundStyle(AppTheme.muted)
+                            }
+                        }
+                        Spacer()
+                        VStack(alignment: .trailing, spacing: 3) {
+                            Text(formatMoney(account.currentBalance ?? 0, currency: account.currency))
+                                .font(.headline.weight(.black))
+                                .foregroundStyle(AppTheme.ink)
+                            if let available = account.availableBalance {
+                                Text("Disponible \(formatMoney(available, currency: account.currency))")
+                                    .font(.caption2.weight(.bold))
+                                    .foregroundStyle(AppTheme.muted)
+                            }
+                        }
+                    }
+                    if let lastSyncedAt = account.lastSyncedAt {
+                        Text("Ultima sincronizacion \(formatPayoutLineDate(lastSyncedAt))")
+                            .font(.caption2.weight(.bold))
+                            .foregroundStyle(AppTheme.muted)
+                    }
+                }
+                .padding(12)
+                .background(AppTheme.surfaceSoft)
+                .overlay(RoundedRectangle(cornerRadius: 14).stroke(AppTheme.line))
+                .clipShape(RoundedRectangle(cornerRadius: 14))
+            }
+        }
+        .glassPanel(padding: 16, accent: AppTheme.green)
     }
 }
 

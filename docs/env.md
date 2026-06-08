@@ -69,6 +69,8 @@ Para imprimir etiquetas automaticamente en el taller, instala la Honeywell PC42d
 
 ## Banco / PSD2
 
+Mitaller usa GoCardless Bank Account Data para conectar N26 por Open Banking/PSD2. No guardes usuario ni contrasena del banco en la app.
+
 - `GOCARDLESS_BANK_API_BASE_URL`: URL de GoCardless Bank Account Data. Por defecto `https://bankaccountdata.gocardless.com/api/v2`.
 - `GOCARDLESS_SECRET_ID`: secret id de GoCardless Bank Account Data. No subir a GitHub.
 - `GOCARDLESS_SECRET_KEY`: secret key de GoCardless Bank Account Data. No subir a GitHub.
