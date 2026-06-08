@@ -10352,13 +10352,16 @@ struct BankBalanceCard: View {
                             .foregroundStyle(AppTheme.blue)
                             .frame(width: 24)
                         VStack(alignment: .leading, spacing: 3) {
-                            Text(account.institutionName ?? account.name)
+                            Text(account.name)
                                 .font(.subheadline.weight(.heavy))
                                 .foregroundStyle(AppTheme.ink)
-                            if let iban = account.iban {
-                                Text(iban)
-                                    .font(.caption.weight(.bold))
-                                    .foregroundStyle(AppTheme.muted)
+                            HStack(spacing: 6) {
+                                if let inst = account.institutionName {
+                                    Text(inst).font(.caption2.weight(.bold)).foregroundStyle(AppTheme.muted)
+                                }
+                                if let iban = account.iban {
+                                    Text(iban).font(.caption2.weight(.semibold)).foregroundStyle(AppTheme.muted)
+                                }
                             }
                         }
                         Spacer()
