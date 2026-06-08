@@ -112,9 +112,13 @@ export class CarrierReturnsService {
     if (this.shopify.hasCredentials()) {
       const draft = await this.shopify.createDraftOrder({
         customerEmail: ret.customerEmail,
-        note: `Reenvío pedido ${ret.orderNumber} (devuelto por Correos)`,
-        tags: ['reenvio', 'correos-devuelto'],
-        lineItems: [{ title: `Reenvío pedido ${ret.orderNumber}`, price: ret.feeAmount, quantity: 1 }]
+        note: `🔁 ENVÍO NUEVO del pedido ${ret.orderNumber} — devuelto por Correos. Reenviar a la dirección de ESTE pedido.`,
+        tags: ['reenvio', 'correos-devuelto', `reenvio-${ret.orderNumber.replace(/^#/, '')}`],
+        noteAttributes: [
+          { key: 'Reenvío del pedido', value: ret.orderNumber },
+          { key: 'Motivo', value: ret.reason }
+        ],
+        lineItems: [{ title: `Reenvío del pedido ${ret.orderNumber} (devuelto por Correos)`, price: ret.feeAmount, quantity: 1 }]
       });
       invoiceUrl = draft.invoiceUrl;
       draftOrderId = draft.id;
