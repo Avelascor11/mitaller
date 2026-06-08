@@ -111,6 +111,16 @@ export class KlaviyoService {
     });
   }
 
+  /** Carrier return: order returned to sender; customer must pay reship fee. */
+  async trackCarrierReturn(params: { email: string; customerName: string; orderNumber: string; fee: number; payUrl: string }) {
+    await this.track('Carrier Return', params.email, {
+      CustomerName: params.customerName,
+      OrderNumber: params.orderNumber,
+      Fee: params.fee.toFixed(2),
+      PayUrl: params.payUrl
+    });
+  }
+
   /** Autopilot alert: fired when the Meta autopilot hits an error or a money-losing campaign. */
   async trackAutopilotAlert(params: { email: string; summary: string; details: string }) {
     await this.track('Autopilot Alert', params.email, {

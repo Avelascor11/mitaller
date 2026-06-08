@@ -815,6 +815,46 @@ model UgcSubmission {
   @@index([storageProvider])
 }
 
+enum CarrierReturnReason {
+  ABSENT
+  NO_ATTEND
+  WRONG_ADDRESS
+  REFUSED
+  OTHER
+}
+
+enum CarrierReturnStatus {
+  PENDING
+  EMAILED
+  PAID
+  RESHIPPED
+  CANCELLED
+}
+
+model CarrierReturn {
+  id             String              @id @default(cuid())
+  orderId        String?
+  orderNumber    String
+  customerName   String?
+  customerEmail  String?
+  reason         CarrierReturnReason @default(OTHER)
+  status         CarrierReturnStatus @default(PENDING)
+  feeAmount      Float               @default(4.95)
+  draftOrderId   String?
+  invoiceUrl     String?
+  reshipOrderName String?
+  newAddress     String?
+  notes          String?
+  emailedAt      DateTime?
+  paidAt         DateTime?
+  reshippedAt    DateTime?
+  createdAt      DateTime            @default(now())
+  updatedAt      DateTime            @updatedAt
+
+  @@index([status])
+  @@index([orderNumber])
+}
+
 model AutopilotConfig {
   id        String   @id @default("singleton")
   mode      String   @default("dry") // off | dry | live

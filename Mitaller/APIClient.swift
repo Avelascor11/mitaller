@@ -179,6 +179,24 @@ struct APIClient {
         try await get("/crew/collaborations/\(Self.pathSegment(collabId))/performance")
     }
 
+    // MARK: - Carrier returns (envíos devueltos)
+    func carrierReturns(status: String? = nil) async throws -> [CarrierReturn] {
+        if let status { return try await get("/carrier-returns?status=\(Self.pathSegment(status))") }
+        return try await get("/carrier-returns")
+    }
+    func createCarrierReturn(orderNumber: String, reason: String, notes: String?) async throws -> CarrierReturn {
+        let request = try jsonRequest(path: "/carrier-returns", method: "POST", body: CreateCarrierReturnRequest(orderNumber: orderNumber, reason: reason, notes: notes))
+        return try await perform(request)
+    }
+    func updateCarrierReturn(_ id: String, body: UpdateCarrierReturnRequest) async throws -> CarrierReturn {
+        let request = try jsonRequest(path: "/carrier-returns/\(Self.pathSegment(id))", method: "PATCH", body: body)
+        return try await perform(request)
+    }
+    func requestCarrierReturnPayment(_ id: String) async throws -> CarrierReturn {
+        let request = try jsonRequest(path: "/carrier-returns/\(Self.pathSegment(id))/request-payment", method: "POST", body: EmptyBody())
+        return try await perform(request)
+    }
+
     func deleteInfluencer(_ id: String) async throws {
         var request = try self.request(path: "/influencers/\(Self.pathSegment(id))", method: "DELETE")
         request.setValue("application/json", forHTTPHeaderField: "Accept")
@@ -1052,6 +1070,32 @@ struct InfluencerUpdateRequest: Encodable {
         self.lastMessage = lastMessage
         self.lastMessageAt = lastMessageAt
     }
+}
+
+struct CarrierReturn: Decodable, Identifiable {
+    let id: String
+    let orderNumber: String
+    let customerName: String?
+    let customerEmail: String?
+    let reason: String
+    let status: String
+    let feeAmount: Double
+    let invoiceUrl: String?
+    let newAddress: String?
+    let notes: String?
+    let createdAt: Date?
+}
+struct CreateCarrierReturnRequest: Encodable {
+    let orderNumber: String
+    let reason: String
+    let notes: String?
+}
+struct UpdateCarrierReturnRequest: Encodable {
+    var status: String?
+    var customerEmail: String?
+    var reason: String?
+    var notes: String?
+    var newAddress: String?
 }
 
 private extension JSONDecoder {

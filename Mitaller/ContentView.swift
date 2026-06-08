@@ -1343,6 +1343,8 @@ struct MainTabView: View {
                 .tabItem { Label("Caja", systemImage: "banknote.fill") }
             DevolucionesView()
                 .tabItem { Label("Devoluciones", systemImage: "arrow.uturn.left.circle.fill") }
+            CarrierReturnsView()
+                .tabItem { Label("Devueltos", systemImage: "arrow.uturn.backward.square.fill") }
             BankView()
                 .tabItem { Label("Banco", systemImage: "building.columns.fill") }
             AdminView()
@@ -7185,6 +7187,195 @@ struct CreateInfluencerSheet: View {
 }
 
 // MARK: - Meta Ads
+
+enum CarrierReason: String, CaseIterable, Identifiable {
+    case ABSENT, NO_ATTEND, WRONG_ADDRESS, REFUSED, OTHER
+    var id: String { rawValue }
+    var label: String {
+        switch self {
+        case .ABSENT: "Ausente"; case .NO_ATTEND: "No atendió al repartidor"
+        case .WRONG_ADDRESS: "Dirección incorrecta"; case .REFUSED: "Rechazado"; case .OTHER: "Otro"
+        }
+    }
+    static func label(_ raw: String) -> String { CarrierReason(rawValue: raw)?.label ?? raw }
+}
+
+struct CarrierReturnsView: View {
+    @Environment(WorkshopStore.self) private var store
+    @State private var items: [CarrierReturn] = []
+    @State private var loading = false
+    @State private var error: String?
+    @State private var showCreate = false
+
+    private var pending: [CarrierReturn] { items.filter { $0.status != "RESHIPPED" && $0.status != "CANCELLED" } }
+    private var done: [CarrierReturn] { items.filter { $0.status == "RESHIPPED" || $0.status == "CANCELLED" } }
+    private var paidCount: Int { items.filter { $0.status == "PAID" }.count }
+    private var reshippedCount: Int { items.filter { $0.status == "RESHIPPED" }.count }
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 16) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Devueltos").font(.system(size: 30, weight: .heavy, design: .rounded)).foregroundStyle(AppTheme.ink)
+                        Text("Pedidos que Correos nos devolvió. Cobra el reenvío (\(eur(4.95))) con dirección corregida.")
+                            .font(.subheadline.weight(.medium)).foregroundStyle(AppTheme.muted)
+                    }
+                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 104), spacing: 10)], spacing: 10) {
+                        MetricTile(title: "Pendientes", value: pending.count, color: AppTheme.amber, icon: "clock.fill")
+                        MetricTile(title: "Pagados", value: paidCount, color: AppTheme.green, icon: "creditcard.fill")
+                        MetricTile(title: "Reenviados", value: reshippedCount, color: AppTheme.blue, icon: "shippingbox.fill")
+                    }
+
+                    if loading && items.isEmpty {
+                        ProgressView().frame(maxWidth: .infinity)
+                    } else if items.isEmpty {
+                        ContentUnavailableView("Nada devuelto", systemImage: "checkmark.circle.fill", description: Text("Cuando Correos devuelva un pedido, añádelo con ＋."))
+                            .padding(.top, 40)
+                    } else {
+                        ForEach(pending) { CarrierReturnRow(item: $0, onChange: { Task { await reload() } }).environment(store) }
+                        if !done.isEmpty {
+                            SectionHeader(title: "Cerrados", subtitle: "\(done.count)")
+                            ForEach(done) { CarrierReturnRow(item: $0, onChange: { Task { await reload() } }).environment(store) }
+                        }
+                    }
+                    if let error { Text(error).font(.footnote).foregroundStyle(AppTheme.red) }
+                }
+                .padding()
+            }
+            .screenBackground()
+            .navigationTitle("Devueltos")
+            .toolbar {
+                ToolbarItem(placement: .primaryAction) { Button { showCreate = true } label: { Image(systemName: "plus.circle.fill") } }
+                ToolbarItem(placement: .topBarLeading) { Button { Task { await reload() } } label: { Image(systemName: "arrow.clockwise") }.disabled(loading) }
+            }
+            .sheet(isPresented: $showCreate) { CarrierReturnCreateSheet(onCreated: { Task { await reload() } }).environment(store) }
+            .task { await reload() }
+            .refreshable { await reload() }
+        }
+    }
+
+    private func eur(_ v: Double) -> String { String(format: "%.2f €", v) }
+    private func reload() async {
+        guard let client = store.apiClient else { error = "API no configurada"; return }
+        loading = true; error = nil; defer { loading = false }
+        do { items = try await client.carrierReturns() } catch { self.error = error.localizedDescription }
+    }
+}
+
+struct CarrierReturnRow: View {
+    @Environment(WorkshopStore.self) private var store
+    @Environment(\.openURL) private var openURL
+    let item: CarrierReturn
+    let onChange: () -> Void
+    @State private var busy = false
+    @State private var emailEdit = ""
+    @State private var showEmailPrompt = false
+
+    private func statusColor(_ s: String) -> Color {
+        switch s { case "PENDING": AppTheme.amber; case "EMAILED": AppTheme.blue; case "PAID": AppTheme.green; case "RESHIPPED": AppTheme.green; default: AppTheme.muted }
+    }
+    private func statusLabel(_ s: String) -> String {
+        switch s { case "PENDING": "Pendiente"; case "EMAILED": "Email enviado"; case "PAID": "Pagado"; case "RESHIPPED": "Reenviado"; case "CANCELLED": "Cancelado"; default: s }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Text(item.orderNumber).font(.headline.weight(.heavy)).foregroundStyle(AppTheme.ink)
+                Spacer()
+                Text(statusLabel(item.status)).font(.caption2.weight(.black))
+                    .padding(.horizontal, 8).padding(.vertical, 4)
+                    .background(statusColor(item.status).opacity(0.18), in: Capsule()).foregroundStyle(statusColor(item.status))
+            }
+            Text(CarrierReason.label(item.reason)).font(.caption.weight(.bold)).foregroundStyle(AppTheme.muted)
+            if let n = item.customerName { Text(n).font(.subheadline).foregroundStyle(AppTheme.ink) }
+            if let e = item.customerEmail { Text(e).font(.caption2).foregroundStyle(AppTheme.muted) }
+            else { Text("Sin email — añádelo para cobrar").font(.caption2).foregroundStyle(AppTheme.red) }
+
+            if let url = item.invoiceUrl, let u = URL(string: url) {
+                Button { openURL(u) } label: { Label("Ver link de pago", systemImage: "link").font(.caption.weight(.bold)) }
+            }
+
+            HStack(spacing: 8) {
+                if item.status == "PENDING" || item.status == "EMAILED" {
+                    Button { Task { await requestPayment() } } label: {
+                        if busy { ProgressView() } else { Label(item.status == "EMAILED" ? "Reenviar email" : "Cobrar 4,95€", systemImage: "envelope.fill").font(.caption.weight(.bold)).frame(maxWidth: .infinity) }
+                    }.buttonStyle(.borderedProminent).tint(AppTheme.blue).disabled(busy)
+                }
+                if item.status != "RESHIPPED" && item.status != "CANCELLED" {
+                    Menu {
+                        Button("Marcar pagado") { Task { await setStatus("PAID") } }
+                        Button("Marcar reenviado") { Task { await setStatus("RESHIPPED") } }
+                        Button("Añadir/editar email") { emailEdit = item.customerEmail ?? ""; showEmailPrompt = true }
+                        Button("Cancelar", role: .destructive) { Task { await setStatus("CANCELLED") } }
+                    } label: { Image(systemName: "ellipsis.circle").font(.title3) }
+                }
+            }
+        }
+        .padding().glassPanel(padding: 14, accent: statusColor(item.status))
+        .alert("Email del cliente", isPresented: $showEmailPrompt) {
+            TextField("email@cliente.com", text: $emailEdit)
+            Button("Guardar") { Task { await saveEmail() } }
+            Button("Cancelar", role: .cancel) {}
+        }
+    }
+
+    private func requestPayment() async {
+        guard let client = store.apiClient else { return }
+        busy = true; defer { busy = false }
+        _ = try? await client.requestCarrierReturnPayment(item.id)
+        onChange()
+    }
+    private func setStatus(_ s: String) async {
+        guard let client = store.apiClient else { return }
+        _ = try? await client.updateCarrierReturn(item.id, body: UpdateCarrierReturnRequest(status: s))
+        onChange()
+    }
+    private func saveEmail() async {
+        guard let client = store.apiClient else { return }
+        _ = try? await client.updateCarrierReturn(item.id, body: UpdateCarrierReturnRequest(customerEmail: emailEdit))
+        onChange()
+    }
+}
+
+struct CarrierReturnCreateSheet: View {
+    @Environment(WorkshopStore.self) private var store
+    @Environment(\.dismiss) private var dismiss
+    let onCreated: () -> Void
+    @State private var orderNumber = ""
+    @State private var reason: CarrierReason = .ABSENT
+    @State private var notes = ""
+    @State private var saving = false
+    @State private var error: String?
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("Pedido devuelto") {
+                    TextField("Nº pedido (ej. #9571)", text: $orderNumber)
+                    Picker("Motivo", selection: $reason) { ForEach(CarrierReason.allCases) { Text($0.label).tag($0) } }
+                    TextField("Notas (opcional)", text: $notes, axis: .vertical).lineLimit(2...4)
+                }
+                if let error { Section { Text(error).font(.footnote).foregroundStyle(AppTheme.red) } }
+                Section {
+                    Button { Task { await save() } } label: {
+                        if saving { ProgressView().frame(maxWidth: .infinity) } else { Label("Añadir", systemImage: "plus").frame(maxWidth: .infinity) }
+                    }.disabled(saving || orderNumber.trimmingCharacters(in: .whitespaces).isEmpty)
+                }
+            }
+            .navigationTitle("Pedido devuelto")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Cancelar") { dismiss() } } }
+        }
+    }
+    private func save() async {
+        guard let client = store.apiClient else { return }
+        saving = true; error = nil; defer { saving = false }
+        do { _ = try await client.createCarrierReturn(orderNumber: orderNumber, reason: reason.rawValue, notes: notes.isEmpty ? nil : notes); onCreated(); dismiss() }
+        catch { self.error = error.localizedDescription }
+    }
+}
 
 struct MetaAdsView: View {
     @Environment(WorkshopStore.self) private var store
