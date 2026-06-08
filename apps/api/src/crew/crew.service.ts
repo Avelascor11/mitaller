@@ -1,4 +1,6 @@
 import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
+import { KlaviyoService } from '../klaviyo/klaviyo.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { ShopifyAdapter } from '../shopify/shopify.adapter';
 import { GoAffProAdapter } from './goaffpro.adapter';
@@ -40,7 +42,9 @@ export class CrewService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly shopify: ShopifyAdapter,
-    private readonly goaffpro: GoAffProAdapter
+    private readonly goaffpro: GoAffProAdapter,
+    private readonly klaviyo: KlaviyoService,
+    private readonly config: ConfigService
   ) {}
 
   /** Approve a crew collaboration: create GoAffPro affiliate + referral code, store on the collab. */
@@ -162,6 +166,21 @@ export class CrewService {
       orderName = await this.createGiftOrder({ fullName, email: body.email.trim(), phone, address: shippingAddress, igHandle, products }, collab.id);
     } catch (e) {
       this.logger.warn(`Crew gift order failed for @${igHandle}: ${(e as Error).message}`);
+    }
+
+    // Welcome email (Klaviyo flow "Crew Welcome") with the content brief + where to upload.
+    try {
+      await this.klaviyo.trackCrewWelcome({
+        email: body.email.trim(),
+        name: fullName,
+        igHandle,
+        tier: tier.tier,
+        products: productSummary,
+        orderName,
+        uploadUrl: this.config.get<string>('CREW_UPLOAD_URL') ?? 'https://drive.google.com/'
+      });
+    } catch (e) {
+      this.logger.warn(`Crew welcome email failed for @${igHandle}: ${(e as Error).message}`);
     }
 
     return { ok: true, status: 'APPLIED', tier, influencerId: influencer.id, collaborationId: collab.id, orderName, message: '¡Solicitud recibida! Preparamos tu pack y te avisamos cuando salga el envío 🚚' };

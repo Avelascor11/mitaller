@@ -110,4 +110,24 @@ export class KlaviyoService {
       ApprovedAt: params.approvedAt
     });
   }
+
+  /** Crew welcome: fired when an influencer signs up and the gift order is created. */
+  async trackCrewWelcome(params: {
+    email: string;
+    name: string;
+    igHandle: string;
+    tier: string;
+    products: string;
+    orderName?: string | null;
+    uploadUrl: string;
+  }) {
+    await this.track('Crew Welcome', params.email, {
+      Name: params.name,
+      InstagramHandle: params.igHandle,
+      Tier: params.tier,
+      Products: params.products,
+      OrderNumber: params.orderName ?? '',
+      UploadUrl: params.uploadUrl
+    });
+  }
 }
