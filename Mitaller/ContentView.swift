@@ -905,6 +905,19 @@ final class WorkshopStore {
         }
     }
 
+    func deleteInfluencer(_ influencer: InfluencerProfile) async {
+        guard let client = apiClient else { return }
+        isInfluencerActionRunning = true
+        syncError = nil
+        defer { isInfluencerActionRunning = false }
+        do {
+            try await client.deleteInfluencer(influencer.id)
+            await loadInfluencers()
+        } catch {
+            syncError = "No se pudo eliminar influ: \(error.localizedDescription)"
+        }
+    }
+
     func refreshSupplierPurchaseRecommendation() async {
         guard let client = apiClient else { return }
         do {
@@ -6559,6 +6572,11 @@ struct InfluencersView: View {
                                 InfluencerCard(influencer: influencer)
                             }
                             .buttonStyle(.plain)
+                            .contextMenu {
+                                Button(role: .destructive) {
+                                    Task { await store.deleteInfluencer(influencer) }
+                                } label: { Label("Eliminar influ", systemImage: "trash") }
+                            }
                         }
                     }
                 }
@@ -6780,8 +6798,10 @@ struct InfluencerStageBadge: View {
 
 struct InfluencerDetailView: View {
     @Environment(WorkshopStore.self) private var store
+    @Environment(\.dismiss) private var dismiss
     let influencer: InfluencerProfile
     @State private var selectedStage: InfluencerStageFilter
+    @State private var confirmingDelete = false
 
     init(influencer: InfluencerProfile) {
         self.influencer = influencer
@@ -6873,6 +6893,21 @@ struct InfluencerDetailView: View {
         .screenBackground()
         .navigationTitle("Influ")
         .refreshable { await store.loadInfluencers() }
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Button(role: .destructive) { confirmingDelete = true } label: {
+                    Image(systemName: "trash")
+                }
+            }
+        }
+        .confirmationDialog("¿Eliminar a @\(influencer.igHandle)?", isPresented: $confirmingDelete, titleVisibility: .visible) {
+            Button("Eliminar influ", role: .destructive) {
+                Task { await store.deleteInfluencer(influencer); dismiss() }
+            }
+            Button("Cancelar", role: .cancel) {}
+        } message: {
+            Text("Se borra el influencer con sus colaboraciones y vídeos. No afecta a pedidos de Shopify ya creados.")
+        }
     }
 }
 

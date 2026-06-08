@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Patch, Post, Query, Res } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Patch, Post, Query, Res } from '@nestjs/common';
 import type { Response } from 'express';
 import { InfluencersService } from './influencers.service';
 
@@ -29,6 +29,11 @@ export class InfluencersController {
   @Patch(':id')
   update(@Param('id') id: string, @Body() body: UpdateInfluencerBody) {
     return this.influencers.updateInfluencer(id, body);
+  }
+
+  @Delete(':id')
+  remove(@Param('id') id: string) {
+    return this.influencers.deleteInfluencer(id);
   }
 
   @Post(':id/collaborations')

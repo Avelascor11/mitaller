@@ -86,6 +86,12 @@ export class InfluencersService {
     });
   }
 
+  async deleteInfluencer(id: string) {
+    await this.ensureInfluencer(id);
+    await this.prisma.influencer.delete({ where: { id } });
+    return { ok: true, id };
+  }
+
   async createCollaboration(influencerId: string, input: CreateCollaborationBody) {
     await this.ensureInfluencer(influencerId);
     if (!input.title?.trim()) throw new BadRequestException('title requerido');

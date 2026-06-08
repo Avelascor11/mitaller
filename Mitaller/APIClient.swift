@@ -179,6 +179,12 @@ struct APIClient {
         try await get("/crew/collaborations/\(Self.pathSegment(collabId))/performance")
     }
 
+    func deleteInfluencer(_ id: String) async throws {
+        var request = try self.request(path: "/influencers/\(Self.pathSegment(id))", method: "DELETE")
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        let _: EmptyResponse = try await perform(request)
+    }
+
     func mappingWorkbench() async throws -> MappingWorkbench {
         try await get("/purchase-needs/mapping-workbench")
     }
