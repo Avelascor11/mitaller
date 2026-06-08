@@ -18,9 +18,18 @@ describe('PriorityService', () => {
     expect(deadline.toISOString()).toBe('2026-05-07T08:00:00.000Z');
   });
 
-  it('marca estandar atrasado como HIGH, no CRITICAL', () => {
+  it('marca estandar pasado de plazo como CRITICAL', () => {
     const result = service.calculate({
       orderedAt: new Date('2026-05-03T08:00:00Z'),
+      shippingMethod: 'Correos Estandar',
+      financialStatus: 'paid'
+    }, new Date('2026-05-06T09:00:00Z'));
+    expect(result.priorityLevel).toBe('CRITICAL');
+  });
+
+  it('marca estandar con mas de 24 horas pero dentro de plazo como HIGH', () => {
+    const result = service.calculate({
+      orderedAt: new Date('2026-05-05T08:00:00Z'),
       shippingMethod: 'Correos Estandar',
       financialStatus: 'paid'
     }, new Date('2026-05-06T09:00:00Z'));

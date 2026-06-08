@@ -38,6 +38,7 @@ export class OrdersService {
   }
 
   async findAll() {
+    await this.refreshPendingPriorities();
     const orders = await this.prisma.order.findMany({
       orderBy: [{ priorityLevel: 'asc' }, { internalDeadlineAt: 'asc' }],
       include: { items: this.activeOrderItemsInclude(), shipments: true }
@@ -46,6 +47,7 @@ export class OrdersService {
   }
 
   async findPendingPreparation() {
+    await this.refreshPendingPriorities();
     const orders = await this.prisma.order.findMany({
       where: {
         operationalStatus: {
@@ -71,6 +73,44 @@ export class OrdersService {
       where: { status: { not: 'CANCELLED' as const } },
       orderBy: { createdAt: 'asc' as const }
     };
+  }
+
+  private async refreshPendingPriorities() {
+    const orders = await this.prisma.order.findMany({
+      where: {
+        operationalStatus: {
+          notIn: ['READY_FOR_LABEL', 'LABEL_CREATED', 'SHIPPED', 'CANCELLED']
+        }
+      },
+      include: { items: { select: { sku: true, status: true } } }
+    });
+
+    await Promise.all(orders.map((order) => {
+      const calculated = this.priority.calculate({
+        orderedAt: order.orderedAt,
+        shippingMethod: order.shippingMethod,
+        financialStatus: order.financialStatus,
+        operationalStatus: order.operationalStatus,
+        hasMissingStock: order.operationalStatus === 'WAITING_STOCK' || order.items.some((item) => item.status !== 'CANCELLED' && item.sku.includes('NO-STOCK')),
+        hasIncident: order.operationalStatus === 'BLOCKED',
+        isProduced: ['PRODUCED', 'WAITING_PICKING', 'PICKED'].includes(order.operationalStatus)
+      });
+
+      if (
+        order.priorityLevel === calculated.priorityLevel &&
+        order.internalDeadlineAt?.getTime() === calculated.internalDeadlineAt.getTime()
+      ) {
+        return Promise.resolve(order);
+      }
+
+      return this.prisma.order.update({
+        where: { id: order.id },
+        data: {
+          priorityLevel: calculated.priorityLevel,
+          internalDeadlineAt: calculated.internalDeadlineAt
+        }
+      });
+    }));
   }
 
   private stripBlobs<T extends { packagePhoto?: unknown; shipments?: Array<{ packagePhoto?: unknown }> }>(order: T): T {

@@ -38,7 +38,11 @@ export class PriorityService {
     }
 
     const ageHours = (now.getTime() - input.orderedAt.getTime()) / 36e5;
-    if ((internalDeadlineAt < now || ageHours > 24) && !input.isProduced) {
+    if (internalDeadlineAt < now && !input.isProduced) {
+      return { internalDeadlineAt, priorityLevel: PriorityLevel.CRITICAL, operationalStatus: OperationalStatus.WAITING_PRODUCTION };
+    }
+
+    if (ageHours > 24 && !input.isProduced) {
       return { internalDeadlineAt, priorityLevel: PriorityLevel.HIGH, operationalStatus: OperationalStatus.WAITING_PRODUCTION };
     }
 
