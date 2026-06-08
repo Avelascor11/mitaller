@@ -761,6 +761,7 @@ model Collaboration {
   productSent    String?
   deliverables   String?
   discountCode   String?
+  requestedCode  String?
   affiliateId    String?
   referralUrl    String?
   tier           String?

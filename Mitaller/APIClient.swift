@@ -170,6 +170,15 @@ struct APIClient {
         let _: StockDTO = try await perform(request)
     }
 
+    func approveCrewCollaboration(_ collabId: String) async throws -> CrewApproveResult {
+        let request = try jsonRequest(path: "/crew/collaborations/\(Self.pathSegment(collabId))/approve", method: "POST", body: EmptyBody())
+        return try await perform(request)
+    }
+
+    func crewPerformance(_ collabId: String) async throws -> CrewPerformance {
+        try await get("/crew/collaborations/\(Self.pathSegment(collabId))/performance")
+    }
+
     func mappingWorkbench() async throws -> MappingWorkbench {
         try await get("/purchase-needs/mapping-workbench")
     }
@@ -862,6 +871,11 @@ struct InfluencerCollaboration: Decodable, Identifiable, Hashable {
     let productSent: String?
     let deliverables: String?
     let discountCode: String?
+    let requestedCode: String?
+    let referralUrl: String?
+    let affiliateId: String?
+    let tier: String?
+    let shopifyOrderName: String?
     let metaCampaignId: String?
     let deadline: Date?
     let openedAt: Date?
@@ -869,6 +883,44 @@ struct InfluencerCollaboration: Decodable, Identifiable, Hashable {
     let notes: String?
     let createdAt: Date?
     let updatedAt: Date?
+}
+
+struct CrewApproveResult: Decodable {
+    let ok: Bool
+    let code: String?
+    let referralUrl: String?
+    let affiliateId: Int?
+}
+
+struct CrewPerfReferral: Decodable {
+    let configured: Bool
+    let code: String?
+    let ordersCount: Int
+    let salesTotal: Double
+    let commission: Double
+}
+struct CrewPerfMetaCampaign: Decodable, Identifiable {
+    let name: String
+    let spend: Double
+    let roas: Double?
+    let purchases: Int
+    var id: String { name }
+}
+struct CrewPerfMeta: Decodable {
+    let spend: Double
+    let purchases: Int
+    let revenue: Double
+    let campaigns: [CrewPerfMetaCampaign]
+}
+struct CrewPerformance: Decodable {
+    let code: String?
+    let referralUrl: String?
+    let referral: CrewPerfReferral
+    let meta: CrewPerfMeta
+    let totalRevenue: Double
+    let roas: Double?
+    let status: String
+    let headline: String
 }
 
 struct InfluencerSubmission: Decodable, Identifiable, Hashable {

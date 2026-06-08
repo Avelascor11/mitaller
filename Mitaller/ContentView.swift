@@ -6849,23 +6849,7 @@ struct InfluencerDetailView: View {
                 if !influencer.collaborations.isEmpty {
                     SectionHeader(title: "Colaboraciones", subtitle: "\(influencer.collaborations.count) abiertas o históricas")
                     ForEach(influencer.collaborations) { collab in
-                        VStack(alignment: .leading, spacing: 6) {
-                            HStack {
-                                Text(collab.title)
-                                    .font(.headline.weight(.black))
-                                    .foregroundStyle(AppTheme.ink)
-                                Spacer()
-                                Text(collab.status.replacingOccurrences(of: "_", with: " "))
-                                    .font(.caption.weight(.black))
-                                    .foregroundStyle(AppTheme.blue)
-                            }
-                            if let deliverables = collab.deliverables {
-                                Text(deliverables)
-                                    .font(.footnote)
-                                    .foregroundStyle(AppTheme.muted)
-                            }
-                        }
-                        .glassPanel(padding: 12, accent: AppTheme.blue)
+                        CrewCollabCard(collab: collab)
                     }
                 }
 
@@ -6889,6 +6873,111 @@ struct InfluencerDetailView: View {
         .screenBackground()
         .navigationTitle("Influ")
         .refreshable { await store.loadInfluencers() }
+    }
+}
+
+struct CrewCollabCard: View {
+    @Environment(WorkshopStore.self) private var store
+    @Environment(\.openURL) private var openURL
+    let collab: InfluencerCollaboration
+    @State private var approving = false
+    @State private var code: String?
+    @State private var referralUrl: String?
+    @State private var perf: CrewPerformance?
+    @State private var loadingPerf = false
+    @State private var error: String?
+
+    private var hasCode: Bool { (code ?? collab.discountCode) != nil }
+
+    private func perfColor(_ s: String) -> Color {
+        switch s { case "WORKING": AppTheme.green; case "UNDERPERFORMING": AppTheme.red; case "WATCH": AppTheme.amber; default: AppTheme.muted }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Text(collab.title).font(.headline.weight(.black)).foregroundStyle(AppTheme.ink)
+                Spacer()
+                Text(collab.status.replacingOccurrences(of: "_", with: " "))
+                    .font(.caption.weight(.black)).foregroundStyle(AppTheme.blue)
+            }
+            if let tier = collab.tier { Text("Nivel \(tier)").font(.caption.weight(.bold)).foregroundStyle(AppTheme.muted) }
+            if let prod = collab.productSent { Text(prod).font(.footnote).foregroundStyle(AppTheme.muted) }
+            if let order = collab.shopifyOrderName { Label("Pedido \(order)", systemImage: "shippingbox.fill").font(.caption.weight(.semibold)).foregroundStyle(AppTheme.muted) }
+
+            // Referral code
+            if let c = code ?? collab.discountCode {
+                HStack(spacing: 8) {
+                    Image(systemName: "tag.fill").foregroundStyle(AppTheme.green)
+                    Text(c).font(.subheadline.weight(.black)).foregroundStyle(AppTheme.green)
+                    Spacer()
+                    if let url = referralUrl ?? collab.referralUrl, let u = URL(string: url) {
+                        Button { openURL(u) } label: { Image(systemName: "link") }
+                    }
+                }
+                .padding(10).background(AppTheme.green.opacity(0.12), in: RoundedRectangle(cornerRadius: 10))
+            } else {
+                if let req = collab.requestedCode {
+                    Text("Código solicitado: \(req)").font(.caption.weight(.semibold)).foregroundStyle(AppTheme.muted)
+                }
+                Button {
+                    Task { await approve() }
+                } label: {
+                    if approving { ProgressView().frame(maxWidth: .infinity) }
+                    else { Label("Aprobar y crear código", systemImage: "checkmark.seal.fill").frame(maxWidth: .infinity) }
+                }
+                .buttonStyle(.borderedProminent).tint(AppTheme.green).disabled(approving)
+            }
+
+            // Performance
+            if let p = perf {
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack(spacing: 8) {
+                        Circle().fill(perfColor(p.status)).frame(width: 9, height: 9)
+                        Text(p.headline).font(.caption.weight(.bold)).foregroundStyle(AppTheme.ink).fixedSize(horizontal: false, vertical: true)
+                    }
+                    HStack(spacing: 14) {
+                        metric("Ventas código", "\(p.referral.ordersCount)")
+                        metric("€ ventas", String(format: "%.0f", p.referral.salesTotal))
+                        if p.meta.spend > 0 { metric("Gasto ads", String(format: "%.0f", p.meta.spend)) }
+                        if let r = p.roas { metric("ROAS", String(format: "%.1fx", r)) }
+                    }
+                }
+                .padding(10).background(perfColor(p.status).opacity(0.1), in: RoundedRectangle(cornerRadius: 10))
+            } else if hasCode {
+                Button { Task { await loadPerf() } } label: {
+                    if loadingPerf { ProgressView() }
+                    else { Label("Ver rendimiento", systemImage: "chart.line.uptrend.xyaxis").font(.caption.weight(.bold)) }
+                }.buttonStyle(.bordered).tint(AppTheme.blue).disabled(loadingPerf)
+            }
+
+            if let error { Text(error).font(.caption2).foregroundStyle(AppTheme.red) }
+        }
+        .glassPanel(padding: 12, accent: AppTheme.blue)
+        .task { if hasCode && perf == nil { await loadPerf() } }
+    }
+
+    private func metric(_ label: String, _ value: String) -> some View {
+        VStack(alignment: .leading, spacing: 1) {
+            Text(label.uppercased()).font(.system(size: 9, weight: .heavy)).foregroundStyle(AppTheme.muted)
+            Text(value).font(.subheadline.weight(.heavy)).foregroundStyle(AppTheme.ink)
+        }
+    }
+
+    private func approve() async {
+        guard let client = store.apiClient else { error = "API no configurada"; return }
+        approving = true; error = nil; defer { approving = false }
+        do {
+            let r = try await client.approveCrewCollaboration(collab.id)
+            code = r.code; referralUrl = r.referralUrl
+            await loadPerf()
+        } catch { self.error = error.localizedDescription }
+    }
+
+    private func loadPerf() async {
+        guard let client = store.apiClient else { return }
+        loadingPerf = true; defer { loadingPerf = false }
+        perf = try? await client.crewPerformance(collab.id)
     }
 }
 

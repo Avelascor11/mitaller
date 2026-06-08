@@ -39,6 +39,7 @@ export default function CrewPage() {
   const [phone, setPhone] = useState('');
   const [address, setAddress] = useState('');
   const [contentUrl, setContentUrl] = useState('');
+  const [desiredCode, setDesiredCode] = useState('');
   const [picks, setPicks] = useState<Pick[]>([]);
   const [sizeSel, setSizeSel] = useState<Record<string, string>>({});
   const [rights, setRights] = useState(false);
@@ -96,7 +97,7 @@ export default function CrewPage() {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           igHandle: handle, email, fullName: name, followers: Number(followers),
-          phone, shippingAddress: address, contentUrl,
+          phone, shippingAddress: address, contentUrl, desiredCode,
           products: picks, acceptedRights: rights
         })
       });
@@ -152,6 +153,9 @@ export default function CrewPage() {
           <Input value={followers} onChange={setFollowers} placeholder="ej. 8500" type="number" />
           <Label>Enlace a tu mejor contenido (opcional)</Label>
           <Input value={contentUrl} onChange={setContentUrl} placeholder="Link a un reel/foto tuya — si puedes, mucho mejor 🔥" />
+          <Label>Tu código de descuento de referido</Label>
+          <Input value={desiredCode} onChange={(v) => setDesiredCode(v.toUpperCase().replace(/[^A-Z0-9]/g, ''))} placeholder="Ej. JULIA10 — el que darás a tus seguidores" />
+          <div style={{ color: C.muted, fontSize: 11, margin: '2px 2px 0' }}>3–20 letras/números. Será tu código y tu enlace de referido.</div>
         </section>
 
         {/* Tier */}

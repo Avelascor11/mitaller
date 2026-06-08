@@ -3,6 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import { KlaviyoService } from '../klaviyo/klaviyo.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { ShopifyAdapter } from '../shopify/shopify.adapter';
+import { MetaService } from '../meta/meta.service';
 import { GoAffProAdapter } from './goaffpro.adapter';
 import { GoogleDriveAdapter } from './google-drive.adapter';
 
@@ -32,9 +33,15 @@ export interface CrewApplyBody {
   phone?: string;
   shippingAddress?: string;
   contentUrl?: string;
+  desiredCode?: string;
   products: CrewApplyProduct[];
   acceptedRights?: boolean;
   notes?: string;
+}
+
+function normalizeCode(raw?: string): string | null {
+  const c = (raw ?? '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+  return c.length >= 3 && c.length <= 20 ? c : null;
 }
 
 @Injectable()
@@ -46,6 +53,7 @@ export class CrewService {
     private readonly goaffpro: GoAffProAdapter,
     private readonly klaviyo: KlaviyoService,
     private readonly drive: GoogleDriveAdapter,
+    private readonly meta: MetaService,
     private readonly config: ConfigService
   ) {}
 
@@ -62,7 +70,7 @@ export class CrewService {
     const ref = await this.goaffpro.ensureAffiliate({
       name: inf.fullName || inf.igHandle,
       email: inf.email,
-      refCode: inf.igHandle
+      refCode: collab.requestedCode || inf.igHandle
     });
 
     const updated = await this.prisma.collaboration.update({
@@ -82,13 +90,65 @@ export class CrewService {
     return { ok: true, code: ref.code, referralUrl: ref.referralUrl, affiliateId: ref.id, collaboration: updated };
   }
 
-  /** GoAffPro sales performance for a collaboration's affiliate. */
-  async affiliatePerformance(collaborationId: string) {
-    const collab = await this.prisma.collaboration.findUnique({ where: { id: collaborationId } });
+  /** Combined influencer performance: GoAffPro sales (their code) + Meta campaigns named with their @. */
+  async affiliatePerformance(collaborationId: string, from?: string, to?: string) {
+    const collab = await this.prisma.collaboration.findUnique({
+      where: { id: collaborationId },
+      include: { influencer: true }
+    });
     if (!collab) throw new NotFoundException('Colaboración no encontrada');
-    if (!collab.affiliateId) return { configured: false, code: collab.discountCode ?? null, ordersCount: 0, salesTotal: 0, commission: 0 };
-    const perf = await this.goaffpro.performance(Number(collab.affiliateId));
-    return { configured: true, ...perf };
+
+    // GoAffPro sales
+    let referral = { configured: false as boolean, code: collab.discountCode ?? null as string | null, ordersCount: 0, salesTotal: 0, commission: 0 };
+    if (collab.affiliateId) {
+      try { referral = { configured: true, ...(await this.goaffpro.performance(Number(collab.affiliateId))) }; } catch { /* keep defaults */ }
+    }
+
+    // Meta campaigns whose name mentions their @handle
+    const handle = collab.influencer.igHandle.toLowerCase();
+    const today = new Date().toISOString().slice(0, 10);
+    const start = from ?? new Date(Date.now() - 30 * 86400000).toISOString().slice(0, 10);
+    let metaSpend = 0, metaPurchases = 0, metaRevenue = 0;
+    let matchedCampaigns: Array<{ name: string; spend: number; roas: number | null; purchases: number }> = [];
+    try {
+      const summary = await this.meta.summary(start, to ?? today);
+      const matches = (summary.campaigns ?? []).filter((c: any) =>
+        `${c.name}`.toLowerCase().includes(handle) || `${c.name}`.toLowerCase().includes(handle.replace(/^@/, '')));
+      matchedCampaigns = matches.map((c: any) => ({ name: c.name, spend: c.spend, roas: c.roas, purchases: c.purchases }));
+      metaSpend = matches.reduce((s: number, c: any) => s + (c.spend ?? 0), 0);
+      metaPurchases = matches.reduce((s: number, c: any) => s + (c.purchases ?? 0), 0);
+      metaRevenue = matches.reduce((s: number, c: any) => s + (c.purchaseValue ?? 0), 0);
+    } catch { /* meta not configured */ }
+
+    // Verdict: total attributed revenue (referral sales + meta) vs ad spend on their campaigns
+    const totalRevenue = +(referral.salesTotal + metaRevenue).toFixed(2);
+    const roas = metaSpend > 0 ? +(totalRevenue / metaSpend).toFixed(2) : null;
+    let status: 'WORKING' | 'WATCH' | 'UNDERPERFORMING' | 'NO_DATA';
+    let headline: string;
+    if (referral.ordersCount === 0 && metaPurchases === 0 && metaSpend < 5) {
+      status = 'NO_DATA';
+      headline = 'Aún sin datos suficientes. Dale tiempo a que publique y venda.';
+    } else if (metaSpend >= 5 && roas != null && roas < 1) {
+      status = 'UNDERPERFORMING';
+      headline = `Gasta más de lo que genera (ROAS ${roas}x). Revisa o pausa su campaña.`;
+    } else if (referral.ordersCount > 0 || (roas != null && roas >= 1.5) || metaPurchases > 0) {
+      status = 'WORKING';
+      headline = `Funciona: ${referral.ordersCount} ventas con su código${metaSpend > 0 ? `, ROAS ${roas ?? '—'}x` : ''}.`;
+    } else {
+      status = 'WATCH';
+      headline = 'Va flojo, vigílalo unos días más.';
+    }
+
+    return {
+      code: referral.code,
+      referralUrl: collab.referralUrl ?? null,
+      referral,
+      meta: { spend: +metaSpend.toFixed(2), purchases: metaPurchases, revenue: +metaRevenue.toFixed(2), campaigns: matchedCampaigns },
+      totalRevenue,
+      roas,
+      status,
+      headline
+    };
   }
 
   /** Reward tier by follower count. */
@@ -158,6 +218,7 @@ export class CrewService {
         productsJson: products as any,
         shippingJson: { fullName, email: body.email.trim(), phone, address: shippingAddress } as any,
         contentUrl: body.contentUrl?.trim() || null,
+        requestedCode: normalizeCode(body.desiredCode) ?? normalizeCode(igHandle),
         notes: body.notes?.trim() || null
       }
     });
