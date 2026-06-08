@@ -1,6 +1,7 @@
-import { BadRequestException, Injectable } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { ShopifyAdapter } from '../shopify/shopify.adapter';
+import { GoAffProAdapter } from './goaffpro.adapter';
 
 export interface CrewTier {
   tier: string;
@@ -33,8 +34,51 @@ export interface CrewApplyBody {
 export class CrewService {
   constructor(
     private readonly prisma: PrismaService,
-    private readonly shopify: ShopifyAdapter
+    private readonly shopify: ShopifyAdapter,
+    private readonly goaffpro: GoAffProAdapter
   ) {}
+
+  /** Approve a crew collaboration: create GoAffPro affiliate + referral code, store on the collab. */
+  async approve(collaborationId: string) {
+    const collab = await this.prisma.collaboration.findUnique({
+      where: { id: collaborationId },
+      include: { influencer: true }
+    });
+    if (!collab) throw new NotFoundException('Colaboración no encontrada');
+    const inf = collab.influencer;
+    if (!inf.email) throw new BadRequestException('El influencer no tiene email; añádelo antes de aprobar.');
+
+    const ref = await this.goaffpro.ensureAffiliate({
+      name: inf.fullName || inf.igHandle,
+      email: inf.email,
+      refCode: inf.igHandle
+    });
+
+    const updated = await this.prisma.collaboration.update({
+      where: { id: collab.id },
+      data: {
+        status: 'PRODUCT_SENT',
+        discountCode: ref.code || collab.discountCode,
+        affiliateId: String(ref.id),
+        referralUrl: ref.referralUrl
+      }
+    });
+    await this.prisma.influencer.update({
+      where: { id: inf.id },
+      data: { stage: 'NEGOTIATING' }
+    }).catch(() => undefined);
+
+    return { ok: true, code: ref.code, referralUrl: ref.referralUrl, affiliateId: ref.id, collaboration: updated };
+  }
+
+  /** GoAffPro sales performance for a collaboration's affiliate. */
+  async affiliatePerformance(collaborationId: string) {
+    const collab = await this.prisma.collaboration.findUnique({ where: { id: collaborationId } });
+    if (!collab) throw new NotFoundException('Colaboración no encontrada');
+    if (!collab.affiliateId) return { configured: false, code: collab.discountCode ?? null, ordersCount: 0, salesTotal: 0, commission: 0 };
+    const perf = await this.goaffpro.performance(Number(collab.affiliateId));
+    return { configured: true, ...perf };
+  }
 
   /** Reward tier by follower count. */
   tierFor(followers: number): CrewTier {
