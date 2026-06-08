@@ -8,6 +8,7 @@ import { BankModule } from './bank/bank.module';
 import { EconomicsModule } from './economics/economics.module';
 import { ManualPrintModule } from './manual-print/manual-print.module';
 import { MetaModule } from './meta/meta.module';
+import { CrewModule } from './crew/crew.module';
 import { InfluencersModule } from './influencers/influencers.module';
 import { OrdersModule } from './orders/orders.module';
 import { PortalConfigModule } from './portal-config/portal-config.module';
@@ -44,6 +45,7 @@ import { SupplierModule } from './supplier/supplier.module';
     EconomicsModule,
     MetaModule,
     InfluencersModule,
+    CrewModule,
     PortalConfigModule
   ],
   controllers: [AppController]

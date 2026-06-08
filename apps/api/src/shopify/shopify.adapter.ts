@@ -125,6 +125,40 @@ export class ShopifyAdapter {
       .map((order) => this.mapGraphqlOrder(order));
   }
 
+  async crewCatalog() {
+    this.assertConfigured();
+    const data = await this.graphql<any>(`
+      query CrewCatalog($first: Int!) {
+        products(first: $first, reverse: true, sortKey: UPDATED_AT, query: "status:active") {
+          nodes {
+            id
+            title
+            productType
+            handle
+            featuredImage { url }
+            options { name values }
+            variants(first: 50) { nodes { id title sku availableForSale } }
+          }
+        }
+      }
+    `, { first: 100 });
+    return (data.products?.nodes ?? []).map((p: any) => {
+      const type = `${p.productType ?? ''} ${p.title ?? ''}`.toLowerCase();
+      const isAccessory = /gorra|cap|tote|bolsa|gorro|calcet|accesori|rinonera|riñonera|sticker|toalla|funda|llaver/.test(type);
+      const sizeOption = (p.options ?? []).find((o: any) => /talla|size/i.test(o.name));
+      return {
+        id: p.id,
+        title: p.title,
+        productType: p.productType,
+        handle: p.handle,
+        imageUrl: p.featuredImage?.url ?? null,
+        category: isAccessory ? 'ACCESORIO' : 'PRENDA',
+        sizes: sizeOption?.values ?? [],
+        variants: (p.variants?.nodes ?? []).map((v: any) => ({ id: v.id, title: v.title, sku: v.sku, available: v.availableForSale }))
+      };
+    });
+  }
+
   async importProducts() {
     this.assertConfigured();
     const data = await this.graphql<ShopifyProductsResponse>(`

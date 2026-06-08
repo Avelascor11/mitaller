@@ -760,6 +760,10 @@ model Collaboration {
   productSent    String?
   deliverables   String?
   discountCode   String?
+  affiliateId    String?
+  referralUrl    String?
+  tier           String?
+  productsJson   Json?
   metaCampaignId String?
   deadline       DateTime?
   openedAt       DateTime        @default(now())

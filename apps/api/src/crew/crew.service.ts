@@ -1,0 +1,132 @@
+import { BadRequestException, Injectable } from '@nestjs/common';
+import { PrismaService } from '../prisma/prisma.service';
+import { ShopifyAdapter } from '../shopify/shopify.adapter';
+
+export interface CrewTier {
+  tier: string;
+  label: string;
+  garments: number;
+  accessories: number;
+  minFollowers: number;
+}
+
+export interface CrewApplyProduct {
+  productId: string;
+  title: string;
+  variantId?: string;
+  size?: string;
+  category: 'PRENDA' | 'ACCESORIO';
+  imageUrl?: string;
+}
+
+export interface CrewApplyBody {
+  igHandle: string;
+  email?: string;
+  fullName?: string;
+  followers: number;
+  products: CrewApplyProduct[];
+  acceptedRights?: boolean;
+  notes?: string;
+}
+
+@Injectable()
+export class CrewService {
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly shopify: ShopifyAdapter
+  ) {}
+
+  /** Reward tier by follower count. */
+  tierFor(followers: number): CrewTier {
+    if (followers >= 15000) return { tier: 'ELITE', label: '2 prendas + 1 accesorio', garments: 2, accessories: 1, minFollowers: 15000 };
+    if (followers >= 10000) return { tier: 'PRO', label: '2 prendas', garments: 2, accessories: 0, minFollowers: 10000 };
+    if (followers >= 5000) return { tier: 'PLUS', label: '1 prenda + 1 accesorio', garments: 1, accessories: 1, minFollowers: 5000 };
+    if (followers >= 1000) return { tier: 'BASE', label: '1 prenda', garments: 1, accessories: 0, minFollowers: 1000 };
+    return { tier: 'WAITLIST', label: 'Lista de espera', garments: 0, accessories: 0, minFollowers: 0 };
+  }
+
+  async catalog() {
+    if (!this.shopify.hasCredentials()) return { prendas: [], accesorios: [] };
+    const products = await this.shopify.crewCatalog();
+    return {
+      prendas: products.filter((p: any) => p.category === 'PRENDA'),
+      accesorios: products.filter((p: any) => p.category === 'ACCESORIO')
+    };
+  }
+
+  async apply(body: CrewApplyBody) {
+    const igHandle = (body.igHandle ?? '').replace(/^@/, '').trim().toLowerCase();
+    if (!igHandle) throw new BadRequestException('Instagram (@usuario) requerido');
+    const followers = Number(body.followers);
+    if (!Number.isFinite(followers) || followers < 0) throw new BadRequestException('Nº de seguidores no válido');
+
+    const tier = this.tierFor(followers);
+    if (tier.tier === 'WAITLIST') {
+      // Still capture them, but as a prospect with no reward.
+      await this.upsertInfluencer(igHandle, body, followers, 'WAITLIST');
+      return { ok: true, status: 'WAITLIST', tier, message: 'Te has unido a la lista de espera. Te avisamos cuando crezcas un poco más.' };
+    }
+
+    const products = body.products ?? [];
+    const garments = products.filter((p) => p.category === 'PRENDA').length;
+    const accessories = products.filter((p) => p.category === 'ACCESORIO').length;
+    if (garments > tier.garments || accessories > tier.accessories) {
+      throw new BadRequestException(`Tu tramo permite ${tier.label}. Has elegido de más.`);
+    }
+    if (garments === 0 && tier.garments > 0) {
+      throw new BadRequestException('Elige al menos una prenda.');
+    }
+    if (body.acceptedRights !== true) {
+      throw new BadRequestException('Debes aceptar la cesión de derechos del contenido.');
+    }
+
+    const influencer = await this.upsertInfluencer(igHandle, body, followers, tier.tier);
+
+    // One open crew collaboration per application
+    const productSummary = products.map((p) => `${p.title}${p.size ? ` (${p.size})` : ''}`).join(', ');
+    const collab = await this.prisma.collaboration.create({
+      data: {
+        influencerId: influencer.id,
+        title: `Crew Speedwear · ${tier.tier}`,
+        type: 'GIFT',
+        status: 'OPEN',
+        tier: tier.tier,
+        productSent: productSummary || null,
+        deliverables: '1 reel + 3 stories etiquetando @speedwear.es',
+        productsJson: products as any,
+        notes: body.notes?.trim() || null
+      }
+    });
+
+    return { ok: true, status: 'APPLIED', tier, influencerId: influencer.id, collaborationId: collab.id, message: '¡Solicitud recibida! Te escribimos por DM para confirmar el envío.' };
+  }
+
+  private async upsertInfluencer(igHandle: string, body: CrewApplyBody, followers: number, tier: string) {
+    const existing = await this.prisma.influencer.findUnique({ where: { igHandle } });
+    const tags = [...new Set([...(existing?.tags ?? []), 'crew', `tier:${tier.toLowerCase()}`])];
+    if (existing) {
+      return this.prisma.influencer.update({
+        where: { id: existing.id },
+        data: {
+          followers,
+          email: body.email?.trim() || existing.email,
+          fullName: body.fullName?.trim() || existing.fullName,
+          source: existing.source ?? 'CREW_FORM',
+          tags,
+          stage: existing.stage === 'PROSPECT' ? 'CONTACTED' : existing.stage
+        }
+      });
+    }
+    return this.prisma.influencer.create({
+      data: {
+        igHandle,
+        followers,
+        email: body.email?.trim() || null,
+        fullName: body.fullName?.trim() || null,
+        source: 'CREW_FORM',
+        stage: 'CONTACTED',
+        tags
+      }
+    });
+  }
+}
