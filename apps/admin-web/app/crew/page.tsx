@@ -4,16 +4,25 @@ import { useEffect, useMemo, useState } from 'react';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001';
 
+type Variant = { id: string; title: string; sku: string; available: boolean };
 type Product = {
   id: string;
   title: string;
   imageUrl: string | null;
   category: 'PRENDA' | 'ACCESORIO';
   sizes: string[];
+  variants: Variant[];
 };
 type Catalog = { prendas: Product[]; accesorios: Product[] };
 type Tier = { tier: string; label: string; garments: number; accessories: number; minFollowers: number };
-type Pick = { productId: string; title: string; size?: string; category: 'PRENDA' | 'ACCESORIO'; imageUrl?: string };
+type Pick = { productId: string; title: string; variantId?: string; sku?: string; size?: string; category: 'PRENDA' | 'ACCESORIO'; imageUrl?: string };
+
+function resolveVariant(p: Product, size?: string): Variant | undefined {
+  if (p.variants?.length === 1) return p.variants[0];
+  if (!size) return undefined;
+  const up = size.toUpperCase();
+  return p.variants?.find(v => v.title.toUpperCase().split(/[\/|,-]/).map(s => s.trim()).includes(up));
+}
 
 const C = {
   bg: '#0B0B0F', card: '#15151C', line: '#26262F', ink: '#FFFFFF', muted: '#9A9AA8',
@@ -62,11 +71,14 @@ export default function CrewPage() {
     const current = p.category === 'PRENDA' ? garmentsPicked : accessoriesPicked;
     if (current >= limit) { setError(`Tu nivel permite ${tier.label}.`); return; }
     if (p.sizes.length && !size) { setError('Elige una talla primero.'); return; }
-    setPicks([...picks, { productId: p.id, title: p.title, size, category: p.category, imageUrl: p.imageUrl ?? undefined }]);
+    const variant = resolveVariant(p, size);
+    setPicks([...picks, { productId: p.id, title: p.title, variantId: variant?.id, sku: variant?.sku, size, category: p.category, imageUrl: p.imageUrl ?? undefined }]);
   }
 
   function setPickSize(productId: string, size: string) {
-    setPicks(picks.map(x => x.productId === productId ? { ...x, size } : x));
+    const prod = [...catalog.prendas, ...catalog.accesorios].find(p => p.id === productId);
+    const variant = prod ? resolveVariant(prod, size) : undefined;
+    setPicks(picks.map(x => x.productId === productId ? { ...x, size, variantId: variant?.id ?? x.variantId, sku: variant?.sku ?? x.sku } : x));
   }
 
   const canSubmit = !!tier && tier.tier !== 'WAITLIST' && handle.trim() && name.trim() && email.trim() && phone.trim() && address.trim()

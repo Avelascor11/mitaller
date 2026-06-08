@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { ShopifyAdapter } from '../shopify/shopify.adapter';
 import { GoAffProAdapter } from './goaffpro.adapter';
@@ -15,6 +15,7 @@ export interface CrewApplyProduct {
   productId: string;
   title: string;
   variantId?: string;
+  sku?: string;
   size?: string;
   category: 'PRENDA' | 'ACCESORIO';
   imageUrl?: string;
@@ -35,6 +36,7 @@ export interface CrewApplyBody {
 
 @Injectable()
 export class CrewService {
+  private readonly logger = new Logger(CrewService.name);
   constructor(
     private readonly prisma: PrismaService,
     private readonly shopify: ShopifyAdapter,
@@ -154,7 +156,50 @@ export class CrewService {
       }
     });
 
-    return { ok: true, status: 'APPLIED', tier, influencerId: influencer.id, collaborationId: collab.id, message: '¡Solicitud recibida! Te escribimos por DM para confirmar el envío.' };
+    // Create a €0 Shopify order with the influencer's name so the pack flows into picking.
+    let orderName: string | null = null;
+    try {
+      orderName = await this.createGiftOrder({ fullName, email: body.email.trim(), phone, address: shippingAddress, igHandle, products }, collab.id);
+    } catch (e) {
+      this.logger.warn(`Crew gift order failed for @${igHandle}: ${(e as Error).message}`);
+    }
+
+    return { ok: true, status: 'APPLIED', tier, influencerId: influencer.id, collaborationId: collab.id, orderName, message: '¡Solicitud recibida! Preparamos tu pack y te avisamos cuando salga el envío 🚚' };
+  }
+
+  private async createGiftOrder(
+    input: { fullName: string; email: string; phone: string; address: string; igHandle: string; products: CrewApplyProduct[] },
+    collaborationId: string
+  ) {
+    if (!this.shopify.hasCredentials()) return null;
+    const lineItems = input.products
+      .filter((p) => p.variantId)
+      .map((p) => ({ variantId: p.variantId!, quantity: 1 }));
+    if (!lineItems.length) {
+      this.logger.warn(`Crew order skipped @${input.igHandle}: no variant IDs`);
+      return null;
+    }
+    const [firstName, ...rest] = input.fullName.split(' ');
+    const draft = await this.shopify.createDraftOrder({
+      customerEmail: input.email,
+      note: `Speedwear Crew · @${input.igHandle} · regalo influencer`,
+      tags: ['crew', 'influencer', 'regalo'],
+      shippingAddress: {
+        firstName: firstName || input.fullName,
+        lastName: rest.join(' ') || '.',
+        address1: input.address,
+        countryCode: 'ES',
+        phone: input.phone
+      },
+      lineItems,
+      appliedDiscount: { valueType: 'PERCENTAGE', value: 100, title: 'Speedwear Crew', description: `Regalo crew @${input.igHandle}` }
+    });
+    const completed = await this.shopify.completeDraftOrder(draft.id);
+    await this.prisma.collaboration.update({
+      where: { id: collaborationId },
+      data: { shopifyOrderId: completed.orderId, shopifyOrderName: completed.orderName, status: 'PRODUCT_SENT' }
+    }).catch(() => undefined);
+    return completed.orderName;
   }
 
   private async upsertInfluencer(igHandle: string, body: CrewApplyBody, followers: number, tier: string) {

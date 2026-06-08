@@ -767,6 +767,8 @@ model Collaboration {
   productsJson   Json?
   shippingJson   Json?
   contentUrl     String?
+  shopifyOrderId String?
+  shopifyOrderName String?
   metaCampaignId String?
   deadline       DateTime?
   openedAt       DateTime        @default(now())
