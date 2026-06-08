@@ -535,6 +535,9 @@ model BankAccount {
   ownerName         String?
   product           String?
   cashAccountType   String?
+  currentBalance    Float?
+  availableBalance  Float?
+  balanceUpdatedAt  DateTime?
   rawDataJson       Json?
   createdAt         DateTime           @default(now())
   updatedAt         DateTime           @updatedAt

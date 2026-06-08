@@ -121,6 +121,19 @@ export class BankService {
         await this.upsertTransaction(account.id, transaction);
         imported += 1;
       }
+      // Fetch + persist balance here (scheduled), to avoid GoCardless rate limits on /accounts.
+      try {
+        const balResponse = await this.accountBalancesWithRetry(account.providerAccountId);
+        const balances = balResponse.balances ?? [];
+        const currentBalance = this.pickBalance(balances, ['interimBooked', 'closingBooked', 'expected', 'openingBooked']);
+        const availableBalance = this.pickBalance(balances, ['interimAvailable', 'forwardAvailable', 'nonInvoiced']);
+        if (currentBalance != null || availableBalance != null) {
+          await this.prisma.bankAccount.update({
+            where: { id: account.id },
+            data: { currentBalance, availableBalance, balanceUpdatedAt: new Date() }
+          });
+        }
+      } catch { /* rate limited or unavailable: keep last known balance */ }
       await this.prisma.bankConnection.update({
         where: { id: account.connectionId },
         data: { lastSyncedAt: new Date() }
@@ -143,32 +156,20 @@ export class BankService {
       include: { connection: true },
       orderBy: { createdAt: 'desc' }
     });
-    const enriched = await Promise.all(accounts.map(async account => {
-      let balances: any[] = [];
-      let currentBalance: number | null = null;
-      let availableBalance: number | null = null;
-      try {
-        const response = await this.accountBalancesWithRetry(account.providerAccountId);
-        balances = response.balances ?? [];
-        currentBalance = this.pickBalance(balances, ['interimBooked', 'closingBooked', 'expected']);
-        availableBalance = this.pickBalance(balances, ['interimAvailable', 'forwardAvailable', 'nonInvoiced']);
-      } catch {
-        balances = [];
-      }
-      return {
-        id: account.id,
-        providerAccountId: account.providerAccountId,
-        institutionName: account.connection.institutionName,
-        iban: this.maskIban(account.iban),
-        name: account.name ?? account.connection.institutionName ?? 'Cuenta bancaria',
-        currency: account.currency ?? balances[0]?.balanceAmount?.currency ?? 'EUR',
-        ownerName: account.ownerName,
-        product: account.product,
-        currentBalance,
-        availableBalance,
-        connectedAt: account.connection.connectedAt,
-        lastSyncedAt: account.connection.lastSyncedAt
-      };
+    const enriched = accounts.map(account => ({
+      id: account.id,
+      providerAccountId: account.providerAccountId,
+      institutionName: account.connection.institutionName,
+      iban: this.maskIban(account.iban),
+      name: account.name ?? account.connection.institutionName ?? 'Cuenta bancaria',
+      currency: account.currency ?? 'EUR',
+      ownerName: account.ownerName,
+      product: account.product,
+      currentBalance: account.currentBalance ?? null,
+      availableBalance: account.availableBalance ?? null,
+      balanceUpdatedAt: account.balanceUpdatedAt ?? null,
+      connectedAt: account.connection.connectedAt,
+      lastSyncedAt: account.connection.lastSyncedAt
     }));
 
     const balanceAvailable = enriched.some(account => account.currentBalance != null);
