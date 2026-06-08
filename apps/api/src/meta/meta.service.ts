@@ -763,7 +763,9 @@ export class MetaService {
   /** Evaluate active adsets and scale budgets of profitable ones within the daily ceiling. */
   async autopilotRun(apply: boolean) {
     this.assert();
-    const ceiling = this.cfgNum('META_AUTOPILOT_MAX_DAILY', 50);
+    // Daily account ceiling: 0 (or unset) = no ceiling, scale freely (+step/day on winners only).
+    const ceilingRaw = Number((this.config.get<string>('META_AUTOPILOT_MAX_DAILY') ?? '0').replace(',', '.'));
+    const ceiling = Number.isFinite(ceilingRaw) && ceilingRaw > 0 ? ceilingRaw : Infinity;
     const minRoas = this.cfgNum('META_AUTOPILOT_MIN_ROAS', 1.5);
     const step = this.cfgNum('META_AUTOPILOT_STEP', 0.15);
     const today = new Date().toISOString().slice(0, 10);
