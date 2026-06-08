@@ -40,6 +40,7 @@ export default function CrewPage() {
   const [address, setAddress] = useState('');
   const [contentUrl, setContentUrl] = useState('');
   const [picks, setPicks] = useState<Pick[]>([]);
+  const [sizeSel, setSizeSel] = useState<Record<string, string>>({});
   const [rights, setRights] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [done, setDone] = useState<{ tier: Tier; message: string; status: string } | null>(null);
@@ -62,7 +63,7 @@ export default function CrewPage() {
   const garmentsPicked = picks.filter(p => p.category === 'PRENDA').length;
   const accessoriesPicked = picks.filter(p => p.category === 'ACCESORIO').length;
 
-  function togglePick(p: Product, size?: string) {
+  function togglePick(p: Product) {
     setError(null);
     const exists = picks.find(x => x.productId === p.id);
     if (exists) { setPicks(picks.filter(x => x.productId !== p.id)); return; }
@@ -70,12 +71,15 @@ export default function CrewPage() {
     const limit = p.category === 'PRENDA' ? tier.garments : tier.accessories;
     const current = p.category === 'PRENDA' ? garmentsPicked : accessoriesPicked;
     if (current >= limit) { setError(`Tu nivel permite ${tier.label}.`); return; }
+    const size = sizeSel[p.id];
     if (p.sizes.length && !size) { setError('Elige una talla primero.'); return; }
     const variant = resolveVariant(p, size);
     setPicks([...picks, { productId: p.id, title: p.title, variantId: variant?.id, sku: variant?.sku, size, category: p.category, imageUrl: p.imageUrl ?? undefined }]);
   }
 
   function setPickSize(productId: string, size: string) {
+    setError(null);
+    setSizeSel({ ...sizeSel, [productId]: size });
     const prod = [...catalog.prendas, ...catalog.accesorios].find(p => p.id === productId);
     const variant = prod ? resolveVariant(prod, size) : undefined;
     setPicks(picks.map(x => x.productId === productId ? { ...x, size, variantId: variant?.id ?? x.variantId, sku: variant?.sku ?? x.sku } : x));
@@ -163,11 +167,11 @@ export default function CrewPage() {
         {tier && tier.tier !== 'WAITLIST' && (
           <>
             <Section title={`Prendas (${garmentsPicked}/${tier.garments})`} />
-            <Grid products={catalog.prendas} picks={picks} onToggle={togglePick} onSize={setPickSize} loading={loadingCatalog} />
+            <Grid products={catalog.prendas} picks={picks} sizeSel={sizeSel} onToggle={togglePick} onSize={setPickSize} loading={loadingCatalog} />
             {tier.accessories > 0 && (
               <>
                 <Section title={`Accesorios (${accessoriesPicked}/${tier.accessories})`} />
-                <Grid products={catalog.accesorios} picks={picks} onToggle={togglePick} onSize={setPickSize} loading={loadingCatalog} />
+                <Grid products={catalog.accesorios} picks={picks} sizeSel={sizeSel} onToggle={togglePick} onSize={setPickSize} loading={loadingCatalog} />
               </>
             )}
           </>
@@ -197,8 +201,8 @@ export default function CrewPage() {
   );
 }
 
-function Grid({ products, picks, onToggle, onSize, loading }: {
-  products: Product[]; picks: Pick[]; onToggle: (p: Product, size?: string) => void; onSize: (id: string, s: string) => void; loading: boolean;
+function Grid({ products, picks, sizeSel, onToggle, onSize, loading }: {
+  products: Product[]; picks: Pick[]; sizeSel: Record<string, string>; onToggle: (p: Product) => void; onSize: (id: string, s: string) => void; loading: boolean;
 }) {
   if (loading) return <p style={{ color: C.muted }}>Cargando catálogo…</p>;
   if (!products.length) return <p style={{ color: C.muted, fontSize: 13 }}>Sin productos disponibles.</p>;
@@ -207,6 +211,7 @@ function Grid({ products, picks, onToggle, onSize, loading }: {
       {products.map(p => {
         const pick = picks.find(x => x.productId === p.id);
         const selected = !!pick;
+        const chosenSize = pick?.size ?? sizeSel[p.id];
         return (
           <div key={p.id} style={{ ...prodCard, borderColor: selected ? C.accent : C.line }}>
             <div style={{ width: '100%', aspectRatio: '1', background: '#0E0E13', borderRadius: 10, overflow: 'hidden', marginBottom: 8 }}>
@@ -217,12 +222,12 @@ function Grid({ products, picks, onToggle, onSize, loading }: {
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, margin: '6px 0' }}>
                 {p.sizes.map(s => (
                   <button key={s} onClick={() => onSize(p.id, s)} style={{
-                    ...sizeBtn, borderColor: pick?.size === s ? C.accent : C.line, color: pick?.size === s ? C.accent : C.muted
+                    ...sizeBtn, borderColor: chosenSize === s ? C.accent : C.line, color: chosenSize === s ? C.accent : C.muted
                   }}>{s}</button>
                 ))}
               </div>
             )}
-            <button onClick={() => onToggle(p, pick?.size ?? (p.sizes[0] && pick ? pick.size : undefined))}
+            <button onClick={() => onToggle(p)}
               style={{ ...pickBtn, background: selected ? C.accent : 'transparent', color: selected ? '#0B0B0F' : C.ink, borderColor: selected ? C.accent : C.line }}>
               {selected ? '✓ Elegido' : 'Elegir'}
             </button>
