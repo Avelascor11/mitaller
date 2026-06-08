@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { BankTransactionCategory } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
@@ -6,6 +6,7 @@ import { GoCardlessBankAdapter } from './gocardless-bank.adapter';
 
 @Injectable()
 export class BankService {
+  private readonly logger = new Logger(BankService.name);
   constructor(
     private readonly prisma: PrismaService,
     private readonly gocardless: GoCardlessBankAdapter,
@@ -125,15 +126,18 @@ export class BankService {
       try {
         const balResponse = await this.accountBalancesWithRetry(account.providerAccountId);
         const balances = balResponse.balances ?? [];
-        const currentBalance = this.pickBalance(balances, ['interimBooked', 'closingBooked', 'expected', 'openingBooked']);
-        const availableBalance = this.pickBalance(balances, ['interimAvailable', 'forwardAvailable', 'nonInvoiced']);
+        this.logger.log(`Balances ${account.name}: ${JSON.stringify(balances)}`);
+        const currentBalance = this.pickBalance(balances, ['interimBooked', 'closingBooked', 'expected', 'openingBooked', 'interimAvailable']);
+        const availableBalance = this.pickBalance(balances, ['interimAvailable', 'forwardAvailable', 'nonInvoiced', 'expected']);
         if (currentBalance != null || availableBalance != null) {
           await this.prisma.bankAccount.update({
             where: { id: account.id },
             data: { currentBalance, availableBalance, balanceUpdatedAt: new Date() }
           });
         }
-      } catch { /* rate limited or unavailable: keep last known balance */ }
+      } catch (e) {
+        this.logger.warn(`Balance fetch failed ${account.name}: ${e instanceof Error ? e.message : String(e)}`);
+      }
       await this.prisma.bankConnection.update({
         where: { id: account.connectionId },
         data: { lastSyncedAt: new Date() }
