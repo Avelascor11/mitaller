@@ -144,14 +144,17 @@ export class CarrierReturnsService {
       });
       invoiceUrl = draft.invoiceUrl;
       draftOrderId = draft.id;
-      // Shopify sends the invoice email with the payment link (transactional, no marketing consent needed).
-      try {
-        await this.shopify.sendDraftOrderInvoice(
-          draft.id,
-          `Correos nos devolvió tu pedido ${ret.orderNumber}. Para reenviártelo, paga el reenvío (${ret.feeAmount.toFixed(2)} €) y confirma tu dirección en este enlace. ¡Gracias!`
-        );
-      } catch (e) {
-        this.logger.warn(`Shopify invoice email failed ${ret.orderNumber}: ${(e as Error).message}`);
+      // Email channel: 'klaviyo' (flow) by default, or 'shopify' to send Shopify's transactional invoice.
+      const channel = (this.config.get<string>('CARRIER_RETURN_SEND_VIA') ?? 'klaviyo').toLowerCase();
+      if (channel === 'shopify') {
+        try {
+          await this.shopify.sendDraftOrderInvoice(
+            draft.id,
+            `Correos nos devolvió tu pedido ${ret.orderNumber}. Para reenviártelo, paga el reenvío (${ret.feeAmount.toFixed(2)} €) y confirma tu dirección en este enlace. ¡Gracias!`
+          );
+        } catch (e) {
+          this.logger.warn(`Shopify invoice email failed ${ret.orderNumber}: ${(e as Error).message}`);
+        }
       }
     }
 
