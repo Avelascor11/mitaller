@@ -7507,6 +7507,19 @@ struct AutopilotCard: View {
                 Text("Hoy no subiría nada (sin anuncios que cumplan el criterio).").font(.caption2).foregroundStyle(AppTheme.muted)
             }
 
+            if let p = autopilot.projection, p.raises > 0 {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("SI LO ACTIVAS (estimado)").font(.system(size: 10, weight: .heavy)).foregroundStyle(AppTheme.muted)
+                    Text("+\(euro(p.extraDailySpend))/día en ads → +\(euro(p.extraDailyRevenue))/día en ventas\(p.avgRoas != nil ? " (ROAS \(String(format: "%.1fx", p.avgRoas!)))" : "")")
+                        .font(.caption.weight(.bold)).foregroundStyle(AppTheme.ink).fixedSize(horizontal: false, vertical: true)
+                    Text("≈ +\(euro(p.monthlyExtraProfit)) de beneficio extra al mes")
+                        .font(.caption2.weight(.heavy)).foregroundStyle(p.monthlyExtraProfit >= 0 ? AppTheme.green : AppTheme.red)
+                    Text("Estimación sobre el ROAS actual; las subidas se hacen gradual (+15%/día).")
+                        .font(.system(size: 9)).foregroundStyle(AppTheme.muted)
+                }
+                .padding(10).background(AppTheme.green.opacity(0.1), in: RoundedRectangle(cornerRadius: 10))
+            }
+
             if !autopilot.advice.isEmpty {
                 Text("AVISOS").font(.system(size: 10, weight: .heavy)).foregroundStyle(AppTheme.muted)
                 ForEach(autopilot.advice.prefix(4)) { a in

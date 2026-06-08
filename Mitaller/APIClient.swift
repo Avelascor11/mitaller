@@ -515,6 +515,16 @@ struct MetaAutopilotAdvice: Decodable, Identifiable {
     var id: String { name + msg }
 }
 struct MetaPauseWeakResult: Decodable { let pausedCount: Int }
+struct MetaAutopilotProjection: Decodable {
+    let raises: Int
+    let extraDailySpend: Double
+    let extraDailyRevenue: Double
+    let extraDailyProfit: Double
+    let monthlyExtraSpend: Double
+    let monthlyExtraRevenue: Double
+    let monthlyExtraProfit: Double
+    let avgRoas: Double?
+}
 struct MetaAutopilot: Decodable {
     let mode: String
     let currentMode: String
@@ -523,6 +533,7 @@ struct MetaAutopilot: Decodable {
     let totalDailyAfter: Double
     let actions: [MetaAutopilotAction]
     let advice: [MetaAutopilotAdvice]
+    let projection: MetaAutopilotProjection?
 }
 struct MetaAutopilotModeRequest: Encodable { let mode: String }
 struct MetaAutopilotModeResult: Decodable { let mode: String }

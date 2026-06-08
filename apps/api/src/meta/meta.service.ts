@@ -859,7 +859,21 @@ export class MetaService {
       }
     }).catch(() => undefined);
 
-    return { mode: apply ? 'live' : 'dry', ranAt: new Date().toISOString(), ceiling, minRoas, step, totalDailyAfter: totalDaily, actions, advice };
+    // Projection: what enabling the autopilot would do (based on the planned raises + their ROAS).
+    const extraDailySpend = +actions.reduce((s, a) => s + (a.to - a.from), 0).toFixed(2);
+    const extraDailyRevenue = +actions.reduce((s, a) => s + (a.to - a.from) * (a.roas ?? 0), 0).toFixed(2);
+    const projection = {
+      raises: actions.length,
+      extraDailySpend,
+      extraDailyRevenue,
+      extraDailyProfit: +(extraDailyRevenue - extraDailySpend).toFixed(2),
+      monthlyExtraSpend: +(extraDailySpend * 30).toFixed(2),
+      monthlyExtraRevenue: +(extraDailyRevenue * 30).toFixed(2),
+      monthlyExtraProfit: +((extraDailyRevenue - extraDailySpend) * 30).toFixed(2),
+      avgRoas: extraDailySpend > 0 ? +(extraDailyRevenue / extraDailySpend).toFixed(2) : null
+    };
+
+    return { mode: apply ? 'live' : 'dry', ranAt: new Date().toISOString(), ceiling, minRoas, step, totalDailyAfter: totalDaily, actions, advice, projection };
   }
 
   async campaigns(from: string, to: string): Promise<CampaignInsight[]> {
