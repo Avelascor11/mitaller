@@ -53,4 +53,9 @@ export class BankController {
   allocation() {
     return this.bank.allocation();
   }
+
+  @Post('advisor/expense')
+  adviseExpense(@Body() body: { amount: number; concept?: string; date?: string }) {
+    return this.bank.adviseExpense(body);
+  }
 }

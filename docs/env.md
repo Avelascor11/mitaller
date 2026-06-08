@@ -76,6 +76,7 @@ Mitaller usa GoCardless Bank Account Data para conectar N26 por Open Banking/PSD
 - `GOCARDLESS_SECRET_KEY`: secret key de GoCardless Bank Account Data. No subir a GitHub.
 - `PUBLIC_API_URL`: URL publica de la API en Railway.
 - `BANK_REDIRECT_URL`: callback publico que usara el banco tras autorizar, normalmente `${PUBLIC_API_URL}/bank/callback`.
+- `CASH_SAFETY_BUFFER_EUR`: colchon minimo que el gestor intenta proteger antes de aprobar gastos. Por defecto `500`.
 
 ## UGC / videos de influencers
 

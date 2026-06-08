@@ -74,5 +74,6 @@ http://localhost:3001
 - `GET /bank/callback`
 - `POST /bank/sync`
 - `GET /bank/accounts`
+- `POST /bank/advisor/expense`
 - `GET /bank/transactions?from=YYYY-MM-DD&to=YYYY-MM-DD`
 - `GET /bank/daily?from=YYYY-MM-DD&to=YYYY-MM-DD`

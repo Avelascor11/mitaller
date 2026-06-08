@@ -264,6 +264,14 @@ struct APIClient {
     }
 
     func bankAccounts() async throws -> BankAccountsSummary { try await get("/bank/accounts") }
+    func bankAdviseExpense(amount: Double, concept: String) async throws -> BankExpenseAdvice {
+        let request = try jsonRequest(
+            path: "/bank/advisor/expense",
+            method: "POST",
+            body: BankExpenseAdviceRequest(amount: amount, concept: concept.isEmpty ? nil : concept)
+        )
+        return try await perform(request)
+    }
     func bankAllocation() async throws -> AllocationPlan { try await get("/bank/allocation") }
     func cashflow() async throws -> CashflowSummary { try await get("/economics/cashflow") }
     func markPayout(_ id: String) async throws {
@@ -989,6 +997,11 @@ private struct BankSyncRequest: Encodable {
     let to: String?
 }
 
+private struct BankExpenseAdviceRequest: Encodable {
+    let amount: Double
+    let concept: String?
+}
+
 struct ProductMappingSaveRequest: Encodable {
     let productName: String
     let productType: String?
@@ -1251,6 +1264,32 @@ struct BankAccountSummary: Decodable, Identifiable {
     let availableBalance: Double?
     let connectedAt: Date?
     let lastSyncedAt: Date?
+}
+
+struct BankExpenseAdvice: Decodable {
+    let currency: String
+    let concept: String
+    let amount: Double
+    let verdict: String
+    let headline: String
+    let recommendation: String
+    let currentBalance: Double
+    let projectedBalance: Double
+    let safetyBuffer: Double
+    let freeAfterBuffer: Double
+    let recent30Days: BankCashStats
+    let recent14Days: BankCashStats
+    let isWeekend: Bool
+    let reasons: [String]
+}
+
+struct BankCashStats: Decodable {
+    let days: Int
+    let income: Double
+    let expense: Double
+    let net: Double
+    let count: Int
+    let averageDailyNet: Double
 }
 
 struct BankDailySummary: Decodable {

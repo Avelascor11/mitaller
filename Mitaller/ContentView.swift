@@ -9179,6 +9179,9 @@ struct BankView: View {
     @State private var institutions: [BankInstitution] = []
     @State private var selectedInstitutionID: String?
     @State private var accounts: BankAccountsSummary?
+    @State private var advisorAmount = ""
+    @State private var advisorConcept = ""
+    @State private var advice: BankExpenseAdvice?
     @State private var daily: BankDailySummary?
     @State private var allocation: AllocationPlan?
     @State private var selectedDay = Calendar.current.startOfDay(for: Date())
@@ -9215,6 +9218,14 @@ struct BankView: View {
                     if let accounts {
                         BankBalanceCard(summary: accounts)
                     }
+
+                    BankAdvisorCard(
+                        amount: $advisorAmount,
+                        concept: $advisorConcept,
+                        advice: advice,
+                        loading: loading,
+                        onAsk: { Task { await askAdvisor() } }
+                    )
 
                     if let allocation, !allocation.payouts.isEmpty {
                         BankAllocationSection(plan: allocation)
@@ -9342,6 +9353,23 @@ struct BankView: View {
             accounts = try await client.bankAccounts()
         } catch {
             // El saldo es contexto extra; no bloquea los movimientos diarios.
+        }
+    }
+
+    private func askAdvisor() async {
+        guard let client = store.apiClient else { error = "API no configurada"; return }
+        let normalized = advisorAmount.replacingOccurrences(of: ",", with: ".")
+        guard let amount = Double(normalized), amount > 0 else {
+            error = "Mete un importe valido para preguntar al gestor."
+            return
+        }
+        loading = true
+        error = nil
+        defer { loading = false }
+        do {
+            advice = try await client.bankAdviseExpense(amount: amount, concept: advisorConcept)
+        } catch {
+            self.error = error.localizedDescription
         }
     }
 
@@ -10326,6 +10354,115 @@ struct BankBalanceCard: View {
             }
         }
         .glassPanel(padding: 16, accent: AppTheme.green)
+    }
+}
+
+struct BankAdvisorCard: View {
+    @Binding var amount: String
+    @Binding var concept: String
+    let advice: BankExpenseAdvice?
+    let loading: Bool
+    let onAsk: () -> Void
+
+    private var adviceColor: Color {
+        switch advice?.verdict {
+        case "APPROVED": AppTheme.green
+        case "WATCH": AppTheme.amber
+        case "REJECTED": AppTheme.red
+        default: AppTheme.blue
+        }
+    }
+
+    private var adviceIcon: String {
+        switch advice?.verdict {
+        case "APPROVED": "checkmark.seal.fill"
+        case "WATCH": "exclamationmark.triangle.fill"
+        case "REJECTED": "xmark.octagon.fill"
+        default: "sparkles"
+        }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(alignment: .top, spacing: 10) {
+                Image(systemName: "sparkles")
+                    .font(.title2.weight(.black))
+                    .foregroundStyle(AppTheme.blue)
+                    .frame(width: 34, height: 34)
+                    .background(AppTheme.blue.opacity(0.12))
+                    .clipShape(RoundedRectangle(cornerRadius: 10))
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("Gestor de caja")
+                        .font(.headline.weight(.heavy))
+                        .foregroundStyle(AppTheme.ink)
+                    Text("Pregunta si puedes asumir una compra antes de gastar.")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(AppTheme.muted)
+                }
+            }
+
+            TextField("Concepto: 300 pegatinas", text: $concept)
+                .textInputAutocapitalization(.sentences)
+                .padding(12)
+                .background(AppTheme.surfaceSoft)
+                .overlay(RoundedRectangle(cornerRadius: 12).stroke(AppTheme.line))
+                .clipShape(RoundedRectangle(cornerRadius: 12))
+
+            HStack(spacing: 10) {
+                TextField("Importe", text: $amount)
+                    .keyboardType(.decimalPad)
+                    .padding(12)
+                    .background(AppTheme.surfaceSoft)
+                    .overlay(RoundedRectangle(cornerRadius: 12).stroke(AppTheme.line))
+                    .clipShape(RoundedRectangle(cornerRadius: 12))
+
+                Button(action: onAsk) {
+                    Label("Preguntar", systemImage: "questionmark.bubble.fill")
+                        .font(.subheadline.weight(.heavy))
+                        .frame(minWidth: 132)
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(loading)
+            }
+
+            if let advice {
+                VStack(alignment: .leading, spacing: 10) {
+                    HStack(alignment: .top, spacing: 10) {
+                        Image(systemName: adviceIcon)
+                            .foregroundStyle(adviceColor)
+                        VStack(alignment: .leading, spacing: 5) {
+                            Text(advice.headline)
+                                .font(.headline.weight(.black))
+                                .foregroundStyle(AppTheme.ink)
+                            Text(advice.recommendation)
+                                .font(.subheadline.weight(.semibold))
+                                .foregroundStyle(AppTheme.muted)
+                        }
+                    }
+
+                    HStack(spacing: 8) {
+                        MoneyTile(label: "Ahora", value: advice.currentBalance, currency: advice.currency, color: AppTheme.blue)
+                        MoneyTile(label: "Despues", value: advice.projectedBalance, currency: advice.currency, color: adviceColor)
+                    }
+
+                    VStack(alignment: .leading, spacing: 6) {
+                        ForEach(advice.reasons, id: \.self) { reason in
+                            HStack(alignment: .top, spacing: 7) {
+                                Circle().fill(adviceColor).frame(width: 6, height: 6).padding(.top, 6)
+                                Text(reason)
+                                    .font(.caption.weight(.semibold))
+                                    .foregroundStyle(AppTheme.muted)
+                            }
+                        }
+                    }
+                }
+                .padding(12)
+                .background(adviceColor.opacity(0.10))
+                .overlay(RoundedRectangle(cornerRadius: 14).stroke(adviceColor.opacity(0.35)))
+                .clipShape(RoundedRectangle(cornerRadius: 14))
+            }
+        }
+        .glassPanel(padding: 16, accent: adviceColor)
     }
 }
 

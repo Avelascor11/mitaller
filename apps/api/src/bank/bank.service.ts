@@ -239,6 +239,66 @@ export class BankService {
     };
   }
 
+  async adviseExpense(input: { amount: number; concept?: string; date?: string }) {
+    const amount = Number(input.amount);
+    if (!Number.isFinite(amount) || amount <= 0) {
+      throw new BadRequestException('Importe requerido y debe ser mayor que 0');
+    }
+
+    const accounts = await this.accounts();
+    const currentBalance = accounts.totalBalance;
+    const safetyBuffer = this.cashSafetyBuffer();
+    const projectedBalance = currentBalance - amount;
+    const freeAfterBuffer = projectedBalance - safetyBuffer;
+    const today = input.date ?? new Date().toISOString().slice(0, 10);
+    const recent = await this.recentCashStats(30);
+    const shortRecent = await this.recentCashStats(14);
+    const isWeekend = this.isWeekend(today);
+
+    let verdict: 'APPROVED' | 'WATCH' | 'REJECTED' = 'APPROVED';
+    const reasons: string[] = [];
+
+    if (!accounts.accounts.length) {
+      verdict = 'REJECTED';
+      reasons.push('No hay ninguna cuenta bancaria conectada todavia.');
+    }
+    if (projectedBalance < safetyBuffer) {
+      verdict = 'REJECTED';
+      reasons.push(`Despues del gasto quedarias por debajo del colchon minimo de ${this.money(safetyBuffer, accounts.currency)}.`);
+    } else if (freeAfterBuffer < amount * 0.75 || shortRecent.net < 0) {
+      verdict = verdict === 'REJECTED' ? verdict : 'WATCH';
+      reasons.push('Se puede hacer, pero deja poco margen respecto al ritmo reciente de caja.');
+    }
+    if (isWeekend) {
+      if (verdict === 'APPROVED') verdict = 'WATCH';
+      reasons.push('Es fin de semana: Shopify suele pagar mas tarde, asi que conviene ser conservador.');
+    }
+    if (recent.expense > recent.income && verdict !== 'REJECTED') {
+      verdict = 'WATCH';
+      reasons.push('En los ultimos 30 dias ha salido mas caja de la que ha entrado.');
+    }
+    if (!reasons.length) {
+      reasons.push('La caja queda por encima del colchon y el gasto encaja con el flujo reciente.');
+    }
+
+    return {
+      currency: accounts.currency,
+      concept: input.concept?.trim() || 'Gasto propuesto',
+      amount,
+      verdict,
+      headline: this.expenseHeadline(verdict, input.concept, amount, accounts.currency),
+      recommendation: this.expenseRecommendation(verdict, freeAfterBuffer, accounts.currency),
+      currentBalance,
+      projectedBalance,
+      safetyBuffer,
+      freeAfterBuffer,
+      recent30Days: recent,
+      recent14Days: shortRecent,
+      isWeekend,
+      reasons
+    };
+  }
+
   private async upsertTransaction(accountId: string, transaction: any) {
     const amount = Number(transaction.transactionAmount?.amount ?? 0);
     const description = [
@@ -292,6 +352,54 @@ export class BankService {
     }
     const fallback = Number(balances[0]?.balanceAmount?.amount);
     return Number.isFinite(fallback) ? fallback : null;
+  }
+
+  private async recentCashStats(days: number) {
+    const end = new Date();
+    const start = new Date(end.getTime() - Math.max(1, days) * 24 * 60 * 60 * 1000);
+    const transactions = await this.prisma.bankTransaction.findMany({
+      where: { bookingDate: { gte: start, lte: end } }
+    });
+    const totals = transactions.reduce(
+      (acc, tx) => {
+        if (tx.amount >= 0) acc.income += tx.amount;
+        else acc.expense += Math.abs(tx.amount);
+        acc.net += tx.amount;
+        acc.count += 1;
+        return acc;
+      },
+      { days, income: 0, expense: 0, net: 0, count: 0, averageDailyNet: 0 }
+    );
+    totals.averageDailyNet = totals.net / days;
+    return totals;
+  }
+
+  private cashSafetyBuffer(): number {
+    const raw = this.config.get<string>('CASH_SAFETY_BUFFER_EUR');
+    const parsed = Number(raw?.replace(',', '.'));
+    return Number.isFinite(parsed) && parsed >= 0 ? parsed : 500;
+  }
+
+  private isWeekend(date: string): boolean {
+    const day = new Date(`${date}T12:00:00.000Z`).getUTCDay();
+    return day === 0 || day === 6;
+  }
+
+  private expenseHeadline(verdict: 'APPROVED' | 'WATCH' | 'REJECTED', concept: string | undefined, amount: number, currency: string) {
+    const label = concept?.trim() || 'ese gasto';
+    if (verdict === 'APPROVED') return `Si, puedes hacer ${label} por ${this.money(amount, currency)}.`;
+    if (verdict === 'WATCH') return `Puedes hacer ${label}, pero con cuidado.`;
+    return `Mejor no hacer ${label} ahora mismo.`;
+  }
+
+  private expenseRecommendation(verdict: 'APPROVED' | 'WATCH' | 'REJECTED', freeAfterBuffer: number, currency: string) {
+    if (verdict === 'APPROVED') return `Despues del gasto aun quedarian ${this.money(Math.max(0, freeAfterBuffer), currency)} por encima del colchon.`;
+    if (verdict === 'WATCH') return 'Yo lo haria solo si es necesario para vender o producir pedidos pendientes.';
+    return 'Espera a que entre caja, baja el importe o revisa gastos pendientes antes de comprar.';
+  }
+
+  private money(value: number, currency: string) {
+    return new Intl.NumberFormat('es-ES', { style: 'currency', currency }).format(value);
   }
 
   private maskIban(iban?: string | null) {
