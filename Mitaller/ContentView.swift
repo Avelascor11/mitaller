@@ -7485,6 +7485,18 @@ struct AutopilotCard: View {
                     .padding(.horizontal, 8).padding(.vertical, 4)
                     .background(modeColor.opacity(0.18), in: Capsule()).foregroundStyle(modeColor)
             }
+
+            if let alerts = autopilot.alerts, !alerts.isEmpty {
+                VStack(alignment: .leading, spacing: 4) {
+                    Label("\(alerts.count) cosa(s) a revisar", systemImage: "exclamationmark.triangle.fill")
+                        .font(.caption.weight(.heavy)).foregroundStyle(AppTheme.red)
+                    ForEach(alerts.prefix(4), id: \.self) { a in
+                        Text("• \(a)").font(.caption2).foregroundStyle(AppTheme.red).fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(10).background(AppTheme.red.opacity(0.12), in: RoundedRectangle(cornerRadius: 10))
+            }
             Text(isLive
                  ? "Cada mañana sube +15% el presupuesto de los anuncios rentables, solo."
                  : "Simulación: calcula los cambios pero no los aplica. Actívalo para que opere solo.")

@@ -2,6 +2,7 @@ import { BadRequestException, Injectable, Logger, UnauthorizedException } from '
 import { Cron } from '@nestjs/schedule';
 import { ConfigService } from '@nestjs/config';
 import { createHmac, timingSafeEqual } from 'crypto';
+import { KlaviyoService } from '../klaviyo/klaviyo.service';
 import { PrismaService } from '../prisma/prisma.service';
 
 const GRAPH = 'https://graph.facebook.com';
@@ -152,7 +153,8 @@ export class MetaService {
 
   constructor(
     private readonly config: ConfigService,
-    private readonly prisma: PrismaService
+    private readonly prisma: PrismaService,
+    private readonly klaviyo: KlaviyoService
   ) {}
 
   // ---------- config ----------
@@ -817,8 +819,23 @@ export class MetaService {
     try {
       const r = await this.autopilotRun(mode === 'live');
       this.logger.log(`Autopilot (${mode}): ${r.actions.length} subidas, ${r.advice.length} avisos`);
+      if (r.alerts.length) await this.sendAutopilotAlert(r.alerts);
     } catch (e) {
       this.logger.warn(`Autopilot failed: ${(e as Error).message}`);
+      await this.sendAutopilotAlert([`El autopilot falló: ${(e as Error).message}`]);
+    }
+  }
+
+  private async sendAutopilotAlert(alerts: string[]) {
+    const email = this.config.get<string>('AUTOPILOT_ALERT_EMAIL') ?? 'angel@speedwear.es';
+    try {
+      await this.klaviyo.trackAutopilotAlert({
+        email,
+        summary: `Meta Autopilot: ${alerts.length} cosa(s) a revisar`,
+        details: alerts.slice(0, 10).join(' | ')
+      });
+    } catch (e) {
+      this.logger.warn(`Autopilot alert email failed: ${(e as Error).message}`);
     }
   }
 
@@ -895,7 +912,12 @@ export class MetaService {
       avgRoas: extraDailySpend > 0 ? +(extraDailyRevenue / extraDailySpend).toFixed(2) : null
     };
 
-    return { mode: apply ? 'live' : 'dry', ranAt: new Date().toISOString(), ceiling, minRoas, step, totalDailyAfter: totalDaily, actions, advice, projection };
+    // Alerts: failed applies + money-losing adsets → things that need the owner's attention.
+    const alerts: string[] = [];
+    for (const a of actions) if (a.applied === false) alerts.push(`No se pudo subir ${a.name}: ${a.error ?? 'error'}`);
+    for (const w of advice) if ((w as any).weak) alerts.push(`${w.name}: ${w.msg}`);
+
+    return { mode: apply ? 'live' : 'dry', ranAt: new Date().toISOString(), ceiling, minRoas, step, totalDailyAfter: totalDaily, actions, advice, projection, alerts };
   }
 
   async campaigns(from: string, to: string): Promise<CampaignInsight[]> {

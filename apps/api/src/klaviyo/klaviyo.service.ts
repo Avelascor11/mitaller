@@ -111,6 +111,15 @@ export class KlaviyoService {
     });
   }
 
+  /** Autopilot alert: fired when the Meta autopilot hits an error or a money-losing campaign. */
+  async trackAutopilotAlert(params: { email: string; summary: string; details: string }) {
+    await this.track('Autopilot Alert', params.email, {
+      Summary: params.summary,
+      Details: params.details,
+      At: new Date().toISOString()
+    });
+  }
+
   /** Crew welcome: fired when an influencer signs up and the gift order is created. */
   async trackCrewWelcome(params: {
     email: string;

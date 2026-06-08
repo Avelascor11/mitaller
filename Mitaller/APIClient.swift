@@ -535,6 +535,7 @@ struct MetaAutopilot: Decodable {
     let advice: [MetaAutopilotAdvice]
     let projection: MetaAutopilotProjection?
     let lastRun: MetaAutopilotLastRun?
+    let alerts: [String]?
 }
 struct MetaAutopilotModeRequest: Encodable { let mode: String }
 struct MetaAutopilotAppliedNow: Decodable { let applied: Int }

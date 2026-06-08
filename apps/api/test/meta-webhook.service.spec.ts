@@ -4,7 +4,8 @@ import { MetaService } from '../src/meta/meta.service';
 function serviceWith(prisma: Record<string, any>, configValues: Record<string, string | undefined> = {}) {
   return new MetaService(
     { get: vi.fn((key: string) => configValues[key]) } as never,
-    prisma as never
+    prisma as never,
+    { trackAutopilotAlert: vi.fn() } as never
   );
 }
 
