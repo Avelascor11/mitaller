@@ -122,11 +122,12 @@ export class BankService {
         await this.upsertTransaction(account.id, transaction);
         imported += 1;
       }
-      // Fetch + persist balance here (scheduled), to avoid GoCardless rate limits on /accounts.
-      try {
+      // Fetch + persist balance here, capped to once / 6h per account (GoCardless free tier = 4 balance calls/day/account).
+      const balanceStale = !account.balanceUpdatedAt
+        || (Date.now() - new Date(account.balanceUpdatedAt).getTime()) > 6 * 60 * 60 * 1000;
+      if (balanceStale) try {
         const balResponse = await this.accountBalancesWithRetry(account.providerAccountId);
         const balances = balResponse.balances ?? [];
-        this.logger.log(`Balances ${account.name}: ${JSON.stringify(balances)}`);
         const currentBalance = this.pickBalance(balances, ['interimBooked', 'closingBooked', 'expected', 'openingBooked', 'interimAvailable']);
         const availableBalance = this.pickBalance(balances, ['interimAvailable', 'forwardAvailable', 'nonInvoiced', 'expected']);
         if (currentBalance != null || availableBalance != null) {
