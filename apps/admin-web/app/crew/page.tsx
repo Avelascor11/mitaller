@@ -191,15 +191,18 @@ export default function CrewPage() {
 
         {error && <div style={{ color: C.danger, fontSize: 14, margin: '8px 2px', fontWeight: 600 }}>{error}</div>}
 
-        <button onClick={submit} disabled={!canSubmit} style={{ ...btn, opacity: canSubmit ? 1 : 0.4 }}>
-          {submitting ? 'Enviando…' : tier?.tier === 'WAITLIST' ? 'Apuntarme a la lista' : 'Unirme a la Crew'}
-        </button>
-        {tier?.tier === 'WAITLIST' && (
-          <button onClick={submit} disabled={submitting} style={{ ...btn, background: C.amber, marginTop: 8 }}>
-            {submitting ? 'Enviando…' : 'Entrar en lista de espera'}
+        {/* Spacer so content isn't hidden behind the sticky bar */}
+        <div style={{ height: 96 }} />
+      </div>
+
+      {/* Sticky submit bar — always visible */}
+      <div style={stickyBar}>
+        <div style={{ maxWidth: 640, margin: '0 auto', width: '100%' }}>
+          <button onClick={submit} disabled={tier?.tier === 'WAITLIST' ? submitting : !canSubmit}
+            style={{ ...btn, marginTop: 0, background: tier?.tier === 'WAITLIST' ? C.amber : C.accent, opacity: (tier?.tier === 'WAITLIST' ? !submitting : canSubmit) ? 1 : 0.4 }}>
+            {submitting ? 'Enviando…' : tier?.tier === 'WAITLIST' ? 'Entrar en lista de espera' : 'Unirme a la Crew'}
           </button>
-        )}
-        <div style={{ height: 40 }} />
+        </div>
       </div>
     </main>
   );
@@ -255,3 +258,4 @@ const prodCard: React.CSSProperties = { background: C.card, border: '1px solid',
 const sizeBtn: React.CSSProperties = { border: '1px solid', background: 'transparent', borderRadius: 8, padding: '4px 8px', fontSize: 11, fontWeight: 700, cursor: 'pointer' };
 const pickBtn: React.CSSProperties = { width: '100%', border: '1px solid', borderRadius: 10, padding: '8px', fontSize: 13, fontWeight: 800, cursor: 'pointer', marginTop: 6 };
 const btn: React.CSSProperties = { width: '100%', background: C.accent, color: '#0B0B0F', border: 'none', borderRadius: 14, padding: '15px', fontSize: 16, fontWeight: 900, cursor: 'pointer', marginTop: 18 };
+const stickyBar: React.CSSProperties = { position: 'fixed', left: 0, right: 0, bottom: 0, padding: '12px 16px calc(12px + env(safe-area-inset-bottom))', background: 'rgba(11,11,15,0.92)', backdropFilter: 'blur(10px)', borderTop: `1px solid ${C.line}`, zIndex: 50 };
