@@ -7340,7 +7340,11 @@ struct CarrierReturnRow: View {
             Text(CarrierReason.label(item.reason)).font(.caption.weight(.bold)).foregroundStyle(AppTheme.muted)
             if let n = item.customerName { Text(n).font(.subheadline).foregroundStyle(AppTheme.ink) }
             if let e = item.customerEmail { Text(e).font(.caption2).foregroundStyle(AppTheme.muted) }
-            else { Text("Sin email — añádelo para cobrar").font(.caption2).foregroundStyle(AppTheme.red) }
+            else {
+                Button { emailEdit = ""; showEmailPrompt = true } label: {
+                    Label("Sin email — toca para añadirlo", systemImage: "envelope.badge.fill").font(.caption2.weight(.bold)).foregroundStyle(AppTheme.red)
+                }
+            }
 
             if let url = item.invoiceUrl, let u = URL(string: url) {
                 Button { openURL(u) } label: { Label("Ver link de pago", systemImage: "link").font(.caption.weight(.bold)) }
