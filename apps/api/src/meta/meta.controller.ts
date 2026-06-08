@@ -17,6 +17,16 @@ export class MetaController {
     return this.meta.billingStatus();
   }
 
+  @Get('autopilot')
+  autopilotPreview() {
+    return this.meta.autopilotRun(false);
+  }
+
+  @Post('autopilot/run')
+  autopilotRun(@Body() body?: { apply?: boolean }) {
+    return this.meta.autopilotRun(Boolean(body?.apply));
+  }
+
   @Get('summary')
   summary(@Query('from') from?: string, @Query('to') to?: string) {
     return this.meta.summary(from, to);

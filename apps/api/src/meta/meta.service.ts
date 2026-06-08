@@ -1,4 +1,5 @@
 import { BadRequestException, Injectable, Logger, UnauthorizedException } from '@nestjs/common';
+import { Cron } from '@nestjs/schedule';
 import { ConfigService } from '@nestjs/config';
 import { createHmac, timingSafeEqual } from 'crypto';
 import { PrismaService } from '../prisma/prisma.service';
@@ -741,6 +742,84 @@ export class MetaService {
   }
 
   // ---------- campaigns + insights ----------
+  // ---------- Autopilot ----------
+  private get autopilotMode() { return (this.config.get<string>('META_AUTOPILOT_MODE') ?? 'dry').toLowerCase(); } // off | dry | live
+  private cfgNum(key: string, fallback: number) {
+    const n = Number((this.config.get<string>(key) ?? '').replace(',', '.'));
+    return Number.isFinite(n) && n > 0 ? n : fallback;
+  }
+
+  @Cron('0 8 * * *', { timeZone: 'Europe/Madrid' })
+  async autopilotCron() {
+    if (this.autopilotMode === 'off' || !this.hasCredentials()) return;
+    try {
+      const r = await this.autopilotRun(this.autopilotMode === 'live');
+      this.logger.log(`Autopilot (${this.autopilotMode}): ${r.actions.length} subidas, ${r.advice.length} avisos`);
+    } catch (e) {
+      this.logger.warn(`Autopilot failed: ${(e as Error).message}`);
+    }
+  }
+
+  /** Evaluate active adsets and scale budgets of profitable ones within the daily ceiling. */
+  async autopilotRun(apply: boolean) {
+    this.assert();
+    const ceiling = this.cfgNum('META_AUTOPILOT_MAX_DAILY', 50);
+    const minRoas = this.cfgNum('META_AUTOPILOT_MIN_ROAS', 1.5);
+    const step = this.cfgNum('META_AUTOPILOT_STEP', 0.15);
+    const today = new Date().toISOString().slice(0, 10);
+    const from = new Date(Date.now() - 7 * 86400000).toISOString().slice(0, 10);
+
+    const activeCampaigns = (await this.campaigns(from, today)).filter((c) => c.status === 'ACTIVE');
+    const adsets: Array<AdSetInsight & { campaignName: string }> = [];
+    for (const c of activeCampaigns) {
+      try {
+        const detail = await this.campaignDetail(c.id, from, today);
+        for (const a of detail.adsets) {
+          if (a.status === 'ACTIVE' && a.dailyBudget != null) adsets.push({ ...a, campaignName: c.name });
+        }
+      } catch { /* skip campaign */ }
+    }
+
+    let totalDaily = +adsets.reduce((s, a) => s + (a.dailyBudget ?? 0), 0).toFixed(2);
+    const actions: any[] = [];
+    const advice: any[] = [];
+
+    for (const a of adsets) {
+      const budget = a.dailyBudget ?? 0;
+      if (a.purchases >= 2 && (a.roas ?? 0) >= minRoas) {
+        const room = +(ceiling - totalDaily).toFixed(2);
+        if (room <= 0.5) { advice.push({ name: a.name, campaign: a.campaignName, msg: `Subiría presupuesto pero el tope diario (${ceiling}€) está al máximo.` }); continue; }
+        const target = +(budget * (1 + step)).toFixed(2);
+        const newBudget = +Math.min(target, budget + room).toFixed(2);
+        if (newBudget <= budget + 0.01) continue;
+        actions.push({ type: 'SCALE', adsetId: a.id, name: a.name, campaign: a.campaignName, from: budget, to: newBudget, roas: a.roas, purchases: a.purchases });
+        totalDaily = +(totalDaily - budget + newBudget).toFixed(2);
+      } else if (a.spend >= 20 && a.purchases === 0) {
+        advice.push({ name: a.name, campaign: a.campaignName, severity: 'PAUSE', msg: `Gasta ${a.spend.toFixed(0)}€ y 0 ventas — considera pausar.` });
+      } else if (a.spend >= 15 && (a.roas ?? 0) > 0 && (a.roas ?? 0) < 1) {
+        advice.push({ name: a.name, campaign: a.campaignName, severity: 'FIX', msg: `ROAS ${a.roas?.toFixed(2)}x (pierde dinero) — revisa o pausa.` });
+      }
+    }
+
+    if (apply) {
+      for (const act of actions) {
+        try { await this.graphPost(act.adsetId, { daily_budget: Math.round(act.to * 100) }); act.applied = true; }
+        catch (e) { act.applied = false; act.error = (e as Error).message; }
+      }
+    }
+
+    await this.prisma.activityLog.create({
+      data: {
+        entityType: 'MetaAutopilot', entityId: 'account',
+        action: apply ? 'AUTOPILOT_APPLIED' : 'AUTOPILOT_DRY',
+        message: `${actions.length} subidas · ${advice.length} avisos · total diario ${totalDaily}€/${ceiling}€`,
+        metadataJson: { actions, advice, totalDaily, ceiling } as any
+      }
+    }).catch(() => undefined);
+
+    return { mode: apply ? 'live' : 'dry', ranAt: new Date().toISOString(), ceiling, minRoas, step, totalDailyAfter: totalDaily, actions, advice };
+  }
+
   async campaigns(from: string, to: string): Promise<CampaignInsight[]> {
     this.assert();
     const time = JSON.stringify({ since: from, until: to });
