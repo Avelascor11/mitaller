@@ -1,4 +1,5 @@
 import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { Cron } from '@nestjs/schedule';
 import { ConfigService } from '@nestjs/config';
 import { BankTransactionCategory } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
@@ -109,18 +110,32 @@ export class BankService {
     return updated;
   }
 
+  @Cron('0 7 * * *', { timeZone: 'Europe/Madrid' })
+  async scheduledSync() {
+    try {
+      const r = await this.sync();
+      this.logger.log(`Bank daily sync: ${r.imported} tx across ${r.accounts} accounts`);
+    } catch (e) {
+      this.logger.warn(`Bank daily sync failed: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  }
+
   async sync(from?: string, to?: string) {
     const accounts = await this.prisma.bankAccount.findMany({ include: { connection: true } });
     let imported = 0;
     for (const account of accounts) {
-      const response = await this.gocardless.accountTransactions(account.providerAccountId, from, to);
-      const transactions = [
-        ...(response.transactions?.booked ?? []),
-        ...(response.transactions?.pending ?? [])
-      ];
-      for (const transaction of transactions) {
-        await this.upsertTransaction(account.id, transaction);
-        imported += 1;
+      try {
+        const response = await this.gocardless.accountTransactions(account.providerAccountId, from, to);
+        const transactions = [
+          ...(response.transactions?.booked ?? []),
+          ...(response.transactions?.pending ?? [])
+        ];
+        for (const transaction of transactions) {
+          await this.upsertTransaction(account.id, transaction);
+          imported += 1;
+        }
+      } catch (e) {
+        this.logger.warn(`Tx fetch failed ${account.name}: ${e instanceof Error ? e.message : String(e)}`);
       }
       // Fetch + persist balance here, capped to once / 6h per account (GoCardless free tier = 4 balance calls/day/account).
       const balanceStale = !account.balanceUpdatedAt
