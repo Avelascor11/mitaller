@@ -764,6 +764,30 @@ export class MetaService {
     return { mode: m };
   }
 
+  /** Pause all underperforming active adsets (the "weak" ones the autopilot only advises about). */
+  async pauseWeakAdsets() {
+    this.assert();
+    const plan = await this.autopilotRun(false);
+    const weak = (plan.advice as any[]).filter((a) => a.weak && a.adsetId);
+    const paused: any[] = [];
+    for (const w of weak) {
+      try {
+        await this.graphPost(w.adsetId, { status: 'PAUSED' });
+        paused.push({ adsetId: w.adsetId, name: w.name, reason: w.msg });
+      } catch (e) {
+        paused.push({ adsetId: w.adsetId, name: w.name, error: (e as Error).message });
+      }
+    }
+    await this.prisma.activityLog.create({
+      data: {
+        entityType: 'MetaAutopilot', entityId: 'account', action: 'AUTOPILOT_PAUSE_WEAK',
+        message: `Pausados ${paused.filter((p) => !p.error).length} anuncios flojos`,
+        metadataJson: { paused } as any
+      }
+    }).catch(() => undefined);
+    return { pausedCount: paused.filter((p) => !p.error).length, paused };
+  }
+
   @Cron('0 8 * * *', { timeZone: 'Europe/Madrid' })
   async autopilotCron() {
     const mode = await this.getAutopilotMode();
@@ -813,9 +837,9 @@ export class MetaService {
         actions.push({ type: 'SCALE', adsetId: a.id, name: a.name, campaign: a.campaignName, from: budget, to: newBudget, roas: a.roas, purchases: a.purchases });
         totalDaily = +(totalDaily - budget + newBudget).toFixed(2);
       } else if (a.spend >= 20 && a.purchases === 0) {
-        advice.push({ name: a.name, campaign: a.campaignName, severity: 'PAUSE', msg: `Gasta ${a.spend.toFixed(0)}€ y 0 ventas — considera pausar.` });
+        advice.push({ adsetId: a.id, name: a.name, campaign: a.campaignName, severity: 'PAUSE', weak: true, msg: `Gasta ${a.spend.toFixed(0)}€ y 0 ventas — considera pausar.` });
       } else if (a.spend >= 15 && (a.roas ?? 0) > 0 && (a.roas ?? 0) < 1) {
-        advice.push({ name: a.name, campaign: a.campaignName, severity: 'FIX', msg: `ROAS ${a.roas?.toFixed(2)}x (pierde dinero) — revisa o pausa.` });
+        advice.push({ adsetId: a.id, name: a.name, campaign: a.campaignName, severity: 'FIX', weak: true, msg: `ROAS ${a.roas?.toFixed(2)}x (pierde dinero) — revisa o pausa.` });
       }
     }
 

@@ -342,6 +342,10 @@ struct APIClient {
         let request = try jsonRequest(path: "/meta/autopilot/mode", method: "POST", body: MetaAutopilotModeRequest(mode: mode))
         return try await perform(request)
     }
+    func metaPauseWeak() async throws -> MetaPauseWeakResult {
+        let request = try jsonRequest(path: "/meta/autopilot/pause-weak", method: "POST", body: EmptyBody())
+        return try await perform(request)
+    }
 
     func metaSetCampaignStatus(_ id: String, status: String) async throws {
         let request = try jsonRequest(path: "/meta/campaigns/\(Self.pathSegment(id))/status", method: "POST", body: MetaStatusRequest(status: status))
@@ -506,9 +510,11 @@ struct MetaAutopilotAdvice: Decodable, Identifiable {
     let name: String
     let campaign: String?
     let severity: String?
+    let weak: Bool?
     let msg: String
     var id: String { name + msg }
 }
+struct MetaPauseWeakResult: Decodable { let pausedCount: Int }
 struct MetaAutopilot: Decodable {
     let mode: String
     let currentMode: String

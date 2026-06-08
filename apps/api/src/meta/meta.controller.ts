@@ -33,6 +33,11 @@ export class MetaController {
     return this.meta.setAutopilotMode(body?.mode);
   }
 
+  @Post('autopilot/pause-weak')
+  pauseWeak() {
+    return this.meta.pauseWeakAdsets();
+  }
+
   @Get('summary')
   summary(@Query('from') from?: string, @Query('to') to?: string) {
     return this.meta.summary(from, to);

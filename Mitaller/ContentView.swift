@@ -7463,7 +7463,11 @@ struct AutopilotCard: View {
     let autopilot: MetaAutopilot
     let onChange: () -> Void
     @State private var busy = false
+    @State private var pausing = false
+    @State private var confirmPause = false
+    @State private var pauseMsg: String?
 
+    private var weakCount: Int { autopilot.advice.filter { $0.weak == true }.count }
     private var isLive: Bool { autopilot.currentMode == "live" }
     private var modeLabel: String {
         switch autopilot.currentMode { case "live": "EN VIVO"; case "off": "APAGADO"; default: "SIMULACIÓN" }
@@ -7517,8 +7521,34 @@ struct AutopilotCard: View {
                 else { Label(isLive ? "Pausar autopilot" : "Activar autopilot", systemImage: isLive ? "pause.fill" : "bolt.fill").font(.subheadline.weight(.heavy)).frame(maxWidth: .infinity) }
             }
             .buttonStyle(.borderedProminent).tint(isLive ? AppTheme.amber : AppTheme.green).disabled(busy)
+
+            if weakCount > 0 {
+                Button(role: .destructive) {
+                    confirmPause = true
+                } label: {
+                    if pausing { ProgressView().frame(maxWidth: .infinity) }
+                    else { Label("Pausar los flojos (\(weakCount))", systemImage: "pause.circle.fill").font(.subheadline.weight(.heavy)).frame(maxWidth: .infinity) }
+                }
+                .buttonStyle(.bordered).tint(AppTheme.red).disabled(pausing)
+            }
+            if let pauseMsg { Text(pauseMsg).font(.caption.weight(.bold)).foregroundStyle(AppTheme.green) }
         }
         .glassPanel(padding: 16, accent: modeColor)
+        .confirmationDialog("Pausar \(weakCount) anuncio(s) flojo(s)", isPresented: $confirmPause, titleVisibility: .visible) {
+            Button("Pausar ahora", role: .destructive) { Task { await pauseWeak() } }
+            Button("Cancelar", role: .cancel) {}
+        } message: {
+            Text("Se pausan en Meta los anuncios que gastan sin vender o con ROAS < 1. Puedes reactivarlos desde el Administrador de Meta.")
+        }
+    }
+
+    private func pauseWeak() async {
+        guard let client = store.apiClient else { return }
+        pausing = true; defer { pausing = false }
+        if let r = try? await client.metaPauseWeak() {
+            pauseMsg = "Pausados \(r.pausedCount) anuncios flojos ✓"
+        }
+        onChange()
     }
 
     private func euro(_ v: Double) -> String { String(format: "%.2f €", v) }
