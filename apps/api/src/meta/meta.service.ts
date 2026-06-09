@@ -847,14 +847,16 @@ export class MetaService {
     const ceiling = Number.isFinite(ceilingRaw) && ceilingRaw > 0 ? ceilingRaw : Infinity;
     const minRoas = this.cfgNum('META_AUTOPILOT_MIN_ROAS', 1.5);
     const step = this.cfgNum('META_AUTOPILOT_STEP', 0.15);
-    const today = new Date().toISOString().slice(0, 10);
-    const from = new Date(Date.now() - 7 * 86400000).toISOString().slice(0, 10);
+    // Evaluate by recent DAILY performance, not a 7-day total. Default: last full day (yesterday).
+    const windowDays = Math.max(1, this.cfgNum('META_AUTOPILOT_WINDOW_DAYS', 1));
+    const to = new Date(Date.now() - 86400000).toISOString().slice(0, 10);
+    const from = new Date(Date.now() - windowDays * 86400000).toISOString().slice(0, 10);
 
-    const activeCampaigns = (await this.campaigns(from, today)).filter((c) => c.status === 'ACTIVE');
+    const activeCampaigns = (await this.campaigns(from, to)).filter((c) => c.status === 'ACTIVE');
     const adsets: Array<AdSetInsight & { campaignName: string }> = [];
     for (const c of activeCampaigns) {
       try {
-        const detail = await this.campaignDetail(c.id, from, today);
+        const detail = await this.campaignDetail(c.id, from, to);
         for (const a of detail.adsets) {
           if (a.status === 'ACTIVE' && a.dailyBudget != null) adsets.push({ ...a, campaignName: c.name });
         }
@@ -917,7 +919,7 @@ export class MetaService {
     for (const a of actions) if (a.applied === false) alerts.push(`No se pudo subir ${a.name}: ${a.error ?? 'error'}`);
     for (const w of advice) if ((w as any).weak) alerts.push(`${w.name}: ${w.msg}`);
 
-    return { mode: apply ? 'live' : 'dry', ranAt: new Date().toISOString(), ceiling, minRoas, step, totalDailyAfter: totalDaily, actions, advice, projection, alerts };
+    return { mode: apply ? 'live' : 'dry', ranAt: new Date().toISOString(), windowFrom: from, windowTo: to, ceiling, minRoas, step, totalDailyAfter: totalDaily, actions, advice, projection, alerts };
   }
 
   async campaigns(from: string, to: string): Promise<CampaignInsight[]> {
