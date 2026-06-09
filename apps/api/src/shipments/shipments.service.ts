@@ -425,11 +425,47 @@ export class ShipmentsService {
       hasOrderPhoto: Boolean(shipment.order.packagePhoto),
       packagePhotoAt: shipment.packagePhotoAt ?? shipment.order.packagePhotoAt ?? null,
       preparedAt: shipment.order.preparedAt ?? null,
+      finalizedAt: shipment.updatedAt,
       cost: shipment.cost,
       createdAt: shipment.createdAt,
       updatedAt: shipment.updatedAt,
       items: shipment.order.items
     }));
+  }
+
+  async finalizedDailySummary(days = 60) {
+    const safeDays = Number.isFinite(days) ? Math.min(Math.max(Math.trunc(days), 1), 365) : 60;
+    const since = new Date();
+    since.setUTCHours(0, 0, 0, 0);
+    since.setUTCDate(since.getUTCDate() - safeDays - 1);
+
+    const shipments = await this.prisma.shipment.findMany({
+      where: {
+        status: { in: ['IN_TRANSIT', 'DELIVERED'] },
+        updatedAt: { gte: since }
+      },
+      select: { id: true, updatedAt: true }
+    });
+
+    const formatter = new Intl.DateTimeFormat('sv-SE', {
+      timeZone: 'Europe/Madrid',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit'
+    });
+    const counts = new Map<string, number>();
+    for (const shipment of shipments) {
+      const day = formatter.format(shipment.updatedAt);
+      counts.set(day, (counts.get(day) ?? 0) + 1);
+    }
+
+    return {
+      timezone: 'Europe/Madrid',
+      total: shipments.length,
+      days: Array.from(counts.entries())
+        .map(([date, count]) => ({ date, count }))
+        .sort((a, b) => b.date.localeCompare(a.date))
+    };
   }
 
   async fetchTracking(id: string) {

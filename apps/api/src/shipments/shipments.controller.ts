@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Headers, Param, Post, Res } from '@nestjs/common';
+import { Body, Controller, Get, Headers, Param, Post, Query, Res } from '@nestjs/common';
 import type { Response } from 'express';
 import { ShipmentsService } from './shipments.service';
 
@@ -52,6 +52,11 @@ export class ShipmentsController {
   @Get('finalized')
   finalized() {
     return this.shipments.findFinalized();
+  }
+
+  @Get('finalized/daily')
+  finalizedDaily(@Query('days') days?: string) {
+    return this.shipments.finalizedDailySummary(days ? Number(days) : undefined);
   }
 
   @Get()

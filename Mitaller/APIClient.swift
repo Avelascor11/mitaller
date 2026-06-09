@@ -146,6 +146,10 @@ struct APIClient {
         try await get("/shipments/finalized")
     }
 
+    func finalizedDailySummary(days: Int = 60) async throws -> FinalizedDailySummary {
+        try await get("/shipments/finalized/daily?days=\(days)")
+    }
+
     func reprintLabel(shipmentId: String) async throws {
         let request = try jsonRequest(path: "/shipments/\(Self.pathSegment(shipmentId))/reprint", method: "POST", body: EmptyBody())
         let _: EmptyResponse = try await perform(request)
@@ -1776,10 +1780,24 @@ struct FinalizedShipment: Decodable, Identifiable {
     let hasOrderPhoto: Bool?
     let packagePhotoAt: Date?
     let preparedAt: Date?
+    let finalizedAt: Date?
     let cost: Double?
     let createdAt: Date
     let updatedAt: Date
     let items: [FinalizedShipmentItem]
+}
+
+struct FinalizedDailySummary: Decodable {
+    let timezone: String
+    let total: Int
+    let days: [FinalizedDailyCount]
+}
+
+struct FinalizedDailyCount: Decodable, Identifiable {
+    let date: String
+    let count: Int
+
+    var id: String { date }
 }
 
 struct ShipmentTrackingResponse: Decodable {

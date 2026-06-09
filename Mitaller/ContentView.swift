@@ -12023,6 +12023,8 @@ func payoutTypeText(_ type: String) -> String {
 struct FinalizedView: View {
     @Environment(WorkshopStore.self) private var store
     @State private var shipments: [FinalizedShipment] = []
+    @State private var dailySummary: FinalizedDailySummary?
+    @State private var selectedDate = Date()
     @State private var loading = false
     @State private var error: String?
     @State private var search = ""
@@ -12037,6 +12039,37 @@ struct FinalizedView: View {
         }
     }
 
+    private var selectedDateKey: String {
+        Self.dayKeyFormatter.string(from: selectedDate)
+    }
+
+    private var todayKey: String {
+        Self.dayKeyFormatter.string(from: Date())
+    }
+
+    private var selectedDayCount: Int {
+        dailySummary?.days.first(where: { $0.date == selectedDateKey })?.count
+            ?? shipments.filter { Self.dayKeyFormatter.string(from: $0.finalizedAt ?? $0.updatedAt) == selectedDateKey }.count
+    }
+
+    private var todayCount: Int {
+        dailySummary?.days.first(where: { $0.date == todayKey })?.count
+            ?? shipments.filter { Self.dayKeyFormatter.string(from: $0.finalizedAt ?? $0.updatedAt) == todayKey }.count
+    }
+
+    private var recentTotal: Int {
+        dailySummary?.total ?? shipments.count
+    }
+
+    private static let dayKeyFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.calendar = Calendar(identifier: .gregorian)
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone(identifier: "Europe/Madrid")
+        formatter.dateFormat = "yyyy-MM-dd"
+        return formatter
+    }()
+
     var body: some View {
         NavigationStack {
             ScrollView {
@@ -12049,6 +12082,25 @@ struct FinalizedView: View {
                             .font(.subheadline.weight(.medium))
                             .foregroundStyle(AppTheme.muted)
                     }
+
+                    VStack(alignment: .leading, spacing: 12) {
+                        DatePicker("Día", selection: $selectedDate, displayedComponents: .date)
+                            .datePickerStyle(.compact)
+                            .font(.subheadline.weight(.bold))
+
+                        LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible()), GridItem(.flexible())], spacing: 10) {
+                            MetricTile(title: "Ese día", value: selectedDayCount, color: AppTheme.green, icon: "calendar.badge.checkmark")
+                            MetricTile(title: "Hoy", value: todayCount, color: AppTheme.blue, icon: "sun.max.fill")
+                            MetricTile(title: "60 días", value: recentTotal, color: AppTheme.purple, icon: "chart.bar.fill")
+                        }
+
+                        if let last = dailySummary?.days.first {
+                            Text("Último día con finalizados: \(last.date) · \(last.count) pedidos")
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(AppTheme.muted)
+                        }
+                    }
+                    .glassPanel()
 
                     HStack(spacing: 10) {
                         Image(systemName: "magnifyingglass").foregroundStyle(AppTheme.muted)
@@ -12115,7 +12167,10 @@ struct FinalizedView: View {
         loading = true; defer { loading = false }
         error = nil
         do {
-            shipments = try await client.finalizedShipments()
+            async let loadedShipments = client.finalizedShipments()
+            async let loadedSummary = client.finalizedDailySummary(days: 60)
+            shipments = try await loadedShipments
+            dailySummary = try await loadedSummary
         } catch let err {
             error = err.localizedDescription
         }
