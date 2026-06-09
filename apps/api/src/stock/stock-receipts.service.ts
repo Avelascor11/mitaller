@@ -36,7 +36,7 @@ export class StockReceiptsService {
       where: { type: { in: [StockItemType.BLANK_GARMENT, StockItemType.TRANSFER] } },
       orderBy: [{ name: 'asc' }]
     });
-    const lines = this.parseLines(rawText, stockItems);
+    const lines = this.parseLines(rawText, this.receiptableStockItems(stockItems));
     const photo = this.decodePhoto(input.photoBase64);
 
     return this.prisma.stockReceipt.create({
@@ -91,6 +91,9 @@ export class StockReceiptsService {
       const received = [];
       for (const line of cleanLines) {
         const stockItem = await tx.stockItem.findUniqueOrThrow({ where: { id: line.stockItemId! } });
+        if (!this.isReceiptableStockItem(stockItem)) {
+          throw new BadRequestException(`El albaran solo puede recibir camisetas y sudaderas. Revisa ${stockItem.name}.`);
+        }
         await tx.stockLevel.upsert({
           where: { stockItemId_locationId: { stockItemId: stockItem.id, locationId: location.id } },
           create: { stockItemId: stockItem.id, locationId: location.id, quantity: line.quantity },
@@ -279,6 +282,16 @@ export class StockReceiptsService {
     if (value.includes('sudadera') || value.includes('hoodie') || /\bwg005\b/.test(value)) return 'sudadera';
     if (value.includes('camiseta') || value.includes('shirt') || value.includes('tshirt') || value.includes('t shirt') || /\btg002\b/.test(value)) return 'camiseta';
     return undefined;
+  }
+
+  private receiptableStockItems(stockItems: StockItem[]) {
+    return stockItems.filter((item) => this.isReceiptableStockItem(item));
+  }
+
+  private isReceiptableStockItem(stockItem: Pick<StockItem, 'name' | 'sku' | 'supplierSku'>) {
+    const text = this.normalize(`${stockItem.name} ${stockItem.sku} ${stockItem.supplierSku ?? ''}`);
+    if (text.includes('banador') || text.includes('swim') || text.includes('bikini')) return false;
+    return text.includes('camiseta') || text.includes('sudadera') || /\btg002\b/.test(text) || /\bwg005\b/.test(text);
   }
 
   private detectColor(value: string) {
