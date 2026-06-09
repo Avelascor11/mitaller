@@ -149,6 +149,7 @@ describe('SupplierOrderService', () => {
             pendingOrderNeed: 6,
             currentInternalStock: 2,
             minStockTarget: 0,
+            alreadyOrderedQuantity: 2,
             demandOrders: [{ orderNumber: '#9510' }]
           }]
         }]
@@ -171,13 +172,17 @@ describe('SupplierOrderService', () => {
 
     await service.generateDailyFalkRossOrder({ source: 'manual' });
 
-    expect(prisma.supplierPurchaseOrder.findMany).toHaveBeenCalledWith(expect.objectContaining({
-      where: { supplier: 'FALK_ROSS', status: { in: ['SUBMITTED'] } }
-    }));
     expect(prisma.supplierPurchaseOrder.create).toHaveBeenCalledWith(expect.objectContaining({
       data: expect.objectContaining({
         rawRequestJson: expect.objectContaining({
           lines: [expect.objectContaining({ supplierSku: '180000002', quantity: 4 })]
+        }),
+        lines: expect.objectContaining({
+          create: [expect.objectContaining({
+            rawDataJson: expect.objectContaining({
+              alreadyPendingSupplierOrderQuantity: 2
+            })
+          })]
         })
       })
     }));

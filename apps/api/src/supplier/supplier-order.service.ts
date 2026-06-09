@@ -113,7 +113,6 @@ export class SupplierOrderService {
 
     await this.syncSupplierStockBeforeOrdering();
     const matrix = await this.purchases.getPurchaseMatrix();
-    const pendingByStockItemId = await this.pendingSupplierOrderQuantityByStockItemId();
     const [supplierArticles, supplierStocks] = await Promise.all([
       this.prisma.supplierArticle.findMany({ where: { supplier: 'FALK_ROSS' } }),
       this.prisma.supplierStock.findMany({ where: { supplier: 'FALK_ROSS' } })
@@ -132,8 +131,8 @@ export class SupplierOrderService {
         const resolvedStyleKey = this.falkRossStyleKey(article?.styleCode ?? article?.productName ?? expectedStyles[0]);
         const supplierStock = article ? stockBySku.get(supplierSku) : null;
         const supplierAvailableQuantity = supplierStock?.availableQuantity ?? null;
-        const alreadyPending = pendingByStockItemId.get(entry.stockItemId!) ?? 0;
-        const requestedQuantity = Math.max(0, entry.recommendedPurchaseQuantity - alreadyPending);
+        const alreadyPending = entry.alreadyOrderedQuantity ?? 0;
+        const requestedQuantity = entry.recommendedPurchaseQuantity;
         const quantity = this.orderableQuantity(requestedQuantity, supplierAvailableQuantity);
         return {
           stockItemId: entry.stockItemId!,

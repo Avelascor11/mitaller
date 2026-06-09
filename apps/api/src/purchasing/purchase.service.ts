@@ -4,6 +4,8 @@ import { Cron } from '@nestjs/schedule';
 import { OperationalStatus, Prisma, StockItem } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 
+const OPEN_SUPPLIER_ORDER_STATUSES = ['SUBMITTED'];
+
 @Injectable()
 export class PurchaseService {
   constructor(private readonly prisma: PrismaService, private readonly config: ConfigService) {}
@@ -15,7 +17,14 @@ export class PurchaseService {
     currentInternalStock: number;
     alreadyOrderedQuantity: number;
   }) {
-    return Math.max(0, input.pendingOrderNeed + input.minStockTarget + (input.forecastNeed ?? 0) - input.currentInternalStock);
+    return Math.max(
+      0,
+      input.pendingOrderNeed
+        + input.minStockTarget
+        + (input.forecastNeed ?? 0)
+        - input.currentInternalStock
+        - input.alreadyOrderedQuantity
+    );
   }
 
   getTodayNeeds() {
@@ -244,7 +253,7 @@ export class PurchaseService {
       OperationalStatus.PICKED,
       OperationalStatus.BLOCKED
     ];
-    const [blankStockItems, transferStockItems, orderItems, supplierStocks, productMappings, orderedNeeds] = await Promise.all([
+    const [blankStockItems, transferStockItems, orderItems, supplierStocks, productMappings, orderedQuantities] = await Promise.all([
       this.prisma.stockItem.findMany({
         where: { type: 'BLANK_GARMENT' },
         include: { levels: true }
@@ -262,7 +271,7 @@ export class PurchaseService {
       }),
       this.prisma.supplierStock.findMany(),
       this.prisma.productSubproductMapping.findMany(),
-      this.prisma.purchaseNeed.findMany({ where: { status: 'ORDERED' } })
+      this.pendingSupplierOrderQuantityByStockItemId()
     ]);
     const mappingIndex = this.buildMappingIndex(productMappings);
 
@@ -271,7 +280,7 @@ export class PurchaseService {
       const kind = this.inferGarmentKind(`${item.name} ${item.sku} ${item.supplierSku ?? ''}`);
       const color = this.normalizeColor(item.color ?? item.name);
       const size = this.normalizeSize(item.size ?? item.name);
-      if (!kind || !color || !size) continue;
+      if (!this.isPurchasableGarmentKind(kind) || !color || !size) continue;
       stockIndex.set(this.matrixKey(kind, color, size), item);
     }
 
@@ -280,6 +289,7 @@ export class PurchaseService {
     for (const item of this.filterByMinimumOrderNumber(orderItems)) {
       const mapped = this.mapOrderItemToBlankGarment(item, mappingIndex);
       if (!mapped) continue;
+      if (!this.isPurchasableGarmentKind(mapped.kind)) continue;
       const { kind, color, size } = mapped;
       const key = this.matrixKey(kind, color, size);
       const current = demand.get(key) ?? { kind, color, size, quantity: 0, orders: [] };
@@ -336,11 +346,7 @@ export class PurchaseService {
       const currentInternalStock = stockItem?.levels.reduce((sum, level) => sum + level.quantity, 0) ?? 0;
       const minStockTarget = stockItem?.minStock ?? 0;
       const pendingOrderNeed = need?.quantity ?? 0;
-      const alreadyOrderedQuantity = stockItem
-        ? orderedNeeds
-          .filter((ordered) => ordered.stockItemId === stockItem.id)
-          .reduce((sum, ordered) => sum + ordered.recommendedPurchaseQuantity, 0)
-        : 0;
+      const alreadyOrderedQuantity = stockItem ? orderedQuantities.get(stockItem.id) ?? 0 : 0;
       const recommendedPurchaseQuantity = this.calculateRecommendedPurchaseQuantity({
         pendingOrderNeed,
         minStockTarget,
@@ -374,7 +380,7 @@ export class PurchaseService {
       groups.set(groupKey, group);
     }
 
-    const dtfGroup = this.buildDtfGroup(dtfDemand, transferIndex, orderedNeeds, supplierStocks);
+    const dtfGroup = this.buildDtfGroup(dtfDemand, transferIndex, new Map(), supplierStocks);
     if (dtfGroup.sizes.length) groups.set(dtfGroup.key, dtfGroup);
 
     const result = [...groups.values()]
@@ -528,7 +534,7 @@ export class PurchaseService {
       OperationalStatus.PICKED,
       OperationalStatus.BLOCKED
     ];
-    const [stockItems, supplierStocks, pendingOrderItems, productMappings] = await Promise.all([
+    const [stockItems, supplierStocks, pendingOrderItems, productMappings, orderedQuantities] = await Promise.all([
       this.prisma.stockItem.findMany({ where: { type: 'BLANK_GARMENT' }, include: { levels: true } }),
       this.prisma.supplierStock.findMany(),
       this.prisma.orderItem.findMany({
@@ -538,13 +544,15 @@ export class PurchaseService {
         },
         include: { order: true }
       }),
-      this.prisma.productSubproductMapping.findMany()
+      this.prisma.productSubproductMapping.findMany(),
+      this.pendingSupplierOrderQuantityByStockItemId()
     ]);
     const mappingIndex = this.buildMappingIndex(productMappings);
     const demand = new Map<string, number>();
     for (const orderItem of this.filterByMinimumOrderNumber(pendingOrderItems)) {
       const mapped = this.mapOrderItemToBlankGarment(orderItem, mappingIndex);
       if (!mapped) continue;
+      if (!this.isPurchasableGarmentKind(mapped.kind)) continue;
       const key = this.matrixKey(mapped.kind, mapped.color, mapped.size);
       demand.set(key, (demand.get(key) ?? 0) + orderItem.quantity);
     }
@@ -555,16 +563,17 @@ export class PurchaseService {
       const kind = this.inferGarmentKind(`${item.name} ${item.sku} ${item.supplierSku ?? ''}`);
       const color = this.normalizeColor(item.color ?? item.name);
       const size = this.normalizeSize(item.size ?? item.name);
-      if (!kind || !color || !size) continue;
+      if (!this.isPurchasableGarmentKind(kind) || !color || !size) continue;
       const key = this.matrixKey(kind, color, size);
       const currentInternalStock = item.levels.reduce((sum, level) => sum + level.quantity, 0);
       const neededForPendingOrders = demand.get(key) ?? 0;
       const supplierAvailableQuantity = supplierStocks.find((stock) => stock.supplierSku === item.supplierSku)?.availableQuantity;
+      const alreadyOrderedQuantity = orderedQuantities.get(item.id) ?? 0;
       const recommendedPurchaseQuantity = this.calculateRecommendedPurchaseQuantity({
         pendingOrderNeed: neededForPendingOrders,
         minStockTarget: item.minStock,
         currentInternalStock,
-        alreadyOrderedQuantity: 0
+        alreadyOrderedQuantity
       });
       if (recommendedPurchaseQuantity === 0) continue;
       created.push(await this.prisma.purchaseNeed.create({
@@ -574,7 +583,7 @@ export class PurchaseService {
           neededForPendingOrders,
           minStockTarget: item.minStock,
           currentInternalStock,
-          alreadyOrderedQuantity: 0,
+          alreadyOrderedQuantity,
           recommendedPurchaseQuantity,
           supplierAvailableQuantity
         }
@@ -779,7 +788,7 @@ export class PurchaseService {
   private buildDtfGroup(
     dtfDemand: Map<string, MatrixDemand>,
     transferIndex: Map<string, StockItemWithLevels>,
-    orderedNeeds: Array<{ stockItemId: string; recommendedPurchaseQuantity: number }>,
+    orderedQuantities: Map<string, number>,
     supplierStocks: Array<{ supplierSku: string; availableQuantity: number }>
   ): PurchaseMatrixGroup {
     const group: PurchaseMatrixGroup = {
@@ -807,11 +816,7 @@ export class PurchaseService {
       const pendingOrderNeed = need?.quantity ?? 0;
       const label = need?.label ?? stockItem?.name.replace(/^DTF\s+/i, '') ?? slug;
       const imageRef = need?.imageRef ?? null;
-      const alreadyOrderedQuantity = stockItem
-        ? orderedNeeds
-          .filter((ordered) => ordered.stockItemId === stockItem.id)
-          .reduce((sum, ordered) => sum + ordered.recommendedPurchaseQuantity, 0)
-        : 0;
+      const alreadyOrderedQuantity = stockItem ? orderedQuantities.get(stockItem.id) ?? 0 : 0;
       const recommendedPurchaseQuantity = this.calculateRecommendedPurchaseQuantity({
         pendingOrderNeed,
         minStockTarget,
@@ -840,6 +845,25 @@ export class PurchaseService {
 
   private matrixKey(kind: string, color: string, size: string) {
     return `${kind}:${color}:${size}`;
+  }
+
+  private isPurchasableGarmentKind(kind: string | null | undefined) {
+    return kind === 'CAMISETA' || kind === 'SUDADERA';
+  }
+
+  private async pendingSupplierOrderQuantityByStockItemId() {
+    if (!this.prisma.supplierPurchaseOrder?.findMany) return new Map<string, number>();
+    const orders = await this.prisma.supplierPurchaseOrder.findMany({
+      where: { supplier: 'FALK_ROSS', status: { in: OPEN_SUPPLIER_ORDER_STATUSES } },
+      include: { lines: true }
+    });
+    const quantities = new Map<string, number>();
+    for (const order of orders) {
+      for (const line of order.lines) {
+        quantities.set(line.stockItemId, (quantities.get(line.stockItemId) ?? 0) + line.quantity);
+      }
+    }
+    return quantities;
   }
 
   private isReliableSku(sku: string) {

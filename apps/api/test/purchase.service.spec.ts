@@ -2,14 +2,14 @@ import { describe, expect, it } from 'vitest';
 import { PurchaseService } from '../src/purchasing/purchase.service';
 
 describe('PurchaseService', () => {
-  it('calcula compra recomendada ignorando unidades ya pedidas', () => {
+  it('calcula compra recomendada descontando pedidos proveedor enviados', () => {
     const service = new PurchaseService({} as never, { get: () => undefined } as never);
     expect(service.calculateRecommendedPurchaseQuantity({
       pendingOrderNeed: 6,
       minStockTarget: 5,
       currentInternalStock: 3,
       alreadyOrderedQuantity: 2
-    })).toBe(8);
+    })).toBe(6);
   });
 
   it('no recomienda cantidades negativas', () => {
@@ -92,6 +92,52 @@ describe('PurchaseService', () => {
     const navy = matrix.groups.find((group) => group.title === 'CAMISETAS NAVY');
     expect(navy?.sizes.find((entry) => entry.size === 'M')?.pendingOrderNeed).toBe(1);
     expect(navy?.sizes.find((entry) => entry.size === 'M')?.recommendedPurchaseQuantity).toBe(1);
+  });
+
+  it('no mete bañadores en compras recomendadas de ropa base', async () => {
+    const service = new PurchaseService({
+      stockItem: {
+        findMany: async ({ where }: { where: { type: string } }) => where.type === 'BLANK_GARMENT'
+          ? [
+            {
+              id: 'swim-blue-m',
+              sku: 'BANADOR-AZUL-M',
+              supplierSku: '55',
+              name: 'Bañador Azul - M',
+              color: 'Azul',
+              size: 'M',
+              minStock: 0,
+              levels: []
+            }
+          ]
+          : []
+      },
+      orderItem: {
+        findMany: async () => [
+          {
+            id: 'item-1',
+            orderId: 'order-1',
+            quantity: 1,
+            title: 'Bañador "55"',
+            sku: 'NO-SKU-55-M',
+            productType: 'Bañador',
+            color: null,
+            size: 'M',
+            variantTitle: 'M',
+            imageUrl: null,
+            imageUrlsJson: null,
+            order: { id: 'order-1', orderNumber: '#9604', shopifyOrderId: 'gid://shopify/Order/9604', customerName: 'Test' }
+          }
+        ]
+      },
+      supplierStock: { findMany: async () => [] },
+      purchaseNeed: { findMany: async () => [] },
+      productSubproductMapping: { findMany: async () => [] }
+    } as never, { get: () => '9454' } as never);
+
+    const matrix = await service.getPurchaseMatrix();
+    expect(matrix.groups.some((group) => group.garmentType === 'BAÑADOR')).toBe(false);
+    expect(matrix.groups.flatMap((group) => group.sizes).some((size) => size.pendingOrderNeed > 0)).toBe(false);
   });
 
   it('genera compras DTF solo para camisetas de colores externos', async () => {
