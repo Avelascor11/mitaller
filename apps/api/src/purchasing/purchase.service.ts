@@ -280,7 +280,7 @@ export class PurchaseService {
       const kind = this.inferGarmentKind(`${item.name} ${item.sku} ${item.supplierSku ?? ''}`);
       const color = this.normalizeColor(item.color ?? item.name);
       const size = this.normalizeSize(item.size ?? item.name);
-      if (!this.isPurchasableGarmentKind(kind) || !color || !size) continue;
+      if (!kind || !color || !size) continue;
       stockIndex.set(this.matrixKey(kind, color, size), item);
     }
 
@@ -289,7 +289,6 @@ export class PurchaseService {
     for (const item of this.filterByMinimumOrderNumber(orderItems)) {
       const mapped = this.mapOrderItemToBlankGarment(item, mappingIndex);
       if (!mapped) continue;
-      if (!this.isPurchasableGarmentKind(mapped.kind)) continue;
       const { kind, color, size } = mapped;
       const key = this.matrixKey(kind, color, size);
       const current = demand.get(key) ?? { kind, color, size, quantity: 0, orders: [] };
@@ -552,7 +551,6 @@ export class PurchaseService {
     for (const orderItem of this.filterByMinimumOrderNumber(pendingOrderItems)) {
       const mapped = this.mapOrderItemToBlankGarment(orderItem, mappingIndex);
       if (!mapped) continue;
-      if (!this.isPurchasableGarmentKind(mapped.kind)) continue;
       const key = this.matrixKey(mapped.kind, mapped.color, mapped.size);
       demand.set(key, (demand.get(key) ?? 0) + orderItem.quantity);
     }
@@ -563,7 +561,7 @@ export class PurchaseService {
       const kind = this.inferGarmentKind(`${item.name} ${item.sku} ${item.supplierSku ?? ''}`);
       const color = this.normalizeColor(item.color ?? item.name);
       const size = this.normalizeSize(item.size ?? item.name);
-      if (!this.isPurchasableGarmentKind(kind) || !color || !size) continue;
+      if (!kind || !color || !size) continue;
       const key = this.matrixKey(kind, color, size);
       const currentInternalStock = item.levels.reduce((sum, level) => sum + level.quantity, 0);
       const neededForPendingOrders = demand.get(key) ?? 0;
@@ -845,10 +843,6 @@ export class PurchaseService {
 
   private matrixKey(kind: string, color: string, size: string) {
     return `${kind}:${color}:${size}`;
-  }
-
-  private isPurchasableGarmentKind(kind: string | null | undefined) {
-    return kind === 'CAMISETA' || kind === 'SUDADERA';
   }
 
   private async pendingSupplierOrderQuantityByStockItemId() {

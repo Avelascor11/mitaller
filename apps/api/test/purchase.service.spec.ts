@@ -94,7 +94,7 @@ describe('PurchaseService', () => {
     expect(navy?.sizes.find((entry) => entry.size === 'M')?.recommendedPurchaseQuantity).toBe(1);
   });
 
-  it('no mete bañadores en compras recomendadas de ropa base', async () => {
+  it('incluye bañadores en compras recomendadas aunque no vayan a Falk & Ross', async () => {
     const service = new PurchaseService({
       stockItem: {
         findMany: async ({ where }: { where: { type: string } }) => where.type === 'BLANK_GARMENT'
@@ -136,8 +136,13 @@ describe('PurchaseService', () => {
     } as never, { get: () => '9454' } as never);
 
     const matrix = await service.getPurchaseMatrix();
-    expect(matrix.groups.some((group) => group.garmentType === 'BAÑADOR')).toBe(false);
-    expect(matrix.groups.flatMap((group) => group.sizes).some((size) => size.pendingOrderNeed > 0)).toBe(false);
+    const swim = matrix.groups.find((group) => group.garmentType === 'BAÑADOR');
+    expect(swim?.title).toBe('BAÑADORES AZUL');
+    expect(swim?.sizes.find((entry) => entry.size === 'M')).toMatchObject({
+      pendingOrderNeed: 1,
+      currentInternalStock: 0,
+      recommendedPurchaseQuantity: 1
+    });
   });
 
   it('genera compras DTF solo para camisetas de colores externos', async () => {
