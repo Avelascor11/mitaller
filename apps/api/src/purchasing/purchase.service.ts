@@ -345,7 +345,9 @@ export class PurchaseService {
       const currentInternalStock = stockItem?.levels.reduce((sum, level) => sum + level.quantity, 0) ?? 0;
       const minStockTarget = stockItem?.minStock ?? 0;
       const pendingOrderNeed = need?.quantity ?? 0;
-      const alreadyOrderedQuantity = stockItem ? orderedQuantities.get(stockItem.id) ?? 0 : 0;
+      // "Ya pedido" no se descuenta de la compra: comprar = pedidos pendientes − stock.
+      // El stock solo sube cuando se mete el albarán. (Se mantiene a 0 a propósito.)
+      const alreadyOrderedQuantity = 0;
       const recommendedPurchaseQuantity = this.calculateRecommendedPurchaseQuantity({
         pendingOrderNeed,
         minStockTarget,
