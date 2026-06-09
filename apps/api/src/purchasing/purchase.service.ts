@@ -23,7 +23,6 @@ export class PurchaseService {
         + input.minStockTarget
         + (input.forecastNeed ?? 0)
         - input.currentInternalStock
-        - input.alreadyOrderedQuantity
     );
   }
 
@@ -535,7 +534,7 @@ export class PurchaseService {
       OperationalStatus.PICKED,
       OperationalStatus.BLOCKED
     ];
-    const [stockItems, supplierStocks, pendingOrderItems, productMappings, orderedQuantities] = await Promise.all([
+    const [stockItems, supplierStocks, pendingOrderItems, productMappings] = await Promise.all([
       this.prisma.stockItem.findMany({ where: { type: 'BLANK_GARMENT' }, include: { levels: true } }),
       this.prisma.supplierStock.findMany(),
       this.prisma.orderItem.findMany({
@@ -545,8 +544,7 @@ export class PurchaseService {
         },
         include: { order: true }
       }),
-      this.prisma.productSubproductMapping.findMany(),
-      this.pendingSupplierOrderQuantityByStockItemId()
+      this.prisma.productSubproductMapping.findMany()
     ]);
     const mappingIndex = this.buildMappingIndex(productMappings);
     const demand = new Map<string, number>();
@@ -568,7 +566,7 @@ export class PurchaseService {
       const currentInternalStock = item.levels.reduce((sum, level) => sum + level.quantity, 0);
       const neededForPendingOrders = demand.get(key) ?? 0;
       const supplierAvailableQuantity = supplierStocks.find((stock) => stock.supplierSku === item.supplierSku)?.availableQuantity;
-      const alreadyOrderedQuantity = orderedQuantities.get(item.id) ?? 0;
+      const alreadyOrderedQuantity = 0;
       const recommendedPurchaseQuantity = this.calculateRecommendedPurchaseQuantity({
         pendingOrderNeed: neededForPendingOrders,
         minStockTarget: item.minStock,
@@ -634,10 +632,12 @@ export class PurchaseService {
       if (mapped) {
         // Mapping defines kind+color; size must come from the actual order item variant
         const actualSize = this.normalizeSize(`${item.size ?? ''} ${item.variantTitle ?? ''}`) ?? mapped.size;
+        const actualKind = this.inferGarmentKind(`${item.productType ?? ''} ${item.title} ${item.variantTitle ?? ''}`) ?? mapped.kind;
         return {
           ...mapped,
+          kind: actualKind,
           size: actualSize,
-          subproductName: `${this.kindLabel(mapped.kind)} ${this.colorSingularLabel(mapped.color)} - ${actualSize}`
+          subproductName: `${this.kindLabel(actualKind)} ${this.colorSingularLabel(mapped.color)} - ${actualSize}`
         };
       }
     }
@@ -913,7 +913,7 @@ export class PurchaseService {
     const rules: Array<[string, RegExp]> = [
       ['BLANCA', /\b(blanco|blanca|white|wht)\b/],
       ['NEGRA', /\b(negro|negra|black|blk)\b/],
-      ['SAND', /\b(sand|arena)\b/],
+      ['SAND', /\b(sand|arena|mastic)\b/],
       ['CHARCOAL', /\b(charcoal|carbon|gris)\b/],
       ['VERDE', /\b(verde|green)\b/],
       ['ROJO', /\b(rojo|red)\b/],

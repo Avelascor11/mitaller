@@ -2,14 +2,14 @@ import { describe, expect, it } from 'vitest';
 import { PurchaseService } from '../src/purchasing/purchase.service';
 
 describe('PurchaseService', () => {
-  it('calcula compra recomendada descontando pedidos proveedor enviados', () => {
+  it('calcula compra recomendada con pedidos pendientes y stock fisico', () => {
     const service = new PurchaseService({} as never, { get: () => undefined } as never);
     expect(service.calculateRecommendedPurchaseQuantity({
       pendingOrderNeed: 6,
       minStockTarget: 5,
       currentInternalStock: 3,
       alreadyOrderedQuantity: 2
-    })).toBe(6);
+    })).toBe(8);
   });
 
   it('no recomienda cantidades negativas', () => {
@@ -48,6 +48,36 @@ describe('PurchaseService', () => {
       color: 'NEGRA',
       size: 'M',
       subproductName: 'Camiseta Negra - M'
+    });
+  });
+
+  it('mantiene el tipo real del pedido si un mapeo antiguo confunde sudadera con camiseta', () => {
+    const service = new PurchaseService({} as never, { get: () => undefined } as never) as unknown as {
+      mapOrderItemToBlankGarment: (item: {
+        productType?: string;
+        title: string;
+        sku: string;
+        color?: string;
+        size?: string;
+        variantTitle?: string;
+      }, mappingIndex?: Map<string, string>) => { kind: string; color: string; size: string; subproductName: string } | null;
+    };
+    const mappingIndex = new Map([
+      ['sku:SFASTER-XL', 'Camiseta Sand - XL']
+    ]);
+
+    expect(service.mapOrderItemToBlankGarment({
+      productType: 'Sudadera',
+      title: 'Sudadera "Fernando is faster than you" - XL',
+      sku: 'SFASTER-XL',
+      color: 'Mastic',
+      size: 'XL',
+      variantTitle: 'XL'
+    }, mappingIndex)).toMatchObject({
+      kind: 'SUDADERA',
+      color: 'SAND',
+      size: 'XL',
+      subproductName: 'Sudadera Sand - XL'
     });
   });
 

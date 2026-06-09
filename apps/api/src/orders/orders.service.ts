@@ -337,7 +337,11 @@ export class OrdersService {
       ?? (this.isReliableSku(item.sku) ? mappingIndex.get(`sku:${item.sku}`) : undefined);
     if (mappedSubproduct) {
       const mapped = this.mapSubproductName(mappedSubproduct);
-      if (mapped) return mapped;
+      if (mapped) {
+        const actualKind = this.inferGarmentKind(`${item.productType ?? ''} ${item.title} ${item.variantTitle ?? ''}`) ?? mapped.kind;
+        const actualSize = this.normalizeSize(`${item.size ?? ''} ${item.variantTitle ?? ''}`) ?? mapped.size;
+        return { ...mapped, kind: actualKind, size: actualSize };
+      }
     }
 
     const kind = this.inferGarmentKind(`${item.productType ?? ''} ${item.title} ${item.sku}`);
