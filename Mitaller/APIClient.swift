@@ -99,6 +99,15 @@ struct APIClient {
         return response.workshopOrder
     }
 
+    func markDamagedGarment(orderId: String, stockItemId: String, quantity: Int = 1, reason: String? = nil) async throws {
+        let request = try jsonRequest(
+            path: "/orders/\(Self.pathSegment(orderId))/damaged-garment",
+            method: "PATCH",
+            body: DamagedGarmentRequest(stockItemId: stockItemId, quantity: quantity, reason: reason)
+        )
+        let _: EmptyResponse = try await perform(request)
+    }
+
     func orderPackagePhotoURL(orderId: String) -> URL? {
         URL(string: "/orders/\(Self.pathSegment(orderId))/package-photo", relativeTo: baseURL)?.absoluteURL
     }
@@ -1158,6 +1167,11 @@ private struct ManualPrintRequest: Encodable {
 }
 private struct MarkPreparedRequest: Encodable {
     let photoBase64: String?
+}
+private struct DamagedGarmentRequest: Encodable {
+    let stockItemId: String
+    let quantity: Int
+    let reason: String?
 }
 private struct BankConnectRequest: Encodable {
     let institutionId: String

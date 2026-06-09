@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { BadRequestException, Injectable, Logger } from '@nestjs/common';
 import { OrderItem, Prisma } from '@prisma/client';
 import { ConfigService } from '@nestjs/config';
 import { Cron } from '@nestjs/schedule';
@@ -175,6 +175,76 @@ export class OrdersService {
     });
   }
 
+  async markDamagedGarment(id: string, input: { stockItemId?: string; quantity?: number; reason?: string }) {
+    const order = await this.findOne(id);
+    if (!input.stockItemId) throw new BadRequestException('stockItemId es obligatorio');
+    const quantity = input.quantity ?? 1;
+    if (!Number.isInteger(quantity) || quantity <= 0) throw new BadRequestException('La cantidad debe ser positiva');
+
+    const stockItem = await this.prisma.stockItem.findUnique({
+      where: { id: input.stockItemId },
+      include: { levels: { include: { location: true }, orderBy: { quantity: 'desc' } } }
+    });
+    if (!stockItem) throw new BadRequestException('Prenda de stock no encontrada');
+
+    const malasLocation = await this.ensureBadStockLocation();
+    const usableLevels = stockItem.levels.filter((level) => level.location.code !== 'MALAS' && level.quantity > 0);
+    const available = usableLevels.reduce((sum, level) => sum + level.quantity, 0);
+    if (available < quantity) {
+      throw new BadRequestException(`Stock insuficiente para marcar como mala. Disponible: ${available}`);
+    }
+
+    let remaining = quantity;
+    const movements = [];
+    for (const level of usableLevels) {
+      if (remaining <= 0) break;
+      const take = Math.min(level.quantity, remaining);
+      await this.prisma.stockLevel.update({
+        where: { id: level.id },
+        data: { quantity: { decrement: take } }
+      });
+      await this.prisma.stockLevel.upsert({
+        where: { stockItemId_locationId: { stockItemId: stockItem.id, locationId: malasLocation.id } },
+        create: { stockItemId: stockItem.id, locationId: malasLocation.id, quantity: take },
+        update: { quantity: { increment: take } }
+      });
+      movements.push(await this.prisma.stockMovement.create({
+        data: {
+          stockItemId: stockItem.id,
+          fromLocationId: level.locationId,
+          toLocationId: malasLocation.id,
+          quantity: take,
+          reason: 'DAMAGED_GARMENT',
+          relatedOrderId: order.id
+        }
+      }));
+      remaining -= take;
+    }
+
+    await this.activity.log({
+      entityType: 'Order',
+      entityId: order.id,
+      action: 'DAMAGED_GARMENT_RECORDED',
+      message: `${quantity} unidad(es) de ${stockItem.name} movidas a MALAS`,
+      metadataJson: {
+        stockItemId: stockItem.id,
+        sku: stockItem.sku,
+        quantity,
+        reason: input.reason?.trim() || 'Prenda manchada o defectuosa'
+      }
+    });
+
+    return {
+      orderId: order.id,
+      orderNumber: order.orderNumber,
+      stockItemId: stockItem.id,
+      stockItemName: stockItem.name,
+      quantity,
+      locationCode: malasLocation.code,
+      movements
+    };
+  }
+
   async getPackagePhoto(id: string): Promise<Buffer | null> {
     const order = await this.prisma.order.findFirst({
       where: { OR: [{ id }, { orderNumber: id }, { shopifyOrderId: id }] },
@@ -317,6 +387,14 @@ export class OrdersService {
     });
     if (location) return location.id;
     return (await this.prisma.stockLocation.findFirstOrThrow()).id;
+  }
+
+  private ensureBadStockLocation() {
+    return this.prisma.stockLocation.upsert({
+      where: { code: 'MALAS' },
+      update: { name: 'Malas', type: 'INCIDENTS' },
+      create: { code: 'MALAS', name: 'Malas', type: 'INCIDENTS' }
+    });
   }
 
   private buildSubproductMappingIndex(mappings: Array<{ sku: string; productName: string; subproductName: string }>) {

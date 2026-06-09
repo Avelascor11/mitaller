@@ -31,6 +31,11 @@ export class OrdersController {
     return this.orders.confirmPicking(id);
   }
 
+  @Patch('orders/:id/damaged-garment')
+  markDamagedGarment(@Param('id') id: string, @Body() body: { stockItemId?: string; quantity?: number; reason?: string }) {
+    return this.orders.markDamagedGarment(id, body);
+  }
+
   @Get('orders/:id/package-photo')
   async getPackagePhoto(@Param('id') id: string, @Res() res: Response) {
     const photo = await this.orders.getPackagePhoto(id);

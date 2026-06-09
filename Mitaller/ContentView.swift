@@ -1162,6 +1162,26 @@ final class WorkshopStore {
         }
     }
 
+    func markDamagedGarmentRemote(order: WorkshopOrder, line: OrderPickingLine) async {
+        guard let client = apiClient, let stockItemId = line.stockItemId else {
+            syncError = "No se pudo marcar prenda mala: falta el stockItemId"
+            return
+        }
+        do {
+            try await client.markDamagedGarment(
+                orderId: order.remoteID ?? order.number,
+                stockItemId: stockItemId,
+                quantity: 1,
+                reason: "Prenda mala en \(order.number)"
+            )
+            await loadPickingList(for: order)
+            await syncFromAPI()
+        } catch {
+            syncError = "No se pudo mover a MALAS: \(error.localizedDescription)"
+            await syncFromAPI()
+        }
+    }
+
     func confirmPickingBatchRemote(_ batchOrders: [WorkshopOrder]) async {
         guard let client = apiClient, !batchOrders.isEmpty else { return }
         isBatchProcessing = true
@@ -5342,6 +5362,7 @@ struct OrderPreparationDetailView: View {
     @State private var showingPickStock = false
     @State private var showingFinishConfirmation = false
     @State private var showingPrintPrompt = false
+    @State private var damagedLine: OrderPickingLine?
     let order: WorkshopOrder
 
     var currentOrder: WorkshopOrder {
@@ -5456,7 +5477,9 @@ struct OrderPreparationDetailView: View {
                             .glassPanel()
                     } else {
                         ForEach(pickingList.lines) { line in
-                            PickingBaseLineCard(line: line)
+                            PickingBaseLineCard(line: line) {
+                                damagedLine = line
+                            }
                         }
                     }
                 } else {
@@ -5559,11 +5582,25 @@ struct OrderPreparationDetailView: View {
         } message: {
             Text("Pedido marcado como preparado.\n¿Crear etiqueta de envío e imprimirla ahora?")
         }
+        .alert("Mover a MALAS", isPresented: Binding(
+            get: { damagedLine != nil },
+            set: { if !$0 { damagedLine = nil } }
+        )) {
+            Button("Cancelar", role: .cancel) { damagedLine = nil }
+            Button("Mover 1 a MALAS", role: .destructive) {
+                guard let line = damagedLine else { return }
+                damagedLine = nil
+                Task { await store.markDamagedGarmentRemote(order: currentOrder, line: line) }
+            }
+        } message: {
+            Text("Se restará 1 unidad de stock bueno y se guardará en la ubicación MALAS. Úsalo si una prenda se mancha, sale mal o hay que coger otra.")
+        }
     }
 }
 
 struct PickingBaseLineCard: View {
     let line: OrderPickingLine
+    var onMarkDamaged: () -> Void = {}
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -5601,6 +5638,13 @@ struct PickingBaseLineCard: View {
                     .font(.caption.weight(.bold))
                     .foregroundStyle(AppTheme.amber)
             }
+            Button(action: onMarkDamaged) {
+                Label("Prenda mala", systemImage: "exclamationmark.triangle.fill")
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.bordered)
+            .tint(AppTheme.red)
+            .disabled(line.stockItemId == nil || line.stockAvailable <= 0)
         }
         .glassPanel(accent: line.stockAvailable >= line.quantity ? AppTheme.blue : AppTheme.red)
     }

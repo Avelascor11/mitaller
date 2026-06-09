@@ -189,4 +189,91 @@ describe('OrdersService', () => {
     expect(prisma.productionTask.deleteMany).toHaveBeenCalledWith({ where: { orderId: 'order-1' } });
     expect(prisma.productionTask.createMany).toHaveBeenCalled();
   });
+
+  it('mueve una prenda mala a MALAS y descuenta stock bueno del pedido', async () => {
+    const order = {
+      id: 'order-9599',
+      orderNumber: '#9599',
+      shopifyOrderId: 'gid://shopify/Order/9599',
+      items: [],
+      shipments: []
+    };
+    const activity = { log: vi.fn() };
+    const prisma = {
+      order: {
+        findFirstOrThrow: vi.fn().mockResolvedValue(order)
+      },
+      stockItem: {
+        findUnique: vi.fn().mockResolvedValue({
+          id: 'stock-xl',
+          sku: 'CAM-BLANCA-XL',
+          name: 'Camiseta Blanca - XL',
+          levels: [{
+            id: 'level-good',
+            locationId: 'loc-est-a-01',
+            quantity: 2,
+            location: { id: 'loc-est-a-01', code: 'EST-A-01' }
+          }]
+        })
+      },
+      stockLocation: {
+        upsert: vi.fn().mockResolvedValue({ id: 'loc-malas', code: 'MALAS', name: 'Malas', type: 'INCIDENTS' })
+      },
+      stockLevel: {
+        update: vi.fn().mockResolvedValue({}),
+        upsert: vi.fn().mockResolvedValue({})
+      },
+      stockMovement: {
+        create: vi.fn().mockResolvedValue({ id: 'movement-1' })
+      }
+    };
+
+    await new OrdersService(
+      prisma as never,
+      { calculate: vi.fn() } as never,
+      { importRecentOrders: vi.fn(), hasCredentials: vi.fn(() => true) } as never,
+      { buildTasks: vi.fn(() => []) } as never,
+      activity as never,
+      { get: vi.fn(() => undefined) } as never
+    ).markDamagedGarment('#9599', {
+      stockItemId: 'stock-xl',
+      quantity: 1,
+      reason: 'Se ha manchado'
+    });
+
+    expect(prisma.stockLocation.upsert).toHaveBeenCalledWith({
+      where: { code: 'MALAS' },
+      update: { name: 'Malas', type: 'INCIDENTS' },
+      create: { code: 'MALAS', name: 'Malas', type: 'INCIDENTS' }
+    });
+    expect(prisma.stockLevel.update).toHaveBeenCalledWith({
+      where: { id: 'level-good' },
+      data: { quantity: { decrement: 1 } }
+    });
+    expect(prisma.stockLevel.upsert).toHaveBeenCalledWith({
+      where: { stockItemId_locationId: { stockItemId: 'stock-xl', locationId: 'loc-malas' } },
+      create: { stockItemId: 'stock-xl', locationId: 'loc-malas', quantity: 1 },
+      update: { quantity: { increment: 1 } }
+    });
+    expect(prisma.stockMovement.create).toHaveBeenCalledWith({
+      data: {
+        stockItemId: 'stock-xl',
+        fromLocationId: 'loc-est-a-01',
+        toLocationId: 'loc-malas',
+        quantity: 1,
+        reason: 'DAMAGED_GARMENT',
+        relatedOrderId: 'order-9599'
+      }
+    });
+    expect(activity.log).toHaveBeenCalledWith(expect.objectContaining({
+      entityType: 'Order',
+      entityId: 'order-9599',
+      action: 'DAMAGED_GARMENT_RECORDED',
+      metadataJson: expect.objectContaining({
+        stockItemId: 'stock-xl',
+        quantity: 1,
+        reason: 'Se ha manchado'
+      })
+    }));
+  });
 });

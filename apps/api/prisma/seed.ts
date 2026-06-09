@@ -83,6 +83,7 @@ async function main() {
     ['FABRICADO', 'Fabricado', 'PRODUCED'],
     ['PACKING', 'Packing', 'PACKING'],
     ['INCIDENCIAS', 'Incidencias', 'INCIDENTS'],
+    ['MALAS', 'Malas', 'INCIDENTS'],
     ['COMPRADO_PENDIENTE_RECIBIR', 'Comprado pendiente recibir', 'INBOUND']
   ] as const) {
     await prisma.stockLocation.upsert({
