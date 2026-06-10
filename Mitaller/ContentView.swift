@@ -10914,13 +10914,13 @@ struct BankBalanceCard: View {
                         .foregroundStyle(AppTheme.muted)
                 }
                 Spacer()
-                Text(formatMoney(summary.totalBalance, currency: summary.currency))
+                Text(summary.balanceAvailable == true ? formatMoney(summary.totalBalance, currency: summary.currency) : "Sin saldo")
                     .font(.system(size: 30, weight: .black, design: .rounded))
-                    .foregroundStyle(summary.totalBalance >= 0 ? AppTheme.green : AppTheme.red)
+                    .foregroundStyle(summary.balanceAvailable == true ? (summary.totalBalance >= 0 ? AppTheme.green : AppTheme.red) : AppTheme.amber)
             }
 
             if summary.balanceAvailable == false {
-                Text("No se pudo leer el saldo real ahora mismo. Sincroniza otra vez antes de tomar decisiones de gasto.")
+                Text("No se pudo leer el saldo real ahora mismo. Pulsa Sincronizar; si sigue igual, puede faltar permiso de saldos en N26.")
                     .font(.caption.weight(.bold))
                     .foregroundStyle(AppTheme.amber)
                     .padding(10)
@@ -10949,9 +10949,9 @@ struct BankBalanceCard: View {
                         }
                         Spacer()
                         VStack(alignment: .trailing, spacing: 3) {
-                            Text(formatMoney(account.currentBalance ?? 0, currency: account.currency))
+                            Text(account.currentBalance.map { formatMoney($0, currency: account.currency) } ?? "Sin saldo leído")
                                 .font(.headline.weight(.black))
-                                .foregroundStyle(AppTheme.ink)
+                                .foregroundStyle(account.currentBalance == nil ? AppTheme.amber : AppTheme.ink)
                             if let available = account.availableBalance {
                                 Text("Disponible \(formatMoney(available, currency: account.currency))")
                                     .font(.caption2.weight(.bold))
@@ -10963,6 +10963,11 @@ struct BankBalanceCard: View {
                         Text("Ultima sincronizacion \(formatPayoutLineDate(lastSyncedAt))")
                             .font(.caption2.weight(.bold))
                             .foregroundStyle(AppTheme.muted)
+                    }
+                    if let balanceUpdatedAt = account.balanceUpdatedAt {
+                        Text("Saldo actualizado \(formatPayoutLineDate(balanceUpdatedAt))")
+                            .font(.caption2.weight(.bold))
+                            .foregroundStyle(AppTheme.green)
                     }
                 }
                 .padding(12)

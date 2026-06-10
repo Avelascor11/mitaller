@@ -1516,6 +1516,7 @@ struct BankAccountSummary: Decodable, Identifiable {
     let product: String?
     let currentBalance: Double?
     let availableBalance: Double?
+    let balanceUpdatedAt: Date?
     let connectedAt: Date?
     let lastSyncedAt: Date?
 }

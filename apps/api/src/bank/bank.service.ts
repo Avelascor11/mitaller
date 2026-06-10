@@ -82,7 +82,7 @@ export class BankService {
     for (const providerAccountId of accounts) {
       const details = await this.gocardless.accountDetails(providerAccountId);
       const account: any = details.account ?? details;
-      await this.prisma.bankAccount.upsert({
+      const savedAccount = await this.prisma.bankAccount.upsert({
         where: { providerAccountId },
         create: {
           connectionId: connection.id,
@@ -105,6 +105,7 @@ export class BankService {
           rawDataJson: details
         }
       });
+      await this.refreshAccountBalance(savedAccount);
     }
 
     return updated;
@@ -137,23 +138,7 @@ export class BankService {
       } catch (e) {
         this.logger.warn(`Tx fetch failed ${account.name}: ${e instanceof Error ? e.message : String(e)}`);
       }
-      // Fetch + persist balance here, capped to once / 6h per account (GoCardless free tier = 4 balance calls/day/account).
-      const balanceStale = !account.balanceUpdatedAt
-        || (Date.now() - new Date(account.balanceUpdatedAt).getTime()) > 6 * 60 * 60 * 1000;
-      if (balanceStale) try {
-        const balResponse = await this.accountBalancesWithRetry(account.providerAccountId);
-        const balances = balResponse.balances ?? [];
-        const currentBalance = this.pickBalance(balances, ['interimBooked', 'closingBooked', 'expected', 'openingBooked', 'interimAvailable']);
-        const availableBalance = this.pickBalance(balances, ['interimAvailable', 'forwardAvailable', 'nonInvoiced', 'expected']);
-        if (currentBalance != null || availableBalance != null) {
-          await this.prisma.bankAccount.update({
-            where: { id: account.id },
-            data: { currentBalance, availableBalance, balanceUpdatedAt: new Date() }
-          });
-        }
-      } catch (e) {
-        this.logger.warn(`Balance fetch failed ${account.name}: ${e instanceof Error ? e.message : String(e)}`);
-      }
+      await this.refreshAccountBalance(account);
       await this.prisma.bankConnection.update({
         where: { id: account.connectionId },
         data: { lastSyncedAt: new Date() }
@@ -176,7 +161,8 @@ export class BankService {
       include: { connection: true },
       orderBy: { createdAt: 'desc' }
     });
-    const enriched = accounts.map(account => ({
+    const refreshedAccounts = await Promise.all(accounts.map(account => this.refreshAccountBalance(account)));
+    const enriched = refreshedAccounts.map(account => ({
       id: account.id,
       providerAccountId: account.providerAccountId,
       institutionName: account.connection.institutionName,
@@ -389,6 +375,29 @@ export class BankService {
     } catch (error) {
       await new Promise(resolve => setTimeout(resolve, 300));
       return this.gocardless.accountBalances(accountId);
+    }
+  }
+
+  private async refreshAccountBalance<T extends { id: string; providerAccountId: string; name?: string | null; balanceUpdatedAt?: Date | string | null; currentBalance?: number | null; availableBalance?: number | null }>(account: T): Promise<T> {
+    const balanceStale = !account.balanceUpdatedAt
+      || (Date.now() - new Date(account.balanceUpdatedAt).getTime()) > 6 * 60 * 60 * 1000;
+    if (!balanceStale) return account;
+
+    try {
+      const balResponse = await this.accountBalancesWithRetry(account.providerAccountId);
+      const balances = balResponse.balances ?? [];
+      const currentBalance = this.pickBalance(balances, ['interimBooked', 'closingBooked', 'expected', 'openingBooked', 'interimAvailable']);
+      const availableBalance = this.pickBalance(balances, ['interimAvailable', 'forwardAvailable', 'nonInvoiced', 'expected']);
+      if (currentBalance == null && availableBalance == null) return account;
+      const updated = await this.prisma.bankAccount.update({
+        where: { id: account.id },
+        data: { currentBalance, availableBalance, balanceUpdatedAt: new Date() },
+        include: { connection: true }
+      });
+      return updated as unknown as T;
+    } catch (e) {
+      this.logger.warn(`Balance fetch failed ${account.name ?? account.providerAccountId}: ${e instanceof Error ? e.message : String(e)}`);
+      return account;
     }
   }
 
