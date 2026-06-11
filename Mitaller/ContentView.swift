@@ -7523,6 +7523,10 @@ struct MetaAdsView: View {
     @State private var searchText = ""
     @State private var campaignFilter: CampaignFilter = .all
     @State private var campaignSort: CampaignSort = .spend
+    @State private var advisorQuestion = ""
+    @State private var advisorAnswer: MetaAdvisorAnswer?
+    @State private var advisorLoading = false
+    @State private var advisorError: String?
 
     enum MetaRange: String, CaseIterable, Identifiable {
         case today, week, month, custom
@@ -7628,6 +7632,14 @@ struct MetaAdsView: View {
                             onApply: { Task { await reload() } }
                         )
                     }
+
+                    MetaAdvisorCard(
+                        question: $advisorQuestion,
+                        answer: advisorAnswer,
+                        loading: advisorLoading,
+                        error: advisorError,
+                        onAsk: { text in Task { await askAdvisor(text) } }
+                    )
 
                     if loading && summary == nil {
                         ProgressView().frame(maxWidth: .infinity)
@@ -7773,6 +7785,232 @@ struct MetaAdsView: View {
         } catch {
             self.error = error.localizedDescription
         }
+    }
+
+    private func askAdvisor(_ text: String) async {
+        guard let client = store.apiClient else { advisorError = "API no configurada"; return }
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        advisorLoading = true
+        advisorError = nil
+        defer { advisorLoading = false }
+        do {
+            let r = dateRange
+            advisorAnswer = try await client.metaAdvisor(question: trimmed, from: r.from, to: r.to)
+        } catch {
+            advisorError = error.localizedDescription
+        }
+    }
+}
+
+struct MetaAdvisorCard: View {
+    @Binding var question: String
+    let answer: MetaAdvisorAnswer?
+    let loading: Bool
+    let error: String?
+    let onAsk: (String) -> Void
+
+    private let fallbackQuestions = [
+        "¿Qué pauso hoy?",
+        "¿Puedo escalar algo?",
+        "¿Cómo protejo caja este finde?",
+        "¿Pago Meta ahora?"
+    ]
+
+    private var suggestedQuestions: [String] {
+        let items = answer?.suggestedQuestions ?? fallbackQuestions
+        return items.isEmpty ? fallbackQuestions : items
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(spacing: 10) {
+                Image(systemName: "sparkles")
+                    .font(.title2.weight(.heavy))
+                    .foregroundStyle(AppTheme.purple)
+                    .frame(width: 32)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Agente Meta Ads")
+                        .font(.headline.weight(.heavy))
+                        .foregroundStyle(AppTheme.ink)
+                    Text("Pregúntale qué pausar, qué escalar o cómo cuidar caja.")
+                        .font(.caption.weight(.medium))
+                        .foregroundStyle(AppTheme.muted)
+                }
+                Spacer()
+                if loading { ProgressView().controlSize(.small) }
+            }
+
+            HStack(spacing: 8) {
+                TextField("Ej: ¿qué campaña pauso hoy?", text: $question, axis: .vertical)
+                    .textFieldStyle(.plain)
+                    .font(.subheadline.weight(.semibold))
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 11)
+                    .background(AppTheme.surfaceSoft.opacity(0.82), in: RoundedRectangle(cornerRadius: 14))
+                    .foregroundStyle(AppTheme.ink)
+                    .lineLimit(1...3)
+                    .submitLabel(.send)
+                    .onSubmit { onAsk(question) }
+
+                Button { onAsk(question) } label: {
+                    Image(systemName: "paperplane.fill")
+                        .font(.headline.weight(.heavy))
+                        .frame(width: 44, height: 44)
+                        .background(AppTheme.purple, in: Circle())
+                        .foregroundStyle(.white)
+                }
+                .buttonStyle(.plain)
+                .disabled(loading || question.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                .opacity(loading || question.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? 0.45 : 1)
+            }
+
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    ForEach(suggestedQuestions, id: \.self) { item in
+                        Button {
+                            question = item
+                            onAsk(item)
+                        } label: {
+                            Text(item)
+                                .font(.caption.weight(.heavy))
+                                .foregroundStyle(AppTheme.purple)
+                                .padding(.horizontal, 11)
+                                .padding(.vertical, 8)
+                                .background(AppTheme.purple.opacity(0.12), in: Capsule())
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+            }
+
+            if let answer {
+                Divider().background(AppTheme.line)
+                VStack(alignment: .leading, spacing: 10) {
+                    HStack(alignment: .top, spacing: 8) {
+                        Image(systemName: confidenceIcon(answer.confidence))
+                            .foregroundStyle(confidenceColor(answer.confidence))
+                            .padding(.top, 2)
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(answer.headline)
+                                .font(.subheadline.weight(.heavy))
+                                .foregroundStyle(AppTheme.ink)
+                                .fixedSize(horizontal: false, vertical: true)
+                            Text(answer.answer)
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(AppTheme.muted)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
+
+                    LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: 2), spacing: 8) {
+                        ForEach(answer.metrics) { metric in
+                            MetaAdvisorMetricTile(metric: metric)
+                        }
+                    }
+
+                    if !answer.nextActions.isEmpty {
+                        VStack(alignment: .leading, spacing: 7) {
+                            Text("QUÉ HARÍA AHORA")
+                                .font(.system(size: 10, weight: .black))
+                                .foregroundStyle(AppTheme.muted)
+                            ForEach(Array(answer.nextActions.prefix(4).enumerated()), id: \.offset) { _, action in
+                                Label(action, systemImage: "arrow.turn.down.right")
+                                    .font(.caption.weight(.semibold))
+                                    .foregroundStyle(AppTheme.ink)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
+                        }
+                    }
+
+                    if !answer.campaigns.isEmpty {
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("CAMPAÑAS CLAVE")
+                                .font(.system(size: 10, weight: .black))
+                                .foregroundStyle(AppTheme.muted)
+                            ForEach(answer.campaigns.prefix(5)) { campaign in
+                                HStack(alignment: .top, spacing: 8) {
+                                    Circle()
+                                        .fill(campaign.status == "ACTIVE" ? AppTheme.green : AppTheme.muted)
+                                        .frame(width: 8, height: 8)
+                                        .padding(.top, 5)
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text(campaign.name)
+                                            .font(.caption.weight(.heavy))
+                                            .foregroundStyle(AppTheme.ink)
+                                            .lineLimit(1)
+                                        Text("\(formatMoney(campaign.spend)) · \(campaign.purchases) compras · ROAS \(campaign.roas.map { String(format: "%.2fx", $0) } ?? "—")")
+                                            .font(.caption2.weight(.semibold))
+                                            .foregroundStyle(AppTheme.muted)
+                                        Text(campaign.advice)
+                                            .font(.caption2.weight(.heavy))
+                                            .foregroundStyle(AppTheme.purple)
+                                            .fixedSize(horizontal: false, vertical: true)
+                                    }
+                                    Spacer()
+                                }
+                                .padding(10)
+                                .background(AppTheme.surfaceSoft.opacity(0.66), in: RoundedRectangle(cornerRadius: 12))
+                            }
+                        }
+                    }
+                }
+            }
+
+            if let error {
+                Label(error, systemImage: "exclamationmark.triangle.fill")
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(AppTheme.red)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .glassPanel(padding: 16, accent: AppTheme.purple)
+    }
+
+    private func confidenceIcon(_ value: String) -> String {
+        switch value {
+        case "HIGH": "checkmark.seal.fill"
+        case "MEDIUM": "exclamationmark.triangle.fill"
+        default: "info.circle.fill"
+        }
+    }
+
+    private func confidenceColor(_ value: String) -> Color {
+        switch value {
+        case "HIGH": AppTheme.green
+        case "MEDIUM": AppTheme.amber
+        default: AppTheme.blue
+        }
+    }
+}
+
+struct MetaAdvisorMetricTile: View {
+    let metric: MetaAdvisorMetric
+
+    private var color: Color {
+        switch metric.tone {
+        case "green": AppTheme.green
+        case "red": AppTheme.red
+        case "amber": AppTheme.amber
+        case "blue": AppTheme.blue
+        default: AppTheme.purple
+        }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text(metric.label.uppercased())
+                .font(.caption2.weight(.black))
+                .foregroundStyle(AppTheme.muted)
+            Text(metric.value)
+                .font(.system(size: 18, weight: .heavy, design: .rounded))
+                .foregroundStyle(color)
+                .lineLimit(1)
+                .minimumScaleFactor(0.6)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(10)
+        .background(color.opacity(0.10), in: RoundedRectangle(cornerRadius: 12))
     }
 }
 

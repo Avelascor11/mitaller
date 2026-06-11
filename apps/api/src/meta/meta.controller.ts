@@ -1,6 +1,6 @@
 import { Body, Controller, Get, Headers, Param, Post, Query, Req, UnauthorizedException } from '@nestjs/common';
 import type { Request } from 'express';
-import { ApplyMetaDailyPlanDto, ApplyMetaRecommendationDto, CreateCampaignDto, MetaService } from './meta.service';
+import { ApplyMetaDailyPlanDto, ApplyMetaRecommendationDto, CreateCampaignDto, MetaAdvisorQuestionDto, MetaService } from './meta.service';
 
 /** Mobile app routes — no JWT (internal Railway URL), like mobile-returns. */
 @Controller('meta')
@@ -43,6 +43,11 @@ export class MetaController {
   @Get('summary')
   summary(@Query('from') from?: string, @Query('to') to?: string) {
     return this.meta.summary(from, to);
+  }
+
+  @Post('advisor')
+  advisor(@Body() body: MetaAdvisorQuestionDto) {
+    return this.meta.advisor(body);
   }
 
   @Get('campaigns')
