@@ -237,13 +237,32 @@ export class ReturnsService {
           });
         }
 
+        // Credit for the returned items: without this the customer pays the
+        // replacement products at full price again (they already paid them in
+        // the original order). Discount = value of returned items, capped at
+        // the replacements' value, so draft total === totalToPay.
+        const exchangeCredit = type === 'EXCHANGE' ? Math.min(refundAmount, chargeAmount) : 0;
+
         const draft = await this.shopify.createDraftOrder({
           customerEmail: dto.email.toLowerCase().trim(),
           note: `${type === 'EXCHANGE' ? 'CAMBIO' : 'DEVOLUCIÓN'} pedido ${order.orderNumber} — ${dto.items.length} artículo(s)`,
           tags: ['return-portal', type.toLowerCase()],
           shippingAddress: this.shippingAddressFromOrder(order.shippingAddressJson, order.customerName),
-          lineItems
+          lineItems,
+          ...(exchangeCredit > 0 ? { appliedDiscount: {
+            valueType: 'FIXED_AMOUNT' as const,
+            value: Number(exchangeCredit.toFixed(2)),
+            title: 'Crédito artículos devueltos',
+            description: `Cambio pedido ${order.orderNumber}`
+          } } : {})
         });
+
+        // Safety net: if the draft total still doesn't match what we computed,
+        // abort instead of overcharging the customer.
+        if (Math.abs(draft.totalPrice - totalToPay) > 0.05) {
+          console.error(`[ReturnsService] Draft total mismatch: draft=${draft.totalPrice} expected=${totalToPay} (order ${order.orderNumber})`);
+          throw new Error(`El importe calculado no coincide (${draft.totalPrice}€ vs ${totalToPay.toFixed(2)}€). Contacta con soporte.`);
+        }
 
         draftOrderId = draft.id;
         checkoutUrl = draft.invoiceUrl;
