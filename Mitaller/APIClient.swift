@@ -418,6 +418,15 @@ struct APIClient {
         let request = try jsonRequest(path: "/meta/daily-plan/apply", method: "POST", body: body)
         return try await perform(request)
     }
+    func metaAdvisor(question: String, from: Date, to: Date) async throws -> MetaAdvisorAnswer {
+        let f = DateFormatter.apiDay
+        let request = try jsonRequest(
+            path: "/meta/advisor",
+            method: "POST",
+            body: MetaAdvisorQuestionRequest(question: question, from: f.string(from: from), to: f.string(from: to))
+        )
+        return try await perform(request)
+    }
 
     // MARK: - Influencers
     func influencerSummary() async throws -> InfluencerSummary {
@@ -804,6 +813,43 @@ struct MetaApplyDailyPlanResult: Decodable {
     let applied: Int
     let failed: Int
     let message: String
+}
+
+private struct MetaAdvisorQuestionRequest: Encodable {
+    let question: String
+    let from: String
+    let to: String
+}
+
+struct MetaAdvisorMetric: Decodable, Identifiable {
+    let label: String
+    let value: String
+    let tone: String
+    var id: String { label }
+}
+
+struct MetaAdvisorCampaign: Decodable, Identifiable {
+    let id: String
+    let name: String
+    let status: String
+    let spend: Double
+    let purchases: Int
+    let roas: Double?
+    let ctr: Double?
+    let advice: String
+}
+
+struct MetaAdvisorAnswer: Decodable {
+    let from: String
+    let to: String
+    let question: String
+    let headline: String
+    let answer: String
+    let confidence: String
+    let nextActions: [String]
+    let metrics: [MetaAdvisorMetric]
+    let campaigns: [MetaAdvisorCampaign]
+    let suggestedQuestions: [String]
 }
 
 struct MetaCampaignDetail: Decodable {

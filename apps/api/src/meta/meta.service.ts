@@ -104,6 +104,12 @@ export interface ApplyMetaDailyPlanDto {
   items: ApplyMetaRecommendationDto[];
 }
 
+export interface MetaAdvisorQuestionDto {
+  question: string;
+  from?: string;
+  to?: string;
+}
+
 export interface BestSeller {
   sku: string | null;
   title: string;
@@ -1110,6 +1116,75 @@ export class MetaService {
     };
   }
 
+  async advisor(body: MetaAdvisorQuestionDto) {
+    const question = body?.question?.trim();
+    if (!question) throw new BadRequestException('Escribe una pregunta para el agente de Meta Ads');
+
+    const today = new Date().toISOString().slice(0, 10);
+    const f = body.from ?? today;
+    const t = body.to ?? today;
+    const [summary, weekendCash, billing] = await Promise.all([
+      this.summary(f, t),
+      this.weekendCash(f, t).catch(() => null),
+      this.billingStatus().catch(() => null)
+    ]);
+
+    const campaigns = summary.campaigns ?? [];
+    const active = campaigns.filter((campaign) => campaign.status === 'ACTIVE');
+    const risky = active
+      .filter((campaign) => campaign.spend >= 8 && (campaign.purchases === 0 || (campaign.roas ?? 0) < 1.1))
+      .sort((a, b) => b.spend - a.spend);
+    const winners = active
+      .filter((campaign) => campaign.purchases >= 2 && (campaign.roas ?? 0) >= 2.2)
+      .sort((a, b) => (b.roas ?? 0) - (a.roas ?? 0));
+    const intent = this.advisorIntent(question);
+    const topRecommendations = summary.recommendations ?? [];
+
+    const context = {
+      summary,
+      weekendCash,
+      billing,
+      risky,
+      winners,
+      topRecommendations
+    };
+    const response = this.buildAdvisorResponse(intent, question, context);
+
+    return {
+      from: f,
+      to: t,
+      question,
+      headline: response.headline,
+      answer: response.answer,
+      confidence: response.confidence,
+      nextActions: response.nextActions,
+      metrics: [
+        { label: 'Gasto', value: this.money(summary.spend), tone: 'red' },
+        { label: 'Ventas atrib.', value: this.money(summary.attributedRevenue), tone: 'green' },
+        { label: 'ROAS', value: summary.roas == null ? '—' : `${summary.roas.toFixed(2)}x`, tone: (summary.roas ?? 0) >= 2 ? 'green' : 'amber' },
+        { label: 'Compras', value: String(summary.purchases), tone: 'blue' }
+      ],
+      campaigns: [...risky.slice(0, 4), ...winners.slice(0, 3)]
+        .filter((campaign, index, list) => list.findIndex((item) => item.id === campaign.id) === index)
+        .map((campaign) => ({
+          id: campaign.id,
+          name: campaign.name,
+          status: campaign.status,
+          spend: campaign.spend,
+          purchases: campaign.purchases,
+          roas: campaign.roas,
+          ctr: campaign.ctr,
+          advice: this.advisorCampaignAdvice(campaign)
+        })),
+      suggestedQuestions: [
+        '¿Qué pauso hoy?',
+        '¿Puedo escalar algo?',
+        '¿Cómo protejo caja este finde?',
+        '¿Pago Meta ahora?'
+      ]
+    };
+  }
+
   async weekendCash(from?: string, to?: string) {
     const today = new Date().toISOString().slice(0, 10);
     const f = from ?? today;
@@ -1543,6 +1618,119 @@ export class MetaService {
 
   private money(value: number) {
     return `${value.toFixed(2)} €`;
+  }
+
+  private advisorIntent(question: string): 'PAUSE' | 'SCALE' | 'WEEKEND' | 'BILLING' | 'GENERAL' {
+    const q = question.toLowerCase();
+    if (/(paus|apagar|parar|cortar|quitar|mal|flojo|flojos)/.test(q)) return 'PAUSE';
+    if (/(subir|escalar|aumentar|presupuesto|meter mas|invertir mas|crecer)/.test(q)) return 'SCALE';
+    if (/(finde|fin de semana|sabado|sábado|domingo|weekend|caja)/.test(q)) return 'WEEKEND';
+    if (/(pagar|factur|saldo|limite|límite|deuda|meta cobra)/.test(q)) return 'BILLING';
+    return 'GENERAL';
+  }
+
+  private buildAdvisorResponse(
+    intent: 'PAUSE' | 'SCALE' | 'WEEKEND' | 'BILLING' | 'GENERAL',
+    question: string,
+    context: {
+      summary: Awaited<ReturnType<MetaService['summary']>>;
+      weekendCash: Awaited<ReturnType<MetaService['weekendCash']>> | null;
+      billing: Awaited<ReturnType<MetaService['billingStatus']>> | null;
+      risky: CampaignInsight[];
+      winners: CampaignInsight[];
+      topRecommendations: MetaRecommendation[];
+    }
+  ) {
+    const { summary, weekendCash, billing, risky, winners, topRecommendations } = context;
+    const confidence: 'HIGH' | 'MEDIUM' | 'LOW' = summary.configured && summary.campaigns.length > 0 ? 'HIGH' : summary.configured ? 'MEDIUM' : 'LOW';
+
+    if (!summary.configured) {
+      return {
+        headline: 'Meta Ads no está conectado',
+        answer: 'No puedo leer campañas reales todavía. Configura el token y la cuenta publicitaria para que el agente pueda responder con datos.',
+        confidence: 'LOW' as const,
+        nextActions: ['Revisar META_ACCESS_TOKEN y META_AD_ACCOUNT_ID en Railway', 'Volver a abrir Meta Ads y refrescar']
+      };
+    }
+
+    if (intent === 'PAUSE') {
+      if (risky.length === 0) {
+        return {
+          headline: 'No pausaría nada fuerte ahora',
+          answer: `Con ${this.money(summary.spend)} gastados y ROAS ${summary.roas == null ? '—' : `${summary.roas.toFixed(2)}x`}, no veo campañas activas con gasto suficiente y señales claras de corte.`,
+          confidence,
+          nextActions: ['Mantén el seguimiento', 'Revisa de nuevo cuando una campaña supere 8-12 € de gasto sin compras']
+        };
+      }
+      const names = risky.slice(0, 3).map((campaign) => `${campaign.name} (${this.money(campaign.spend)}, ${campaign.purchases} compras, ROAS ${campaign.roas?.toFixed(2) ?? '—'})`);
+      return {
+        headline: `Revisaría ${risky.length} campaña(s) antes de seguir gastando`,
+        answer: `Mi lectura: las candidatas a pausar o arreglar son ${names.join('; ')}. Si una pasa de 20 € sin compras, la pausaría. Si tiene compras pero ROAS bajo, antes probaría creativo/oferta.`,
+        confidence,
+        nextActions: risky.slice(0, 3).map((campaign) => campaign.purchases === 0
+          ? `Pausar o bajar ${campaign.name} si no tiene compras al refrescar`
+          : `Arreglar ${campaign.name}: mantener solo si el ROAS sube por encima de 1.5x`)
+      };
+    }
+
+    if (intent === 'SCALE') {
+      if (winners.length === 0) {
+        return {
+          headline: 'Ahora no escalaría presupuesto',
+          answer: 'No veo campañas activas con al menos 2 compras y ROAS sólido. Escalar sin esa base puede quemar caja, sobre todo si Shopify tarda en pagar.',
+          confidence,
+          nextActions: ['Esperar más muestra o ventas', 'Escalar solo cuando una campaña tenga 2+ compras y ROAS mayor de 2.2x']
+        };
+      }
+      return {
+        headline: `Puedes escalar ${winners.length} campaña(s) con cuidado`,
+        answer: `Las mejores señales están en ${winners.slice(0, 3).map((campaign) => `${campaign.name} (ROAS ${campaign.roas?.toFixed(2)}x)`).join(', ')}. Yo subiría poco a poco, no de golpe.`,
+        confidence,
+        nextActions: winners.slice(0, 3).map((campaign) => `Subir ${campaign.name} un 10-15% y revisar mañana`)
+      };
+    }
+
+    if (intent === 'WEEKEND') {
+      const actions = weekendCash?.actions?.length ? weekendCash.actions : ['Usa el gasto diario real y el cobro pendiente de Shopify antes de subir presupuesto'];
+      return {
+        headline: weekendCash?.headline ?? 'Revisa caja antes de tocar ads',
+        answer: weekendCash
+          ? `Para este rango, Meta lleva ${this.money(weekendCash.spend)} y el límite prudente es ${this.money(weekendCash.maxWeekendSpend)}. Quedan ${this.money(weekendCash.remainingWeekendSpend)} de margen prudente.`
+          : 'No he podido leer la caja de fin de semana, así que trataría el presupuesto con prudencia.',
+        confidence: weekendCash ? confidence : 'MEDIUM' as const,
+        nextActions: actions
+      };
+    }
+
+    if (intent === 'BILLING') {
+      return {
+        headline: billing?.headline ?? 'No he podido leer el saldo de Meta',
+        answer: billing
+          ? `Saldo pendiente: ${this.money(billing.balanceDue)}. Tu aviso está en ${this.money(billing.warningThreshold)} y el límite en ${this.money(billing.paymentLimit)}.`
+          : 'No he podido consultar facturación ahora mismo.',
+        confidence: billing ? confidence : 'MEDIUM' as const,
+        nextActions: [billing?.action ?? 'Abre Meta Billing y revisa el saldo manualmente']
+      };
+    }
+
+    const firstRecommendation = topRecommendations[0];
+    return {
+      headline: firstRecommendation?.title ?? 'Lectura general de Meta Ads',
+      answer: firstRecommendation
+        ? `${firstRecommendation.reason} Mi acción sería: ${firstRecommendation.action}`
+        : `Hoy llevas ${this.money(summary.spend)}, ${summary.purchases} compras y ROAS ${summary.roas == null ? '—' : `${summary.roas.toFixed(2)}x`}. Pregúntame por pausar, escalar, caja de finde o saldo de Meta para ir al grano.`,
+      confidence,
+      nextActions: topRecommendations.slice(0, 3).map((recommendation) => recommendation.action)
+        .concat(topRecommendations.length ? [] : ['Mirar campañas con gasto sin compras', 'Escalar solo ganadoras con ROAS alto'])
+    };
+  }
+
+  private advisorCampaignAdvice(campaign: CampaignInsight) {
+    if (campaign.spend >= 20 && campaign.purchases === 0) return 'Pausar si sigue sin compras';
+    if (campaign.spend >= 8 && campaign.purchases === 0) return 'Vigilar: gasta sin comprar';
+    if ((campaign.roas ?? 0) >= 2.2 && campaign.purchases >= 2) return 'Candidata a escalar +10-15%';
+    if (campaign.purchases > 0 && (campaign.roas ?? 0) < 1.1) return 'Arreglar creatividad/oferta antes de escalar';
+    return 'Mantener y seguir midiendo';
   }
 
   // ---------- template (existing campaign structure) ----------
