@@ -648,8 +648,10 @@ export class ReturnsService {
       metadataJson: { status }
     });
 
-    // Feature 1: Automatic Shopify refund when approved
-    if (status === 'APPROVED') {
+    // Feature 1: Automatic Shopify refund when approved.
+    // RETURN only — exchanges already received the returned-items credit as a
+    // discount on the replacement order; refunding here would pay them twice.
+    if (status === 'APPROVED' && record.type === 'RETURN') {
       this.issueShopifyRefund(id).catch((err) => {
         console.error('[ReturnsService] Background Shopify refund error:', err);
       });
