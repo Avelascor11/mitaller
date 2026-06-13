@@ -1380,6 +1380,8 @@ struct MainTabView: View {
                 .tabItem { Label("Envios", systemImage: "truck.box.fill") }
             StockView()
                 .tabItem { Label("Stock", systemImage: "barcode.viewfinder") }
+            PreorderView()
+                .tabItem { Label("Preventa", systemImage: "flag.checkered") }
             DTFView()
                 .tabItem { Label("DTF", systemImage: "photo.on.rectangle.angled") }
             PurchaseMatrixView()
@@ -1396,8 +1398,6 @@ struct MainTabView: View {
                 .tabItem { Label("Influs", systemImage: "person.2.crop.square.stack.fill") }
             CashflowView()
                 .tabItem { Label("Caja", systemImage: "banknote.fill") }
-            PreorderView()
-                .tabItem { Label("Preventa", systemImage: "flag.checkered") }
             DevolucionesView()
                 .tabItem { Label("Devoluciones", systemImage: "arrow.uturn.left.circle.fill") }
             CarrierReturnsView()
@@ -10699,6 +10699,7 @@ struct CashflowView: View {
                     if loading {
                         ProgressView().frame(maxWidth: .infinity).padding(.top, 40)
                     } else if let summary {
+                        CashflowPreorderNotice(summary: summary)
                         CashflowTodayCard(summary: summary, onToggleMark: { payout in await toggleMark(payout) })
                         if !summary.pending.payouts.isEmpty || !summary.scheduled.payouts.isEmpty {
                             CashflowPendingCard(pending: summary.pending, scheduled: summary.scheduled, currency: summary.currency)
@@ -10736,6 +10737,56 @@ struct CashflowView: View {
             else { try await client.markPayout(payout.id) }
             summary = try await client.cashflow()
         } catch { self.error = error.localizedDescription }
+    }
+}
+
+struct CashflowPreorderNotice: View {
+    let summary: CashflowSummary
+
+    private var todayReserve: Double {
+        summary.payouts.reduce(0) { $0 + ($1.retroPreorder?.reserve ?? 0) }
+    }
+    private var todayUnits: Int {
+        summary.payouts.reduce(0) { $0 + ($1.retroPreorder?.units ?? 0) }
+    }
+    private var upcomingReserve: Double {
+        (summary.pending.payouts + summary.scheduled.payouts).reduce(0) { $0 + ($1.retroPreorder?.reserve ?? 0) }
+    }
+    private var upcomingUnits: Int {
+        (summary.pending.payouts + summary.scheduled.payouts).reduce(0) { $0 + ($1.retroPreorder?.units ?? 0) }
+    }
+    private var totalReserve: Double { todayReserve + upcomingReserve }
+    private var totalUnits: Int { todayUnits + upcomingUnits }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .top, spacing: 10) {
+                Image(systemName: "flag.checkered")
+                    .font(.title2.weight(.black))
+                    .foregroundStyle(AppTheme.magenta)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Preventa Retro Aston")
+                        .font(.headline.weight(.black))
+                        .foregroundStyle(AppTheme.ink)
+                    Text(totalReserve > 0
+                         ? "A separar entre cobros de hoy y próximos pagos."
+                         : "No hay cobros retro detectados en los pagos visibles de Shopify.")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(AppTheme.muted)
+                }
+                Spacer()
+            }
+
+            LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 10) {
+                PreorderMetricTile(title: "Separar total visible", value: money(totalReserve), subtitle: "\(totalUnits) uds retro", color: AppTheme.magenta, icon: "tray.and.arrow.down.fill")
+                PreorderMetricTile(title: "Próximos pagos", value: money(upcomingReserve), subtitle: "\(upcomingUnits) uds retro", color: AppTheme.amber, icon: "clock.fill")
+            }
+        }
+        .glassPanel(padding: 16, accent: AppTheme.magenta)
+    }
+
+    private func money(_ value: Double) -> String {
+        formatMoney(value, currency: summary.currency)
     }
 }
 
