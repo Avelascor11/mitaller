@@ -476,7 +476,12 @@ export class EconomicsService {
       const dbOrders = sourceIds.length
         ? await this.prisma.order.findMany({
             where: { shopifyOrderId: { in: sourceIds.map(id => `gid://shopify/Order/${id}`) } },
-            select: { shopifyOrderId: true, orderNumber: true, orderedAt: true }
+            select: {
+              shopifyOrderId: true,
+              orderNumber: true,
+              orderedAt: true,
+              items: { select: { title: true, variantTitle: true, sku: true, quantity: true, unitPrice: true } }
+            }
           })
         : [];
       const orderBySourceId = new Map(
@@ -492,12 +497,16 @@ export class EconomicsService {
         const saleDate = dbOrder?.orderedAt
           ? dbOrder.orderedAt.toISOString().slice(0, 10)
           : t.processed_at?.slice(0, 10) ?? null;
+        const retroUnits = this.retroAstonUnits(dbOrder);
+        const retroReserve = +(retroUnits * this.retroAstonUnitCost()).toFixed(2);
         return {
           orderNumber,
           saleDate,
           amount: this.money(t.amount),
           fee: -Math.abs(this.money(t.fee)),
-          processedAt: t.processed_at?.slice(0, 10)
+          processedAt: t.processed_at?.slice(0, 10),
+          retroUnits,
+          retroReserve
         };
       });
 
@@ -512,6 +521,8 @@ export class EconomicsService {
       }
       const salesDays = [...byDate.values()].sort((a, b) => a.date.localeCompare(b.date));
       const adsReserve = await this.adsReserveForSalesDays(salesDays.map(day => day.date));
+      const retroPreorder = +orders.reduce((sum, order) => sum + order.retroReserve, 0).toFixed(2);
+      const retroUnits = orders.reduce((sum, order) => sum + order.retroUnits, 0);
 
       const gross = amount / (1 - shopifyFeeRate);
       return {
@@ -524,12 +535,20 @@ export class EconomicsService {
         refunds: +refunds.reduce((s, t) => s + this.money(t.amount), 0).toFixed(2),
         orders,
         salesDays,
+        retroPreorder: {
+          units: retroUnits,
+          reserve: retroPreorder,
+          unitCost: this.retroAstonUnitCost(),
+          totalCommitment: this.retroAstonTotalCommitment(),
+          sellingPrice: this.retroAstonSellingPrice()
+        },
         allocation: {
           taxReserve: +(gross * taxRate).toFixed(2),
           production: +(gross * productionRate).toFixed(2),
           shipping: +(gross * shippingRate).toFixed(2),
           adsReserve,
-          cashFree: +(amount - gross * taxRate - gross * productionRate - gross * shippingRate - adsReserve).toFixed(2)
+          retroPreorder,
+          cashFree: +(amount - gross * taxRate - gross * productionRate - gross * shippingRate - adsReserve - retroPreorder).toFixed(2)
         }
       };
     };
@@ -541,6 +560,7 @@ export class EconomicsService {
       production: +todayPayouts.reduce((s, p) => s + p.allocation.production, 0).toFixed(2),
       shipping: +todayPayouts.reduce((s, p) => s + p.allocation.shipping, 0).toFixed(2),
       adsReserve: +todayPayouts.reduce((s, p) => s + p.allocation.adsReserve, 0).toFixed(2),
+      retroPreorder: +todayPayouts.reduce((s, p) => s + p.allocation.retroPreorder, 0).toFixed(2),
       cashFree: +todayPayouts.reduce((s, p) => s + p.allocation.cashFree, 0).toFixed(2)
     };
 
@@ -565,6 +585,31 @@ export class EconomicsService {
     const uniqueDays = [...new Set(days.filter((day) => /^\d{4}-\d{2}-\d{2}$/.test(day)))];
     const values = await Promise.all(uniqueDays.map((day) => this.meta.spendForRange(day, day).catch(() => 0)));
     return +values.reduce((sum, value) => sum + value, 0).toFixed(2);
+  }
+
+  private retroAstonTotalCommitment() {
+    return 2194.94;
+  }
+
+  private retroAstonSellingPrice() {
+    return 54.95;
+  }
+
+  private retroAstonUnitCost() {
+    return this.retroAstonTotalCommitment() / 100;
+  }
+
+  private retroAstonUnits(order?: { items?: Array<{ title: string; variantTitle: string | null; sku: string; quantity: number }> } | null) {
+    return order?.items?.reduce((sum, item) => sum + (this.isRetroAstonItem(item) ? item.quantity : 0), 0) ?? 0;
+  }
+
+  private isRetroAstonItem(item: { title: string; variantTitle: string | null; sku: string }) {
+    const text = this.normalizeSearchText([item.title, item.variantTitle, item.sku].filter(Boolean).join(' '));
+    return text.includes('retro') && (text.includes('aston') || text.includes('astn') || text.includes('alonso'));
+  }
+
+  private normalizeSearchText(value: string) {
+    return value.normalize('NFD').replace(/\p{Diacritic}/gu, '').toLowerCase();
   }
 
   async payouts() {

@@ -1635,6 +1635,7 @@ struct CashflowPayout: Decodable, Identifiable {
     let refunds: Double
     let orders: [CashflowOrder]
     let salesDays: [CashflowSalesDay]
+    let retroPreorder: RetroAstonPayout?
     let allocation: CashflowAllocation
 }
 
@@ -1644,6 +1645,8 @@ struct CashflowOrder: Decodable {
     let amount: Double
     let fee: Double
     let processedAt: String?
+    let retroUnits: Int?
+    let retroReserve: Double?
 }
 
 struct CashflowSalesDay: Decodable, Identifiable {
@@ -1658,12 +1661,21 @@ struct CashflowAllocation: Decodable {
     let production: Double
     let shipping: Double
     let adsReserve: Double
+    let retroPreorder: Double?
     let cashFree: Double
 }
 
 struct CashflowPending: Decodable {
     let amount: Double
     let payouts: [CashflowPayout]
+}
+
+struct RetroAstonPayout: Decodable {
+    let units: Int
+    let reserve: Double
+    let unitCost: Double
+    let totalCommitment: Double
+    let sellingPrice: Double
 }
 
 struct FulfillableLine: Decodable {

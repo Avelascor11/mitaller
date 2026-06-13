@@ -215,6 +215,15 @@ struct WorkshopOrderItem: Identifiable, Hashable {
         }
         return "Talla"
     }
+
+    var isRetroAston: Bool {
+        let text = [title, variantTitle, sku]
+            .compactMap { $0 }
+            .joined(separator: " ")
+            .folding(options: .diacriticInsensitive, locale: .current)
+            .lowercased()
+        return text.contains("retro") && (text.contains("aston") || text.contains("astn") || text.contains("alonso"))
+    }
 }
 
 struct WorkshopOrder: Identifiable, Hashable {
@@ -263,6 +272,8 @@ struct WorkshopOrder: Identifiable, Hashable {
 
     var hasMultipleItems: Bool { items.count > 1 }
     var totalUnits: Int { items.reduce(0) { $0 + $1.quantity } }
+    var retroAstonUnits: Int { items.reduce(0) { $0 + ($1.isRetroAston ? $1.quantity : 0) } }
+    var hasRetroAstonPreorder: Bool { retroAstonUnits > 0 }
 
     var shippingCategory: ShippingCategory {
         let value = shippingMethod.folding(options: .diacriticInsensitive, locale: .current).lowercased()
@@ -462,6 +473,30 @@ enum PriorityChoice: String, CaseIterable, Identifiable {
         case .high: order.priority == .high
         case .normal: order.priority == .normal || order.priority == .low
         case .blocked: order.priority == .blocked || order.status == .waitingStock
+        }
+    }
+}
+
+enum PreorderChoice: String, CaseIterable, Identifiable {
+    case all = "Todos"
+    case hideRetro = "Sin retro Aston"
+    case onlyRetro = "Solo retro Aston"
+
+    var id: String { rawValue }
+
+    var iconName: String {
+        switch self {
+        case .all: "tshirt.fill"
+        case .hideRetro: "eye.slash.fill"
+        case .onlyRetro: "flag.checkered"
+        }
+    }
+
+    func matches(_ order: WorkshopOrder) -> Bool {
+        switch self {
+        case .all: true
+        case .hideRetro: !order.hasRetroAstonPreorder
+        case .onlyRetro: order.hasRetroAstonPreorder
         }
     }
 }
@@ -1934,6 +1969,7 @@ struct PickingView: View {
     @Environment(WorkshopStore.self) private var store
     @State private var shippingFilter: ShippingChoice = .all
     @State private var priorityFilter: PriorityChoice = .all
+    @State private var preorderFilter: PreorderChoice = .all
     @State private var sort: OrderSort = .smart
     @State private var searchText = ""
     @State private var rafagaActive = false
@@ -1945,12 +1981,13 @@ struct PickingView: View {
         let filtered = store.pendingPreparationOrders
             .filter { shippingFilter.matches($0) }
             .filter { priorityFilter.matches($0) }
+            .filter { preorderFilter.matches($0) }
             .filter { matchesSearch($0) }
         return sort.sort(filtered)
     }
 
     var hasActiveFilters: Bool {
-        shippingFilter != .all || priorityFilter != .all || sort != .smart
+        shippingFilter != .all || priorityFilter != .all || preorderFilter != .all || sort != .smart
     }
 
     var selectedOrders: [WorkshopOrder] {
@@ -2027,6 +2064,13 @@ struct PickingView: View {
                                     }
                                 }
                             }
+                            Section("Preventa") {
+                                Picker("Preventa", selection: $preorderFilter) {
+                                    ForEach(PreorderChoice.allCases) { option in
+                                        Label(option.rawValue, systemImage: option.iconName).tag(option)
+                                    }
+                                }
+                            }
                             Section("Ordenar") {
                                 Picker("Ordenar", selection: $sort) {
                                     ForEach(OrderSort.allCases) { option in
@@ -2039,6 +2083,7 @@ struct PickingView: View {
                                 Button(role: .destructive) {
                                     shippingFilter = .all
                                     priorityFilter = .all
+                                    preorderFilter = .all
                                     sort = .smart
                                 } label: {
                                     Label("Limpiar filtros", systemImage: "xmark.circle")
@@ -2071,6 +2116,11 @@ struct PickingView: View {
                                 if priorityFilter != .all {
                                     ActiveFilterChip(text: priorityFilter.rawValue, icon: priorityFilter.iconName) {
                                         priorityFilter = .all
+                                    }
+                                }
+                                if preorderFilter != .all {
+                                    ActiveFilterChip(text: preorderFilter.rawValue, icon: preorderFilter.iconName) {
+                                        preorderFilter = .all
                                     }
                                 }
                                 if sort != .smart {
@@ -5304,6 +5354,9 @@ struct PendingOrderRow: View {
                 SourceChip(source: order.source)
                 StatusChip(status: order.status)
                 ShippingChip(category: order.shippingCategory)
+                if order.hasRetroAstonPreorder {
+                    Tag(text: "PREVENTA RETRO · \(order.retroAstonUnits) uds", systemImage: "flag.checkered")
+                }
                 Tag(text: order.hasMultipleItems ? "\(order.items.count) líneas · \(order.totalUnits) uds" : "\(order.totalUnits) ud", systemImage: "square.stack.3d.up.fill")
             }
             HStack(spacing: 12) {
@@ -10774,17 +10827,25 @@ struct CashflowPayoutDetail: View {
                             .foregroundStyle(AppTheme.teal)
                     }
                     ForEach(Array(day.orders.enumerated()), id: \.offset) { _, order in
-                        HStack {
-                            Image(systemName: "cart.fill")
-                                .font(.caption2)
-                                .foregroundStyle(AppTheme.muted)
-                            Text(order.orderNumber ?? "Pedido sin número")
-                                .font(.subheadline.weight(.semibold))
-                                .foregroundStyle(AppTheme.ink)
-                            Spacer()
-                            Text(m(order.amount, currency: currency))
-                                .font(.subheadline.weight(.bold))
-                                .foregroundStyle(AppTheme.inkSoft)
+                        VStack(alignment: .leading, spacing: 4) {
+                            HStack {
+                                Image(systemName: "cart.fill")
+                                    .font(.caption2)
+                                    .foregroundStyle(AppTheme.muted)
+                                Text(order.orderNumber ?? "Pedido sin número")
+                                    .font(.subheadline.weight(.semibold))
+                                    .foregroundStyle(AppTheme.ink)
+                                Spacer()
+                                Text(m(order.amount, currency: currency))
+                                    .font(.subheadline.weight(.bold))
+                                    .foregroundStyle(AppTheme.inkSoft)
+                            }
+                            if let units = order.retroUnits, units > 0 {
+                                Label("Retro Aston x\(units) · separar \(m(order.retroReserve ?? 0, currency: currency))", systemImage: "flag.checkered")
+                                    .font(.caption2.weight(.heavy))
+                                    .foregroundStyle(AppTheme.magenta)
+                                    .padding(.leading, 12)
+                            }
                         }
                         .padding(.leading, 12)
                     }
@@ -10840,6 +10901,9 @@ struct CashflowAllocationGrid: View {
             CashflowAllocationTile(label: "Producción", amount: allocation.production, currency: currency, color: AppTheme.amber, icon: "tshirt.fill")
             CashflowAllocationTile(label: "Envíos", amount: allocation.shipping, currency: currency, color: AppTheme.blue, icon: "shippingbox.fill")
             CashflowAllocationTile(label: "Meta Ads", amount: allocation.adsReserve, currency: currency, color: AppTheme.purple, icon: "megaphone.fill")
+            if let retro = allocation.retroPreorder, retro > 0 {
+                CashflowAllocationTile(label: "Preventa Retro", amount: retro, currency: currency, color: AppTheme.magenta, icon: "flag.checkered")
+            }
             CashflowAllocationTile(label: "Beneficio libre", amount: allocation.cashFree, currency: currency, color: AppTheme.green, icon: "banknote.fill")
         }
     }
@@ -10885,11 +10949,41 @@ struct CashflowPendingCard: View {
     let scheduled: CashflowPending
     let currency: String
 
+    private var pendingRetroReserve: Double {
+        pending.payouts.reduce(0) { $0 + ($1.retroPreorder?.reserve ?? 0) }
+    }
+
+    private var scheduledRetroReserve: Double {
+        scheduled.payouts.reduce(0) { $0 + ($1.retroPreorder?.reserve ?? 0) }
+    }
+
+    private var pendingRetroUnits: Int {
+        pending.payouts.reduce(0) { $0 + ($1.retroPreorder?.units ?? 0) }
+    }
+
+    private var scheduledRetroUnits: Int {
+        scheduled.payouts.reduce(0) { $0 + ($1.retroPreorder?.units ?? 0) }
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             Text("Pendiente de cobrar")
                 .font(.headline.weight(.bold))
                 .foregroundStyle(AppTheme.ink)
+
+            if pendingRetroReserve + scheduledRetroReserve > 0 {
+                VStack(alignment: .leading, spacing: 6) {
+                    Label("Preventa Retro Aston", systemImage: "flag.checkered")
+                        .font(.subheadline.weight(.heavy))
+                        .foregroundStyle(AppTheme.magenta)
+                    Text("De los próximos cobros, separa \(m(pendingRetroReserve + scheduledRetroReserve)) para \(pendingRetroUnits + scheduledRetroUnits) camiseta(s) retro.")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(AppTheme.muted)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .padding(10)
+                .background(AppTheme.magenta.opacity(0.10), in: RoundedRectangle(cornerRadius: 12))
+            }
 
             if pending.amount > 0 {
                 VStack(alignment: .leading, spacing: 10) {
@@ -10902,6 +10996,11 @@ struct CashflowPendingCard: View {
                             .font(.title2.weight(.heavy))
                             .foregroundStyle(AppTheme.amber)
                     }
+                    if pendingRetroReserve > 0 {
+                        Label("Separar retro: \(m(pendingRetroReserve)) · \(pendingRetroUnits) uds", systemImage: "flag.checkered")
+                            .font(.caption.weight(.heavy))
+                            .foregroundStyle(AppTheme.magenta)
+                    }
                     ForEach(pending.payouts) { payout in
                         VStack(alignment: .leading, spacing: 6) {
                             HStack {
@@ -10912,6 +11011,11 @@ struct CashflowPendingCard: View {
                                 Text(m(payout.amount))
                                     .font(.subheadline.weight(.bold))
                                     .foregroundStyle(AppTheme.amber)
+                            }
+                            if let retro = payout.retroPreorder, retro.reserve > 0 {
+                                Label("Retro Aston x\(retro.units) · separar \(m(retro.reserve))", systemImage: "flag.checkered")
+                                    .font(.caption2.weight(.heavy))
+                                    .foregroundStyle(AppTheme.magenta)
                             }
                             ForEach(payout.salesDays) { day in
                                 HStack {
@@ -10947,15 +11051,27 @@ struct CashflowPendingCard: View {
                             .font(.title2.weight(.heavy))
                             .foregroundStyle(AppTheme.purple)
                     }
+                    if scheduledRetroReserve > 0 {
+                        Label("Separar retro: \(m(scheduledRetroReserve)) · \(scheduledRetroUnits) uds", systemImage: "flag.checkered")
+                            .font(.caption.weight(.heavy))
+                            .foregroundStyle(AppTheme.magenta)
+                    }
                     ForEach(scheduled.payouts) { payout in
-                        HStack {
-                            Text("Ingreso \(payout.date)")
-                                .font(.subheadline.weight(.semibold))
-                                .foregroundStyle(AppTheme.ink)
-                            Spacer()
-                            Text(m(payout.amount))
-                                .font(.subheadline.weight(.bold))
-                                .foregroundStyle(AppTheme.purple)
+                        VStack(alignment: .leading, spacing: 4) {
+                            HStack {
+                                Text("Ingreso \(payout.date)")
+                                    .font(.subheadline.weight(.semibold))
+                                    .foregroundStyle(AppTheme.ink)
+                                Spacer()
+                                Text(m(payout.amount))
+                                    .font(.subheadline.weight(.bold))
+                                    .foregroundStyle(AppTheme.purple)
+                            }
+                            if let retro = payout.retroPreorder, retro.reserve > 0 {
+                                Label("Retro Aston x\(retro.units) · separar \(m(retro.reserve))", systemImage: "flag.checkered")
+                                    .font(.caption2.weight(.heavy))
+                                    .foregroundStyle(AppTheme.magenta)
+                            }
                         }
                     }
                 }
