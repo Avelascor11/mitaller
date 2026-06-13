@@ -1396,6 +1396,8 @@ struct MainTabView: View {
                 .tabItem { Label("Influs", systemImage: "person.2.crop.square.stack.fill") }
             CashflowView()
                 .tabItem { Label("Caja", systemImage: "banknote.fill") }
+            PreorderView()
+                .tabItem { Label("Preventa", systemImage: "flag.checkered") }
             DevolucionesView()
                 .tabItem { Label("Devoluciones", systemImage: "arrow.uturn.left.circle.fill") }
             CarrierReturnsView()
@@ -11086,6 +11088,323 @@ struct CashflowPendingCard: View {
         f.currencyCode = currency
         f.maximumFractionDigits = 2
         return f.string(from: NSNumber(value: value)) ?? "\(value)"
+    }
+}
+
+struct PreorderView: View {
+    @Environment(WorkshopStore.self) private var store
+    @State private var summary: CashflowSummary?
+    @State private var loading = false
+    @State private var error: String?
+
+    private let commitmentUnits = 100
+    private let commitmentCost = 2194.94
+    private let sellingPrice = 54.95
+
+    private var unitCost: Double { commitmentCost / Double(commitmentUnits) }
+    private var pendingOrders: [WorkshopOrder] {
+        OrderSort.dateAsc.sort(store.pendingPreparationOrders.filter(\.hasRetroAstonPreorder))
+    }
+    private var pendingOrderUnits: Int {
+        pendingOrders.reduce(0) { $0 + $1.retroAstonUnits }
+    }
+    private var todayReserve: Double {
+        summary?.payouts.reduce(0) { $0 + ($1.retroPreorder?.reserve ?? 0) } ?? 0
+    }
+    private var todayUnits: Int {
+        summary?.payouts.reduce(0) { $0 + ($1.retroPreorder?.units ?? 0) } ?? 0
+    }
+    private var inTransitReserve: Double {
+        summary?.pending.payouts.reduce(0) { $0 + ($1.retroPreorder?.reserve ?? 0) } ?? 0
+    }
+    private var inTransitUnits: Int {
+        summary?.pending.payouts.reduce(0) { $0 + ($1.retroPreorder?.units ?? 0) } ?? 0
+    }
+    private var scheduledReserve: Double {
+        summary?.scheduled.payouts.reduce(0) { $0 + ($1.retroPreorder?.reserve ?? 0) } ?? 0
+    }
+    private var scheduledUnits: Int {
+        summary?.scheduled.payouts.reduce(0) { $0 + ($1.retroPreorder?.units ?? 0) } ?? 0
+    }
+    private var upcomingReserve: Double { inTransitReserve + scheduledReserve }
+    private var upcomingUnits: Int { inTransitUnits + scheduledUnits }
+    private var visibleReserve: Double { todayReserve + upcomingReserve }
+    private var visibleUnits: Int { todayUnits + upcomingUnits }
+    private var remainingCommitment: Double { max(0, commitmentCost - visibleReserve) }
+    private var progress: Double { min(1, max(0, visibleReserve / commitmentCost)) }
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 16) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Preventa")
+                            .font(.system(size: 36, weight: .black, design: .rounded))
+                            .foregroundStyle(AppTheme.ink)
+                        Text("Retro Aston: pagos, reservas y pedidos para no mezclar con taller normal.")
+                            .font(.subheadline.weight(.medium))
+                            .foregroundStyle(AppTheme.muted)
+                    }
+
+                    if loading && summary == nil {
+                        ProgressView().frame(maxWidth: .infinity).padding(.top, 40)
+                    } else {
+                        PreorderCommitmentCard(
+                            commitmentCost: commitmentCost,
+                            commitmentUnits: commitmentUnits,
+                            unitCost: unitCost,
+                            sellingPrice: sellingPrice,
+                            visibleReserve: visibleReserve,
+                            visibleUnits: visibleUnits,
+                            remainingCommitment: remainingCommitment,
+                            progress: progress,
+                            currency: summary?.currency ?? "EUR"
+                        )
+
+                        LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 10) {
+                            PreorderMetricTile(title: "Cobrado hoy", value: money(todayReserve), subtitle: "\(todayUnits) uds retro", color: AppTheme.green, icon: "banknote.fill")
+                            PreorderMetricTile(title: "Próximos cobros", value: money(upcomingReserve), subtitle: "\(upcomingUnits) uds retro", color: AppTheme.magenta, icon: "clock.badge.checkmark.fill")
+                            PreorderMetricTile(title: "En sin preparar", value: "\(pendingOrderUnits)", subtitle: "\(pendingOrders.count) pedidos", color: AppTheme.amber, icon: "shippingbox.fill")
+                            PreorderMetricTile(title: "PVP unidad", value: money(sellingPrice), subtitle: "Coste \(money(unitCost))", color: AppTheme.blue, icon: "tag.fill")
+                        }
+
+                        if let summary {
+                            PreorderPayoutSection(
+                                title: "Cobros con retro",
+                                subtitle: "Dinero que ya entra hoy",
+                                payouts: summary.payouts,
+                                color: AppTheme.green,
+                                currency: summary.currency
+                            )
+                            PreorderPayoutSection(
+                                title: "Próximos pagos",
+                                subtitle: "Lo que tendrás que separar cuando Shopify lo pague",
+                                payouts: summary.pending.payouts + summary.scheduled.payouts,
+                                color: AppTheme.magenta,
+                                currency: summary.currency
+                            )
+                        }
+
+                        PreorderPendingOrdersSection(orders: pendingOrders)
+                    }
+
+                    if let error {
+                        Text(error)
+                            .font(.footnote.weight(.semibold))
+                            .foregroundStyle(AppTheme.red)
+                            .glassPanel(padding: 12, accent: AppTheme.red)
+                    }
+                }
+                .padding()
+            }
+            .screenBackground()
+            .navigationTitle("Preventa")
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button { Task { await load() } } label: {
+                        Image(systemName: "arrow.clockwise")
+                    }
+                    .disabled(loading)
+                }
+            }
+            .task { await load() }
+            .refreshable { await load() }
+        }
+    }
+
+    private func load() async {
+        guard let client = store.apiClient else { error = "API no configurada"; return }
+        loading = true
+        error = nil
+        defer { loading = false }
+        do {
+            summary = try await client.cashflow()
+        } catch {
+            self.error = error.localizedDescription
+        }
+    }
+
+    private func money(_ value: Double) -> String {
+        formatMoney(value, currency: summary?.currency ?? "EUR")
+    }
+}
+
+struct PreorderCommitmentCard: View {
+    let commitmentCost: Double
+    let commitmentUnits: Int
+    let unitCost: Double
+    let sellingPrice: Double
+    let visibleReserve: Double
+    let visibleUnits: Int
+    let remainingCommitment: Double
+    let progress: Double
+    let currency: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(alignment: .top) {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("Retro Aston")
+                        .font(.title2.weight(.black))
+                        .foregroundStyle(AppTheme.ink)
+                    Text("Objetivo principal: cubrir el pago de \(commitmentUnits) unidades.")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(AppTheme.muted)
+                }
+                Spacer()
+                Image(systemName: "flag.checkered")
+                    .font(.title.weight(.black))
+                    .foregroundStyle(AppTheme.magenta)
+            }
+
+            VStack(alignment: .leading, spacing: 7) {
+                GeometryReader { proxy in
+                    ZStack(alignment: .leading) {
+                        Capsule().fill(AppTheme.surfaceSoft)
+                        Capsule()
+                            .fill(AppTheme.magenta)
+                            .frame(width: max(8, proxy.size.width * progress))
+                    }
+                }
+                .frame(height: 10)
+                HStack {
+                    Text("Separado visible: \(m(visibleReserve)) · \(visibleUnits) uds")
+                        .font(.caption.weight(.heavy))
+                        .foregroundStyle(AppTheme.magenta)
+                    Spacer()
+                    Text("Falta \(m(remainingCommitment))")
+                        .font(.caption.weight(.heavy))
+                        .foregroundStyle(remainingCommitment > 0 ? AppTheme.amber : AppTheme.green)
+                }
+            }
+
+            LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 10) {
+                PreorderMetricTile(title: "Compromiso total", value: m(commitmentCost), subtitle: "\(commitmentUnits) unidades", color: AppTheme.magenta, icon: "target")
+                PreorderMetricTile(title: "Coste unidad", value: m(unitCost), subtitle: "Para separar por venta", color: AppTheme.amber, icon: "divide.circle.fill")
+            }
+        }
+        .glassPanel(padding: 16, accent: AppTheme.magenta)
+    }
+
+    private func m(_ value: Double) -> String { formatMoney(value, currency: currency) }
+}
+
+struct PreorderMetricTile: View {
+    let title: String
+    let value: String
+    let subtitle: String
+    let color: Color
+    let icon: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 7) {
+            Image(systemName: icon)
+                .font(.caption.weight(.black))
+                .foregroundStyle(color)
+            Text(value)
+                .font(.system(size: 20, weight: .black, design: .rounded))
+                .foregroundStyle(color)
+                .lineLimit(1)
+                .minimumScaleFactor(0.65)
+            Text(title.uppercased())
+                .font(.caption2.weight(.black))
+                .foregroundStyle(AppTheme.ink)
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
+            Text(subtitle)
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(AppTheme.muted)
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(12)
+        .background(color.opacity(0.10), in: RoundedRectangle(cornerRadius: 12))
+    }
+}
+
+struct PreorderPayoutSection: View {
+    let title: String
+    let subtitle: String
+    let payouts: [CashflowPayout]
+    let color: Color
+    let currency: String
+
+    private var retroPayouts: [CashflowPayout] {
+        payouts.filter { ($0.retroPreorder?.reserve ?? 0) > 0 }
+    }
+    private var totalReserve: Double {
+        retroPayouts.reduce(0) { $0 + ($1.retroPreorder?.reserve ?? 0) }
+    }
+    private var totalUnits: Int {
+        retroPayouts.reduce(0) { $0 + ($1.retroPreorder?.units ?? 0) }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            SectionHeader(title: title, subtitle: retroPayouts.isEmpty ? subtitle : "\(totalUnits) uds · separar \(m(totalReserve))")
+            if retroPayouts.isEmpty {
+                EmptyStateCard(title: "Sin cobros retro aquí", subtitle: subtitle)
+            } else {
+                ForEach(retroPayouts) { payout in
+                    VStack(alignment: .leading, spacing: 8) {
+                        HStack {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("Ingreso \(payout.date)")
+                                    .font(.subheadline.weight(.heavy))
+                                    .foregroundStyle(AppTheme.ink)
+                                Text("\(payout.retroPreorder?.units ?? 0) uds retro")
+                                    .font(.caption.weight(.semibold))
+                                    .foregroundStyle(AppTheme.muted)
+                            }
+                            Spacer()
+                            Text(m(payout.retroPreorder?.reserve ?? 0))
+                                .font(.headline.weight(.black))
+                                .foregroundStyle(color)
+                        }
+                        ForEach(payout.orders.filter { ($0.retroUnits ?? 0) > 0 }, id: \.orderNumber) { order in
+                            HStack(spacing: 8) {
+                                Image(systemName: "flag.checkered")
+                                    .font(.caption2.weight(.black))
+                                    .foregroundStyle(AppTheme.magenta)
+                                Text(order.orderNumber ?? "Pedido sin número")
+                                    .font(.caption.weight(.heavy))
+                                    .foregroundStyle(AppTheme.ink)
+                                Text("x\(order.retroUnits ?? 0)")
+                                    .font(.caption.weight(.heavy))
+                                    .foregroundStyle(AppTheme.magenta)
+                                Spacer()
+                                Text(m(order.retroReserve ?? 0))
+                                    .font(.caption.weight(.heavy))
+                                    .foregroundStyle(AppTheme.inkSoft)
+                            }
+                            .padding(.vertical, 2)
+                        }
+                    }
+                    .glassPanel(padding: 12, accent: color)
+                }
+            }
+        }
+    }
+
+    private func m(_ value: Double) -> String { formatMoney(value, currency: currency) }
+}
+
+struct PreorderPendingOrdersSection: View {
+    let orders: [WorkshopOrder]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            SectionHeader(title: "Pedidos retro sin preparar", subtitle: "\(orders.count) pedidos · \(orders.reduce(0) { $0 + $1.retroAstonUnits }) uds")
+            if orders.isEmpty {
+                EmptyStateCard(title: "No hay retro pendiente en taller", subtitle: "Los pedidos de preventa no están mezclados en la cola.")
+            } else {
+                ForEach(orders) { order in
+                    PendingOrderRow(order: order, showsAction: false) {}
+                        .glassPanel(padding: 14, accent: AppTheme.magenta)
+                }
+            }
+        }
     }
 }
 
