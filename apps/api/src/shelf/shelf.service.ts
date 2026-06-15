@@ -1,6 +1,7 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { OperationalStatus } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
+import { ShopifyAdapter } from '../shopify/shopify.adapter';
 
 const PENDING_STATUSES: OperationalStatus[] = [
   OperationalStatus.NEW,
@@ -22,7 +23,22 @@ function normTitle(s?: string | null): string {
 
 @Injectable()
 export class ShelfService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(private readonly prisma: PrismaService, private readonly shopify: ShopifyAdapter) {}
+
+  /** All brand garments (camisetas + sudaderas + bañadores) to pick from when stocking the shelf. */
+  async catalog() {
+    if (!this.shopify.hasCredentials()) return [];
+    const products = await this.shopify.crewCatalog();
+    return products
+      .filter((p: any) => p.category === 'PRENDA')
+      .map((p: any) => ({
+        id: p.id,
+        title: p.title,
+        imageUrl: p.imageUrl,
+        sizes: p.sizes,
+        variants: p.variants
+      }));
+  }
 
   list() {
     return this.prisma.returnShelfItem.findMany({ orderBy: [{ productTitle: 'asc' }, { size: 'asc' }] });

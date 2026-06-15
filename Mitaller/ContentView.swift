@@ -1402,6 +1402,8 @@ struct MainTabView: View {
                 .tabItem { Label("Devoluciones", systemImage: "arrow.uturn.left.circle.fill") }
             CarrierReturnsView()
                 .tabItem { Label("Devueltos", systemImage: "arrow.uturn.backward.square.fill") }
+            EstanteriaView()
+                .tabItem { Label("Estantería", systemImage: "tray.2.fill") }
             BankView()
                 .tabItem { Label("Banco", systemImage: "building.columns.fill") }
             AdminView()
@@ -7286,6 +7288,232 @@ struct CreateInfluencerSheet: View {
 }
 
 // MARK: - Meta Ads
+
+struct EstanteriaView: View {
+    @Environment(WorkshopStore.self) private var store
+    @State private var items: [ShelfItem] = []
+    @State private var fulfillable: ShelfFulfillable?
+    @State private var loading = false
+    @State private var error: String?
+    @State private var showAdd = false
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 16) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Estantería").font(.system(size: 30, weight: .heavy, design: .rounded)).foregroundStyle(AppTheme.ink)
+                        Text("Camisetas de cambios/devoluciones. Qué pedidos puedes sacar sin fabricar.")
+                            .font(.subheadline.weight(.medium)).foregroundStyle(AppTheme.muted)
+                    }
+                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 104), spacing: 10)], spacing: 10) {
+                        MetricTile(title: "Unidades", value: items.reduce(0) { $0 + $1.quantity }, color: AppTheme.green, icon: "tray.2.fill")
+                        MetricTile(title: "Referencias", value: items.count, color: AppTheme.blue, icon: "tshirt.fill")
+                        MetricTile(title: "Pedidos posibles", value: fulfillable?.orders.count ?? 0, color: AppTheme.magenta, icon: "checkmark.circle.fill")
+                    }
+
+                    if let f = fulfillable, !f.orders.isEmpty {
+                        SectionHeader(title: "Pedidos que puedes hacer", subtitle: "Con lo que hay en la estantería")
+                        ForEach(f.orders) { ShelfFulfillCard(order: $0) }
+                    }
+
+                    SectionHeader(title: "En la estantería", subtitle: "\(items.count) referencias")
+                    if loading && items.isEmpty {
+                        ProgressView().frame(maxWidth: .infinity)
+                    } else if items.isEmpty {
+                        ContentUnavailableView("Estantería vacía", systemImage: "tray", description: Text("Añade camisetas con ＋ (producto + talla)."))
+                    } else {
+                        ForEach(items) { item in
+                            ShelfItemRow(item: item, onChange: { Task { await reload() } }).environment(store)
+                        }
+                    }
+                    if let error { Text(error).font(.footnote).foregroundStyle(AppTheme.red) }
+                }
+                .padding()
+            }
+            .screenBackground()
+            .navigationTitle("Estantería")
+            .toolbar {
+                ToolbarItem(placement: .primaryAction) { Button { showAdd = true } label: { Image(systemName: "plus.circle.fill") } }
+                ToolbarItem(placement: .topBarLeading) { Button { Task { await reload() } } label: { Image(systemName: "arrow.clockwise") }.disabled(loading) }
+            }
+            .sheet(isPresented: $showAdd) { ShelfAddSheet(onAdded: { Task { await reload() } }).environment(store) }
+            .task { await reload() }
+            .refreshable { await reload() }
+        }
+    }
+
+    private func reload() async {
+        guard let client = store.apiClient else { error = "API no configurada"; return }
+        loading = true; error = nil; defer { loading = false }
+        do {
+            async let i = client.shelfItems()
+            async let f = client.shelfFulfillable()
+            items = try await i
+            fulfillable = try? await f
+        } catch { self.error = error.localizedDescription }
+    }
+}
+
+struct ShelfFulfillCard: View {
+    let order: ShelfFulfillOrder
+    private var isFull: Bool { order.fulfillability == "FULL" }
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text(order.orderNumber).font(.headline.weight(.heavy)).foregroundStyle(AppTheme.ink)
+                Spacer()
+                Text(isFull ? "COMPLETO" : "PARCIAL").font(.caption2.weight(.black))
+                    .padding(.horizontal, 8).padding(.vertical, 4)
+                    .background((isFull ? AppTheme.green : AppTheme.amber).opacity(0.18), in: Capsule())
+                    .foregroundStyle(isFull ? AppTheme.green : AppTheme.amber)
+            }
+            if let c = order.customerName { Text(c).font(.caption).foregroundStyle(AppTheme.muted) }
+            Text("\(order.matchedUnits)/\(order.totalUnits) ud desde estantería").font(.caption2.weight(.bold)).foregroundStyle(AppTheme.muted)
+            ForEach(order.lines.filter { $0.fromShelf > 0 }) { l in
+                HStack(spacing: 8) {
+                    Image(systemName: "checkmark.circle.fill").foregroundStyle(AppTheme.green).font(.caption)
+                    Text("\(l.fromShelf)× \(l.title)\(l.size != nil ? " · \(l.size!)" : "")").font(.caption).foregroundStyle(AppTheme.ink).lineLimit(1)
+                }
+            }
+        }
+        .padding(12).glassPanel(padding: 14, accent: isFull ? AppTheme.green : AppTheme.amber)
+    }
+}
+
+struct ShelfItemRow: View {
+    @Environment(WorkshopStore.self) private var store
+    let item: ShelfItem
+    let onChange: () -> Void
+    @State private var busy = false
+    var body: some View {
+        HStack(spacing: 12) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(item.productTitle).font(.subheadline.weight(.bold)).foregroundStyle(AppTheme.ink).lineLimit(2)
+                HStack(spacing: 6) {
+                    Text("Talla \(item.size)").font(.caption2.weight(.bold)).foregroundStyle(AppTheme.blue)
+                    if let c = item.color { Text("· \(c)").font(.caption2).foregroundStyle(AppTheme.muted) }
+                }
+            }
+            Spacer()
+            HStack(spacing: 10) {
+                Button { Task { await adjust(item.quantity - 1) } } label: { Image(systemName: "minus.circle.fill") }
+                Text("\(item.quantity)").font(.headline.weight(.black)).foregroundStyle(AppTheme.ink).frame(minWidth: 24)
+                Button { Task { await adjust(item.quantity + 1) } } label: { Image(systemName: "plus.circle.fill") }
+            }
+            .foregroundStyle(AppTheme.green).disabled(busy)
+        }
+        .padding(12).glassPanel(padding: 12, accent: AppTheme.green)
+    }
+    private func adjust(_ q: Int) async {
+        guard let client = store.apiClient else { return }
+        busy = true; defer { busy = false }
+        try? await client.adjustShelfItem(item.id, quantity: max(0, q))
+        onChange()
+    }
+}
+
+struct ShelfAddSheet: View {
+    @Environment(WorkshopStore.self) private var store
+    @Environment(\.dismiss) private var dismiss
+    let onAdded: () -> Void
+    @State private var catalog: [ShelfCatalogProduct] = []
+    @State private var loading = true
+    @State private var search = ""
+    @State private var selected: ShelfCatalogProduct?
+    @State private var size = "M"
+    @State private var quantity = 1
+    @State private var saving = false
+    @State private var error: String?
+
+    private var filtered: [ShelfCatalogProduct] {
+        let q = search.trimmingCharacters(in: .whitespaces).lowercased()
+        guard !q.isEmpty else { return catalog }
+        return catalog.filter { $0.title.lowercased().contains(q) }
+    }
+
+    var body: some View {
+        NavigationStack {
+            Group {
+                if let p = selected {
+                    Form {
+                        Section {
+                            HStack(spacing: 12) {
+                                shelfImage(p.imageUrl, size: 54)
+                                Text(p.title).font(.subheadline.weight(.bold))
+                            }
+                        }
+                        Section("Talla") {
+                            Picker("Talla", selection: $size) {
+                                ForEach(p.sizes.isEmpty ? ["S","M","L","XL","XXL"] : p.sizes, id: \.self) { Text($0).tag($0) }
+                            }.pickerStyle(.segmented)
+                        }
+                        Section { Stepper("Cantidad: \(quantity)", value: $quantity, in: 1...50) }
+                        if let error { Section { Text(error).font(.footnote).foregroundStyle(AppTheme.red) } }
+                        Section {
+                            Button { Task { await save(p) } } label: {
+                                if saving { ProgressView().frame(maxWidth: .infinity) }
+                                else { Label("Añadir \(quantity)× talla \(size)", systemImage: "tray.and.arrow.down.fill").frame(maxWidth: .infinity) }
+                            }.disabled(saving)
+                            Button("Elegir otro diseño") { selected = nil }
+                        }
+                    }
+                } else {
+                    List {
+                        if loading { ProgressView() }
+                        ForEach(filtered) { p in
+                            Button { selected = p; size = p.sizes.first ?? "M"; quantity = 1 } label: {
+                                HStack(spacing: 12) {
+                                    shelfImage(p.imageUrl, size: 44)
+                                    Text(p.title).font(.subheadline.weight(.medium)).foregroundStyle(AppTheme.ink).lineLimit(2)
+                                    Spacer()
+                                    Image(systemName: "chevron.right").font(.caption).foregroundStyle(AppTheme.muted)
+                                }
+                            }
+                        }
+                    }
+                    .searchable(text: $search, prompt: "Buscar diseño (camiseta o sudadera)")
+                }
+            }
+            .navigationTitle(selected == nil ? "Elige diseño" : "Añadir stock")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Cancelar") { dismiss() } } }
+            .task {
+                guard let client = store.apiClient else { return }
+                catalog = (try? await client.shelfCatalog()) ?? []
+                loading = false
+            }
+        }
+    }
+
+    @ViewBuilder private func shelfImage(_ url: String?, size: CGFloat) -> some View {
+        if let url, let u = URL(string: url) {
+            AsyncImage(url: u) { img in img.resizable().scaledToFill() } placeholder: { Color.gray.opacity(0.2) }
+                .frame(width: size, height: size).clipShape(RoundedRectangle(cornerRadius: 8))
+        } else {
+            Image(systemName: "tshirt.fill").frame(width: size, height: size).foregroundStyle(AppTheme.muted)
+        }
+    }
+
+    private func save(_ p: ShelfCatalogProduct) async {
+        guard let client = store.apiClient else { return }
+        saving = true; error = nil; defer { saving = false }
+        let variant = p.variant(for: size)
+        do {
+            _ = try await client.addShelfItem(CreateShelfItemRequest(
+                productTitle: p.title,
+                sku: variant?.sku,
+                shopifyProductId: p.id,
+                shopifyVariantId: variant?.id,
+                imageUrl: p.imageUrl,
+                color: nil,
+                size: size,
+                quantity: quantity
+            ))
+            onAdded(); dismiss()
+        } catch { self.error = error.localizedDescription }
+    }
+}
 
 enum CarrierReason: String, CaseIterable, Identifiable {
     case ABSENT, NO_ATTEND, WRONG_ADDRESS, REFUSED, OTHER

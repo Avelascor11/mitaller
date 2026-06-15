@@ -192,6 +192,24 @@ struct APIClient {
         try await get("/crew/collaborations/\(Self.pathSegment(collabId))/performance")
     }
 
+    // MARK: - Estantería cambios/devs
+    func shelfCatalog() async throws -> [ShelfCatalogProduct] { try await get("/shelf/catalog") }
+    func shelfItems() async throws -> [ShelfItem] { try await get("/shelf") }
+    func shelfFulfillable() async throws -> ShelfFulfillable { try await get("/shelf/fulfillable") }
+    func addShelfItem(_ body: CreateShelfItemRequest) async throws -> ShelfItem {
+        let request = try jsonRequest(path: "/shelf", method: "POST", body: body)
+        return try await perform(request)
+    }
+    func adjustShelfItem(_ id: String, quantity: Int) async throws {
+        let request = try jsonRequest(path: "/shelf/\(Self.pathSegment(id))", method: "PATCH", body: ShelfQtyRequest(quantity: quantity))
+        let _: EmptyResponse = try await perform(request)
+    }
+    func deleteShelfItem(_ id: String) async throws {
+        var request = try self.request(path: "/shelf/\(Self.pathSegment(id))", method: "DELETE")
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        let _: EmptyResponse = try await perform(request)
+    }
+
     // MARK: - Carrier returns (envíos devueltos)
     func carrierReturns(status: String? = nil) async throws -> [CarrierReturn] {
         if let status { return try await get("/carrier-returns?status=\(Self.pathSegment(status))") }
@@ -1133,6 +1151,71 @@ struct InfluencerUpdateRequest: Encodable {
         self.lastMessage = lastMessage
         self.lastMessageAt = lastMessageAt
     }
+}
+
+struct ShelfItem: Decodable, Identifiable {
+    let id: String
+    let productTitle: String
+    let sku: String?
+    let color: String?
+    let size: String
+    let imageUrl: String?
+    let quantity: Int
+}
+struct CreateShelfItemRequest: Encodable {
+    let productTitle: String
+    let sku: String?
+    let shopifyProductId: String?
+    let shopifyVariantId: String?
+    let imageUrl: String?
+    let color: String?
+    let size: String
+    let quantity: Int
+}
+struct ShelfCatalogVariant: Decodable, Identifiable {
+    let id: String
+    let title: String
+    let sku: String?
+}
+struct ShelfCatalogProduct: Decodable, Identifiable {
+    let id: String
+    let title: String
+    let imageUrl: String?
+    let sizes: [String]
+    let variants: [ShelfCatalogVariant]
+    func variant(for size: String) -> ShelfCatalogVariant? {
+        if variants.count == 1 { return variants.first }
+        let up = size.uppercased()
+        return variants.first { v in
+            v.title.uppercased().split(whereSeparator: { "/|,-".contains($0) }).map { $0.trimmingCharacters(in: .whitespaces) }.contains(up)
+        }
+    }
+}
+private struct ShelfQtyRequest: Encodable { let quantity: Int }
+struct ShelfFulfillLine: Decodable, Identifiable {
+    let orderItemId: String
+    let title: String
+    let size: String?
+    let sku: String?
+    let quantity: Int
+    let fromShelf: Int
+    let imageUrl: String?
+    var id: String { orderItemId }
+}
+struct ShelfFulfillOrder: Decodable, Identifiable {
+    let orderId: String
+    let orderNumber: String
+    let customerName: String?
+    let operationalStatus: String
+    let totalUnits: Int
+    let matchedUnits: Int
+    let fulfillability: String
+    let lines: [ShelfFulfillLine]
+    var id: String { orderId }
+}
+struct ShelfFulfillable: Decodable {
+    let shelfUnits: Int
+    let orders: [ShelfFulfillOrder]
 }
 
 struct CarrierReturn: Decodable, Identifiable {
