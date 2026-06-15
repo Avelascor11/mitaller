@@ -16,6 +16,9 @@ const PENDING_STATUSES: OperationalStatus[] = [
 function normSize(s?: string | null): string {
   return (s ?? '').toString().trim().toUpperCase().replace('2XL', 'XXL');
 }
+function normTitle(s?: string | null): string {
+  return (s ?? '').toString().toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9]+/g, ' ').trim();
+}
 
 @Injectable()
 export class ShelfService {
@@ -106,12 +109,14 @@ export class ShelfService {
 
     // available pool keyed by variantId and by productId|size and by sku|size
     const pool = shelf.map((s) => ({ ...s, remaining: s.quantity }));
-    const matchShelf = (it: { shopifyVariantId?: string | null; shopifyProductId?: string | null; sku?: string | null; size?: string | null }) => {
+    const matchShelf = (it: { shopifyVariantId?: string | null; shopifyProductId?: string | null; sku?: string | null; size?: string | null; title?: string | null }) => {
       const size = normSize(it.size);
+      const title = normTitle(it.title);
       return pool.find((s) => s.remaining > 0 && (
         (it.shopifyVariantId && s.shopifyVariantId && s.shopifyVariantId === it.shopifyVariantId) ||
         (it.shopifyProductId && s.shopifyProductId && s.shopifyProductId === it.shopifyProductId && normSize(s.size) === size) ||
-        (it.sku && s.sku && s.sku === it.sku && normSize(s.size) === size)
+        (it.sku && s.sku && s.sku === it.sku && normSize(s.size) === size) ||
+        (title && normTitle(s.productTitle) === title && normSize(s.size) === size)
       ));
     };
 
