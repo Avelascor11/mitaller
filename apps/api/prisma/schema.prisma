@@ -855,6 +855,25 @@ model CarrierReturn {
   @@index([orderNumber])
 }
 
+model ReturnShelfItem {
+  id               String   @id @default(cuid())
+  productTitle     String
+  shopifyProductId String?
+  shopifyVariantId String?
+  sku              String?
+  color            String?
+  size             String
+  imageUrl         String?
+  quantity         Int      @default(1)
+  source           String   @default("MANUAL") // MANUAL | RETURN | SCAN
+  notes            String?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  @@index([shopifyVariantId])
+  @@index([shopifyProductId, size])
+}
+
 model AutopilotConfig {
   id        String   @id @default("singleton")
   mode      String   @default("dry") // off | dry | live
