@@ -15,6 +15,11 @@ export class ShelfController {
     return this.shelf.stats();
   }
 
+  @Get('catalog')
+  catalog() {
+    return this.shelf.catalog();
+  }
+
   @Get('fulfillable')
   fulfillable() {
     return this.shelf.fulfillable();
