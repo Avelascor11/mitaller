@@ -224,6 +224,15 @@ struct WorkshopOrderItem: Identifiable, Hashable {
             .lowercased()
         return text.contains("retro") && (text.contains("aston") || text.contains("astn") || text.contains("alonso"))
     }
+
+    var isRetro: Bool {
+        let text = [title, variantTitle, sku]
+            .compactMap { $0 }
+            .joined(separator: " ")
+            .folding(options: .diacriticInsensitive, locale: .current)
+            .lowercased()
+        return text.contains("retro")
+    }
 }
 
 struct WorkshopOrder: Identifiable, Hashable {
@@ -274,6 +283,10 @@ struct WorkshopOrder: Identifiable, Hashable {
     var totalUnits: Int { items.reduce(0) { $0 + $1.quantity } }
     var retroAstonUnits: Int { items.reduce(0) { $0 + ($1.isRetroAston ? $1.quantity : 0) } }
     var hasRetroAstonPreorder: Bool { retroAstonUnits > 0 }
+    var retroUnits: Int { items.reduce(0) { $0 + ($1.isRetro ? $1.quantity : 0) } }
+    var hasRetro: Bool { retroUnits > 0 }
+    /** Mixed: has retro AND non-retro items → policy is wait & ship together. */
+    var isMixedRetro: Bool { hasRetro && retroUnits < totalUnits }
 
     var shippingCategory: ShippingCategory {
         let value = shippingMethod.folding(options: .diacriticInsensitive, locale: .current).lowercased()
@@ -479,8 +492,8 @@ enum PriorityChoice: String, CaseIterable, Identifiable {
 
 enum PreorderChoice: String, CaseIterable, Identifiable {
     case all = "Todos"
-    case hideRetro = "Sin retro Aston"
-    case onlyRetro = "Solo retro Aston"
+    case hideRetro = "Sin retro"
+    case onlyRetro = "Con retro"
 
     var id: String { rawValue }
 
@@ -495,8 +508,8 @@ enum PreorderChoice: String, CaseIterable, Identifiable {
     func matches(_ order: WorkshopOrder) -> Bool {
         switch self {
         case .all: true
-        case .hideRetro: !order.hasRetroAstonPreorder
-        case .onlyRetro: order.hasRetroAstonPreorder
+        case .hideRetro: !order.hasRetro
+        case .onlyRetro: order.hasRetro
         }
     }
 }
@@ -5360,10 +5373,18 @@ struct PendingOrderRow: View {
                 SourceChip(source: order.source)
                 StatusChip(status: order.status)
                 ShippingChip(category: order.shippingCategory)
-                if order.hasRetroAstonPreorder {
-                    Tag(text: "PREVENTA RETRO · \(order.retroAstonUnits) uds", systemImage: "flag.checkered")
+                if order.hasRetro {
+                    Tag(text: "RETRO · \(order.retroUnits) uds", systemImage: "flag.checkered")
                 }
                 Tag(text: order.hasMultipleItems ? "\(order.items.count) líneas · \(order.totalUnits) uds" : "\(order.totalUnits) ud", systemImage: "square.stack.3d.up.fill")
+            }
+            if order.isMixedRetro {
+                Label("Mixto con retro — espera a tener el retro y manda todo junto.", systemImage: "clock.badge.exclamationmark.fill")
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(AppTheme.amber)
+                    .padding(8)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(AppTheme.amber.opacity(0.14), in: RoundedRectangle(cornerRadius: 10))
             }
             HStack(spacing: 12) {
                 Label(order.shippingMethod, systemImage: "shippingbox.and.arrow.backward.fill")
