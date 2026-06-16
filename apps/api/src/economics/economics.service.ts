@@ -569,16 +569,19 @@ export class EconomicsService {
       };
     };
 
-    const todayPayouts = await Promise.all(paidToday.map(enrichPayout));
     const fixedExpenses = await this.fixedExpenses().catch(() => null);
+    const todayPayouts = await Promise.all(paidToday.map(enrichPayout));
     const todayTotal = todayPayouts.reduce((s, p) => s + p.amount, 0);
+    const cashFreeBeforeOperations = +todayPayouts.reduce((s, p) => s + p.allocation.cashFree, 0).toFixed(2);
+    const operationsReserve = +Math.min(Math.max(cashFreeBeforeOperations, 0), Number((fixedExpenses as any)?.pending ?? 0)).toFixed(2);
     const todayAllocation = {
       taxReserve: +todayPayouts.reduce((s, p) => s + p.allocation.taxReserve, 0).toFixed(2),
       production: +todayPayouts.reduce((s, p) => s + p.allocation.production, 0).toFixed(2),
       shipping: +todayPayouts.reduce((s, p) => s + p.allocation.shipping, 0).toFixed(2),
       adsReserve: +todayPayouts.reduce((s, p) => s + p.allocation.adsReserve, 0).toFixed(2),
       retroPreorder: +todayPayouts.reduce((s, p) => s + p.allocation.retroPreorder, 0).toFixed(2),
-      cashFree: +todayPayouts.reduce((s, p) => s + p.allocation.cashFree, 0).toFixed(2)
+      operationsReserve,
+      cashFree: +(cashFreeBeforeOperations - operationsReserve).toFixed(2)
     };
 
     return {
