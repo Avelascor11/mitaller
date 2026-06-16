@@ -380,15 +380,45 @@ export class SendcloudAdapter {
     if (!address1 || !city || !zip || !country) {
       throw new BadRequestException('Direccion de envio incompleta para Sendcloud');
     }
+    const lines = this.clampAddressLines(address1, this.pickString(source, ['address2', 'address_2']));
     return {
       name: this.pickString(source, ['name']),
-      address1,
-      address2: this.pickString(source, ['address2', 'address_2']),
+      address1: lines.address1,
+      address2: lines.address2,
       city,
       zip,
       country,
       phone: this.pickString(source, ['phone', 'telephone'])
     };
+  }
+
+  // Sendcloud rechaza lineas largas: address max 75, address_2 max 24.
+  // Si address_2 desborda, intenta llevar el sobrante a address_1 (si cabe);
+  // lo que no quepa se trunca por palabra para no romper la entrega.
+  private clampAddressLines(address1: string, address2?: string): { address1: string; address2?: string } {
+    const ADDRESS1_MAX = 75;
+    const ADDRESS2_MAX = 24;
+    let line1 = address1.trim();
+    let line2 = (address2 ?? '').trim();
+
+    if (line2.length > ADDRESS2_MAX) {
+      const overflow = line2.slice(ADDRESS2_MAX).trim();
+      line2 = this.truncateAtWord(line2, ADDRESS2_MAX);
+      const room = ADDRESS1_MAX - line1.length - 1;
+      if (overflow && room > 3) {
+        line1 = `${line1} ${this.truncateAtWord(overflow, room)}`.trim();
+      }
+    }
+
+    line1 = this.truncateAtWord(line1, ADDRESS1_MAX);
+    return { address1: line1, address2: line2 || undefined };
+  }
+
+  private truncateAtWord(value: string, max: number): string {
+    if (value.length <= max) return value;
+    const slice = value.slice(0, max);
+    const lastSpace = slice.lastIndexOf(' ');
+    return (lastSpace > max * 0.6 ? slice.slice(0, lastSpace) : slice).trim();
   }
 
   private pickString(source: Record<string, unknown>, keys: string[]) {
