@@ -11704,6 +11704,9 @@ struct CashflowAllocationGrid: View {
             if let retro = allocation.retroPreorder, retro > 0 {
                 CashflowAllocationTile(label: "Preventa Retro", amount: retro, currency: currency, color: AppTheme.magenta, icon: "flag.checkered")
             }
+            if let operations = allocation.operationsReserve, operations > 0 {
+                CashflowAllocationTile(label: "Operaciones", amount: operations, currency: currency, color: AppTheme.teal, icon: "calendar.badge.exclamationmark")
+            }
             CashflowAllocationTile(label: "Beneficio libre", amount: allocation.cashFree, currency: currency, color: AppTheme.green, icon: "banknote.fill")
         }
     }

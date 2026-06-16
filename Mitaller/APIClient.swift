@@ -1827,6 +1827,7 @@ struct CashflowAllocation: Decodable {
     let shipping: Double
     let adsReserve: Double
     let retroPreorder: Double?
+    let operationsReserve: Double?
     let cashFree: Double
 }
 
