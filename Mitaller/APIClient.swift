@@ -343,6 +343,33 @@ struct APIClient {
     }
     func bankAllocation() async throws -> AllocationPlan { try await get("/bank/allocation") }
     func cashflow() async throws -> CashflowSummary { try await get("/economics/cashflow") }
+    func fixedExpenses(period: String? = nil) async throws -> FixedExpenseSummary {
+        if let period { return try await get("/economics/fixed-expenses?period=\(Self.queryValue(period))") }
+        return try await get("/economics/fixed-expenses")
+    }
+    func createFixedExpense(_ body: FixedExpenseSaveRequest) async throws -> FixedExpenseItem {
+        let request = try jsonRequest(path: "/economics/fixed-expenses", method: "POST", body: body)
+        return try await perform(request)
+    }
+    func updateFixedExpense(id: String, body: FixedExpenseSaveRequest) async throws -> FixedExpenseItem {
+        let request = try jsonRequest(path: "/economics/fixed-expenses/\(Self.pathSegment(id))", method: "PATCH", body: body)
+        return try await perform(request)
+    }
+    func deleteFixedExpense(id: String) async throws {
+        var request = try self.request(path: "/economics/fixed-expenses/\(Self.pathSegment(id))", method: "DELETE")
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        let _: EmptyResponse = try await perform(request)
+    }
+    func markFixedExpensePaid(id: String, period: String? = nil, amount: Double? = nil) async throws {
+        let request = try jsonRequest(path: "/economics/fixed-expenses/\(Self.pathSegment(id))/pay", method: "POST", body: FixedExpensePayRequest(period: period, amount: amount))
+        let _: EmptyResponse = try await perform(request)
+    }
+    func unmarkFixedExpensePaid(id: String, period: String? = nil) async throws {
+        let suffix = period.map { "?period=\(Self.queryValue($0))" } ?? ""
+        var request = try self.request(path: "/economics/fixed-expenses/\(Self.pathSegment(id))/pay\(suffix)", method: "DELETE")
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        let _: EmptyResponse = try await perform(request)
+    }
     func markPayout(_ id: String) async throws {
         let request = try jsonRequest(path: "/economics/cashflow/\(Self.pathSegment(id))/mark", method: "POST", body: EmptyBody())
         let _: EmptyResponse = try await perform(request)
@@ -1704,8 +1731,63 @@ struct CashflowSummary: Decodable {
     let receivedToday: Double
     let payouts: [CashflowPayout]
     let allocation: CashflowAllocation
+    let fixedExpenses: FixedExpenseSummary?
     let pending: CashflowPending
     let scheduled: CashflowPending
+}
+
+struct FixedExpenseSaveRequest: Encodable {
+    let name: String
+    let category: String
+    let amount: Double
+    let currency: String?
+    let dueDay: Int?
+    let active: Bool?
+    let matcher: String?
+    let notes: String?
+}
+
+private struct FixedExpensePayRequest: Encodable {
+    let period: String?
+    let amount: Double?
+}
+
+struct FixedExpenseTemplate: Decodable, Identifiable {
+    let name: String
+    let category: String
+    let icon: String
+    var id: String { category + name }
+}
+
+struct FixedExpenseItem: Decodable, Identifiable {
+    let id: String
+    let name: String
+    let category: String
+    let amount: Double
+    let currency: String
+    let dueDay: Int?
+    let active: Bool
+    let matcher: String?
+    let notes: String?
+    let paid: Bool?
+    let paidAt: Date?
+    let paidAmount: Double?
+    let paymentId: String?
+    let createdAt: Date?
+    let updatedAt: Date?
+}
+
+struct FixedExpenseSummary: Decodable {
+    let period: String
+    let currency: String
+    let totalMonthly: Double
+    let paid: Double
+    let pending: Double
+    let activeCount: Int
+    let paidCount: Int
+    let items: [FixedExpenseItem]
+    let upcoming: [FixedExpenseItem]
+    let templates: [FixedExpenseTemplate]
 }
 
 struct CashflowPayout: Decodable, Identifiable {

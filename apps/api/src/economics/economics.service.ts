@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { BadRequestException, Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { OperationalStatus } from '@prisma/client';
 import { BankService } from '../bank/bank.service';
@@ -181,12 +181,13 @@ export class EconomicsService {
     const end = new Date(today); end.setHours(23, 59, 59, 999);
     const todayKey = today.toISOString().slice(0, 10);
 
-    const [bankAccounts, economics, purchaseMatrix, pendingOrders, metaSummary] = await Promise.all([
+    const [bankAccounts, economics, purchaseMatrix, pendingOrders, metaSummary, fixedExpenses] = await Promise.all([
       this.bank.accounts().catch(() => ({ currency: 'EUR', totalBalance: 0, balanceAvailable: false, accounts: [] as any[] })),
       this.summary(start, end),
       this.purchases.getPurchaseMatrix().catch(() => ({ groups: [] as any[] })),
       this.pendingWorkshopOrders(),
-      this.meta.summary(todayKey, todayKey).catch(() => null)
+      this.meta.summary(todayKey, todayKey).catch(() => null),
+      this.fixedExpenses().catch(() => null)
     ]);
 
     const currency = bankAccounts.currency ?? economics.currency ?? 'EUR';
@@ -195,7 +196,8 @@ export class EconomicsService {
     const safetyBuffer = this.cashSafetyBuffer();
     const freeCash = balanceAvailable ? Math.max(0, bankBalance - safetyBuffer) : 0;
     const purchase = this.purchaseExposure(purchaseMatrix);
-    const mandatorySpend = purchase.estimatedCost;
+    const fixedPending = Number((fixedExpenses as any)?.pending ?? 0);
+    const mandatorySpend = purchase.estimatedCost + fixedPending;
     const freeAfterMandatory = Math.max(0, freeCash - mandatorySpend);
     const metaSpend = Number((metaSummary as any)?.spend ?? economics.adSpend ?? 0);
     const metaRoas = (metaSummary as any)?.roas ?? null;
@@ -227,6 +229,15 @@ export class EconomicsService {
         `Comprar ropa obligatoria: ${purchase.units} uds aprox. (${this.formatMoney(purchase.estimatedCost, currency)})`,
         'HIGH',
         'cart.badge.plus'
+      ));
+    }
+
+    if (fixedPending > 0) {
+      actions.push(this.growthAction(
+        'FIXED_EXPENSES',
+        `Reservar gastos fijos pendientes: ${this.formatMoney(fixedPending, currency)}`,
+        'HIGH',
+        'building.columns.fill'
       ));
     }
 
@@ -274,6 +285,11 @@ export class EconomicsService {
         units: purchase.units,
         estimatedCost: purchase.estimatedCost,
         topItems: purchase.topItems
+      },
+      fixedExpenses: {
+        pending: fixedPending,
+        totalMonthly: Number((fixedExpenses as any)?.totalMonthly ?? 0),
+        paid: Number((fixedExpenses as any)?.paid ?? 0)
       },
       scale: {
         freeAfterMandatory,
@@ -554,6 +570,7 @@ export class EconomicsService {
     };
 
     const todayPayouts = await Promise.all(paidToday.map(enrichPayout));
+    const fixedExpenses = await this.fixedExpenses().catch(() => null);
     const todayTotal = todayPayouts.reduce((s, p) => s + p.amount, 0);
     const todayAllocation = {
       taxReserve: +todayPayouts.reduce((s, p) => s + p.allocation.taxReserve, 0).toFixed(2),
@@ -570,6 +587,7 @@ export class EconomicsService {
       receivedToday: +todayTotal.toFixed(2),
       payouts: todayPayouts,
       allocation: todayAllocation,
+      fixedExpenses,
       pending: {
         amount: +inTransit.reduce((s, p) => s + this.money(p.amount), 0).toFixed(2),
         payouts: await Promise.all(inTransit.map(enrichPayout))
@@ -579,6 +597,117 @@ export class EconomicsService {
         payouts: await Promise.all(scheduledSoon.map(enrichPayout))
       }
     };
+  }
+
+  async fixedExpenses(period?: string) {
+    const currentPeriod = this.fixedExpensePeriod(period);
+    const expenses = await this.prisma.fixedExpense.findMany({
+      include: { payments: { where: { period: currentPeriod } } },
+      orderBy: [{ active: 'desc' }, { dueDay: 'asc' }, { name: 'asc' }]
+    });
+    const items = expenses.map((expense) => {
+      const payment = expense.payments[0] ?? null;
+      return {
+        id: expense.id,
+        name: expense.name,
+        category: expense.category,
+        amount: expense.amount,
+        currency: expense.currency,
+        dueDay: expense.dueDay,
+        active: expense.active,
+        matcher: expense.matcher,
+        notes: expense.notes,
+        paid: Boolean(payment),
+        paidAt: payment?.paidAt ?? null,
+        paidAmount: payment?.amount ?? null,
+        paymentId: payment?.id ?? null,
+        createdAt: expense.createdAt,
+        updatedAt: expense.updatedAt
+      };
+    });
+    const active = items.filter((item) => item.active);
+    const totalMonthly = +active.reduce((sum, item) => sum + item.amount, 0).toFixed(2);
+    const paid = +active.filter((item) => item.paid).reduce((sum, item) => sum + (item.paidAmount ?? item.amount), 0).toFixed(2);
+    const pending = +Math.max(0, totalMonthly - paid).toFixed(2);
+    const upcoming = active
+      .filter((item) => !item.paid)
+      .sort((a, b) => (a.dueDay ?? 99) - (b.dueDay ?? 99))
+      .slice(0, 5);
+
+    return {
+      period: currentPeriod,
+      currency: active[0]?.currency ?? items[0]?.currency ?? 'EUR',
+      totalMonthly,
+      paid,
+      pending,
+      activeCount: active.length,
+      paidCount: active.filter((item) => item.paid).length,
+      items,
+      upcoming,
+      templates: this.fixedExpenseTemplates()
+    };
+  }
+
+  async createFixedExpense(body: {
+    name: string;
+    category: string;
+    amount: number;
+    currency?: string;
+    dueDay?: number | null;
+    matcher?: string | null;
+    notes?: string | null;
+  }) {
+    return this.prisma.fixedExpense.create({
+      data: this.fixedExpenseData(body)
+    });
+  }
+
+  async updateFixedExpense(id: string, body: {
+    name?: string;
+    category?: string;
+    amount?: number;
+    currency?: string;
+    dueDay?: number | null;
+    active?: boolean;
+    matcher?: string | null;
+    notes?: string | null;
+  }) {
+    return this.prisma.fixedExpense.update({
+      where: { id },
+      data: this.fixedExpenseData(body, true)
+    });
+  }
+
+  async deleteFixedExpense(id: string) {
+    await this.prisma.fixedExpense.delete({ where: { id } });
+    return { ok: true, id };
+  }
+
+  async markFixedExpensePaid(id: string, body: { period?: string; amount?: number; paidAt?: string; notes?: string | null }) {
+    const expense = await this.prisma.fixedExpense.findUnique({ where: { id } });
+    if (!expense) return null;
+    const period = this.fixedExpensePeriod(body.period);
+    return this.prisma.fixedExpensePayment.upsert({
+      where: { fixedExpenseId_period: { fixedExpenseId: id, period } },
+      create: {
+        fixedExpenseId: id,
+        period,
+        amount: this.money(body.amount ?? expense.amount),
+        paidAt: body.paidAt ? new Date(body.paidAt) : new Date(),
+        notes: body.notes ?? null
+      },
+      update: {
+        amount: this.money(body.amount ?? expense.amount),
+        paidAt: body.paidAt ? new Date(body.paidAt) : new Date(),
+        notes: body.notes ?? null
+      }
+    });
+  }
+
+  async unmarkFixedExpensePaid(id: string, period?: string) {
+    const currentPeriod = this.fixedExpensePeriod(period);
+    await this.prisma.fixedExpensePayment.deleteMany({ where: { fixedExpenseId: id, period: currentPeriod } });
+    return { ok: true, id, period: currentPeriod };
   }
 
   private async adsReserveForSalesDays(days: string[]) {
@@ -610,6 +739,51 @@ export class EconomicsService {
 
   private normalizeSearchText(value: string) {
     return value.normalize('NFD').replace(/\p{Diacritic}/gu, '').toLowerCase();
+  }
+
+  private fixedExpensePeriod(period?: string) {
+    if (period && /^\d{4}-\d{2}$/.test(period)) return period;
+    return new Date().toISOString().slice(0, 7);
+  }
+
+  private fixedExpenseData(body: any, partial = false) {
+    const data: any = {};
+    if (!partial || body.name !== undefined) data.name = this.requiredText(body.name, 'Nombre');
+    if (!partial || body.category !== undefined) data.category = this.requiredText(body.category, 'Categoría').toUpperCase();
+    if (!partial || body.amount !== undefined) {
+      const amount = Number(body.amount);
+      if (!Number.isFinite(amount) || amount < 0) throw new BadRequestException('Importe inválido');
+      data.amount = this.money(amount);
+    }
+    if (body.currency !== undefined) data.currency = body.currency || 'EUR';
+    else if (!partial) data.currency = 'EUR';
+    if (body.dueDay !== undefined) {
+      const dueDay = body.dueDay == null ? null : Number(body.dueDay);
+      data.dueDay = dueDay == null || !Number.isFinite(dueDay) ? null : Math.min(31, Math.max(1, Math.round(dueDay)));
+    }
+    if (body.active !== undefined) data.active = Boolean(body.active);
+    if (body.matcher !== undefined) data.matcher = body.matcher?.trim() || null;
+    if (body.notes !== undefined) data.notes = body.notes?.trim() || null;
+    return data;
+  }
+
+  private requiredText(value: unknown, label: string) {
+    const text = String(value ?? '').trim();
+    if (!text) throw new BadRequestException(`${label} obligatorio`);
+    return text;
+  }
+
+  private fixedExpenseTemplates() {
+    return [
+      { name: 'Alquiler', category: 'ALQUILER', icon: 'house.fill' },
+      { name: 'Luz', category: 'SUMINISTROS', icon: 'bolt.fill' },
+      { name: 'Agua', category: 'SUMINISTROS', icon: 'drop.fill' },
+      { name: 'Internet', category: 'TELECOM', icon: 'wifi' },
+      { name: 'Trabajadores', category: 'NOMINAS', icon: 'person.2.fill' },
+      { name: 'Gestoría', category: 'GESTORIA', icon: 'folder.fill' },
+      { name: 'Software', category: 'SOFTWARE', icon: 'desktopcomputer' },
+      { name: 'Seguro', category: 'SEGUROS', icon: 'shield.fill' }
+    ];
   }
 
   async payouts() {

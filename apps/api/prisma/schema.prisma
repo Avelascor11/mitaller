@@ -576,6 +576,40 @@ model PayoutMark {
   markedAt  DateTime @default(now())
 }
 
+model FixedExpense {
+  id        String                @id @default(cuid())
+  name      String
+  category  String
+  amount    Float
+  currency  String                @default("EUR")
+  dueDay    Int?
+  active    Boolean               @default(true)
+  matcher   String?
+  notes     String?
+  createdAt DateTime              @default(now())
+  updatedAt DateTime              @updatedAt
+  payments  FixedExpensePayment[]
+
+  @@index([active, category])
+  @@map("fixed_expenses")
+}
+
+model FixedExpensePayment {
+  id                String        @id @default(cuid())
+  fixedExpenseId    String
+  period            String
+  amount            Float
+  paidAt            DateTime      @default(now())
+  bankTransactionId String?
+  notes             String?
+  createdAt         DateTime      @default(now())
+  fixedExpense      FixedExpense  @relation(fields: [fixedExpenseId], references: [id], onDelete: Cascade)
+
+  @@unique([fixedExpenseId, period])
+  @@index([period])
+  @@map("fixed_expense_payments")
+}
+
 model ShippingRule {
   id                            String   @id @default(cuid())
   name                          String
