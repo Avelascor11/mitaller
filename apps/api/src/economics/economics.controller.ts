@@ -1,4 +1,4 @@
-import { Controller, Delete, Get, NotFoundException, Param, Post, Query } from '@nestjs/common';
+import { Body, Controller, Delete, Get, NotFoundException, Param, Patch, Post, Query } from '@nestjs/common';
 import { EconomicsService } from './economics.service';
 
 @Controller('economics')
@@ -40,6 +40,53 @@ export class EconomicsController {
   @Get('cashflow')
   cashflow() {
     return this.economics.cashflow();
+  }
+
+  @Get('fixed-expenses')
+  fixedExpenses(@Query('period') period?: string) {
+    return this.economics.fixedExpenses(period);
+  }
+
+  @Post('fixed-expenses')
+  createFixedExpense(@Body() body: {
+    name: string;
+    category: string;
+    amount: number;
+    currency?: string;
+    dueDay?: number | null;
+    matcher?: string | null;
+    notes?: string | null;
+  }) {
+    return this.economics.createFixedExpense(body);
+  }
+
+  @Patch('fixed-expenses/:id')
+  updateFixedExpense(@Param('id') id: string, @Body() body: {
+    name?: string;
+    category?: string;
+    amount?: number;
+    currency?: string;
+    dueDay?: number | null;
+    active?: boolean;
+    matcher?: string | null;
+    notes?: string | null;
+  }) {
+    return this.economics.updateFixedExpense(id, body);
+  }
+
+  @Delete('fixed-expenses/:id')
+  deleteFixedExpense(@Param('id') id: string) {
+    return this.economics.deleteFixedExpense(id);
+  }
+
+  @Post('fixed-expenses/:id/pay')
+  markFixedExpensePaid(@Param('id') id: string, @Body() body: { period?: string; amount?: number; paidAt?: string; notes?: string | null }) {
+    return this.economics.markFixedExpensePaid(id, body);
+  }
+
+  @Delete('fixed-expenses/:id/pay')
+  unmarkFixedExpensePaid(@Param('id') id: string, @Query('period') period?: string) {
+    return this.economics.unmarkFixedExpensePaid(id, period);
   }
 
   @Post('cashflow/:payoutId/mark')

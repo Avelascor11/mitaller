@@ -1398,6 +1398,8 @@ struct MainTabView: View {
                 .tabItem { Label("Influs", systemImage: "person.2.crop.square.stack.fill") }
             CashflowView()
                 .tabItem { Label("Caja", systemImage: "banknote.fill") }
+            FixedExpensesView()
+                .tabItem { Label("Gastos", systemImage: "calendar.badge.exclamationmark") }
             DevolucionesView()
                 .tabItem { Label("Devoluciones", systemImage: "arrow.uturn.left.circle.fill") }
             CarrierReturnsView()
@@ -10927,6 +10929,9 @@ struct CashflowView: View {
                     if loading {
                         ProgressView().frame(maxWidth: .infinity).padding(.top, 40)
                     } else if let summary {
+                        if let fixed = summary.fixedExpenses {
+                            FixedExpensesSummaryCard(summary: fixed)
+                        }
                         CashflowPreorderNotice(summary: summary)
                         CashflowTodayCard(summary: summary, onToggleMark: { payout in await toggleMark(payout) })
                         if !summary.pending.payouts.isEmpty || !summary.scheduled.payouts.isEmpty {
@@ -10965,6 +10970,520 @@ struct CashflowView: View {
             else { try await client.markPayout(payout.id) }
             summary = try await client.cashflow()
         } catch { self.error = error.localizedDescription }
+    }
+}
+
+struct FixedExpensesSummaryCard: View {
+    let summary: FixedExpenseSummary
+
+    private var progress: Double {
+        guard summary.totalMonthly > 0 else { return 0 }
+        return min(1, max(0, summary.paid / summary.totalMonthly))
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(alignment: .top, spacing: 12) {
+                Image(systemName: "calendar.badge.exclamationmark")
+                    .font(.title2.weight(.black))
+                    .foregroundStyle(summary.pending > 0 ? AppTheme.amber : AppTheme.green)
+                    .frame(width: 40, height: 40)
+                    .background((summary.pending > 0 ? AppTheme.amber : AppTheme.green).opacity(0.14))
+                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Gastos fijos")
+                        .font(.headline.weight(.black))
+                        .foregroundStyle(AppTheme.ink)
+                    Text(summary.pending > 0 ? "Pendientes de separar este mes." : "Todo marcado como pagado este mes.")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(AppTheme.muted)
+                }
+                Spacer()
+                Text(formatMoney(summary.pending, currency: summary.currency))
+                    .font(.title3.weight(.black))
+                    .foregroundStyle(summary.pending > 0 ? AppTheme.amber : AppTheme.green)
+            }
+
+            ProgressView(value: progress)
+                .tint(summary.pending > 0 ? AppTheme.amber : AppTheme.green)
+
+            HStack(spacing: 10) {
+                FixedExpenseMiniMetric(title: "Mes", value: formatMoney(summary.totalMonthly, currency: summary.currency), color: AppTheme.blue)
+                FixedExpenseMiniMetric(title: "Pagado", value: formatMoney(summary.paid, currency: summary.currency), color: AppTheme.green)
+                FixedExpenseMiniMetric(title: "Pendiente", value: formatMoney(summary.pending, currency: summary.currency), color: AppTheme.amber)
+            }
+
+            if summary.upcoming.isEmpty {
+                Text(summary.items.isEmpty ? "Añade alquiler, luz, internet, nóminas y otros gastos para que Caja sepa lo que no puedes gastar." : "No quedan pagos pendientes.")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(AppTheme.muted)
+            } else {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Próximos")
+                        .font(.caption.weight(.black))
+                        .foregroundStyle(AppTheme.muted)
+                    ForEach(summary.upcoming.prefix(3)) { item in
+                        HStack(spacing: 8) {
+                            Image(systemName: icon(for: item.category))
+                                .foregroundStyle(AppTheme.amber)
+                                .frame(width: 20)
+                            Text(item.name)
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(AppTheme.ink)
+                            Spacer()
+                            Text(formatMoney(item.amount, currency: item.currency))
+                                .font(.caption.weight(.black))
+                                .foregroundStyle(AppTheme.inkSoft)
+                        }
+                    }
+                }
+            }
+        }
+        .glassPanel(padding: 16, accent: summary.pending > 0 ? AppTheme.amber : AppTheme.green)
+    }
+
+    private func icon(for category: String) -> String {
+        FixedExpensesView.icon(for: category)
+    }
+}
+
+struct FixedExpenseMiniMetric: View {
+    let title: String
+    let value: String
+    let color: Color
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text(title.uppercased())
+                .font(.caption2.weight(.black))
+                .foregroundStyle(AppTheme.muted)
+            Text(value)
+                .font(.subheadline.weight(.black))
+                .foregroundStyle(color)
+                .lineLimit(1)
+                .minimumScaleFactor(0.70)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(10)
+        .background(AppTheme.surfaceSoft)
+        .overlay(RoundedRectangle(cornerRadius: 12).stroke(AppTheme.line))
+        .clipShape(RoundedRectangle(cornerRadius: 12))
+    }
+}
+
+struct FixedExpensesView: View {
+    @Environment(WorkshopStore.self) private var store
+    @State private var summary: FixedExpenseSummary?
+    @State private var loading = false
+    @State private var error: String?
+    @State private var showingAdd = false
+    @State private var editingItem: FixedExpenseItem?
+    @State private var template: FixedExpenseTemplate?
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 16) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Gastos fijos")
+                            .font(.system(size: 30, weight: .heavy, design: .rounded))
+                            .foregroundStyle(AppTheme.ink)
+                        Text("Alquiler, luz, internet, trabajadores y pagos fijos que Caja debe respetar.")
+                            .font(.subheadline.weight(.medium))
+                            .foregroundStyle(AppTheme.muted)
+                    }
+
+                    if let summary {
+                        FixedExpensesSummaryCard(summary: summary)
+                    }
+
+                    if let error {
+                        Text(error)
+                            .font(.footnote.weight(.semibold))
+                            .foregroundStyle(AppTheme.red)
+                            .glassPanel(padding: 12, accent: AppTheme.red)
+                    }
+
+                    if loading && summary == nil {
+                        ProgressView().frame(maxWidth: .infinity).padding(.top, 40)
+                    } else {
+                        quickAddSection
+                        expensesSection
+                    }
+                }
+                .padding()
+            }
+            .screenBackground()
+            .navigationTitle("Gastos")
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button {
+                        template = nil
+                        showingAdd = true
+                    } label: {
+                        Image(systemName: "plus")
+                            .font(.headline.weight(.black))
+                    }
+                }
+            }
+            .task { await load() }
+            .refreshable { await load() }
+            .sheet(isPresented: $showingAdd) {
+                FixedExpenseEditorSheet(template: template, item: nil) { request in
+                    await saveNew(request)
+                }
+            }
+            .sheet(item: $editingItem) { item in
+                FixedExpenseEditorSheet(template: nil, item: item) { request in
+                    await update(item: item, request: request)
+                }
+            }
+        }
+    }
+
+    private var quickAddSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Añadir rápido")
+                .font(.headline.weight(.black))
+                .foregroundStyle(AppTheme.ink)
+            LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 10) {
+                ForEach(summary?.templates ?? []) { template in
+                    Button {
+                        self.template = template
+                        showingAdd = true
+                    } label: {
+                        HStack(spacing: 8) {
+                            Image(systemName: template.icon)
+                                .font(.headline.weight(.black))
+                                .foregroundStyle(AppTheme.blue)
+                            Text(template.name)
+                                .font(.subheadline.weight(.black))
+                                .foregroundStyle(AppTheme.ink)
+                            Spacer()
+                            Image(systemName: "plus.circle.fill")
+                                .foregroundStyle(AppTheme.green)
+                        }
+                        .padding(12)
+                        .background(AppTheme.surfaceSoft)
+                        .overlay(RoundedRectangle(cornerRadius: 14).stroke(AppTheme.line))
+                        .clipShape(RoundedRectangle(cornerRadius: 14))
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+        }
+        .glassPanel(padding: 16, accent: AppTheme.blue)
+    }
+
+    private var expensesSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Text("Este mes")
+                    .font(.headline.weight(.black))
+                    .foregroundStyle(AppTheme.ink)
+                Spacer()
+                if loading {
+                    ProgressView().controlSize(.small)
+                }
+            }
+
+            let items = summary?.items ?? []
+            if items.isEmpty {
+                VStack(spacing: 10) {
+                    Image(systemName: "calendar.badge.plus")
+                        .font(.system(size: 42, weight: .black))
+                        .foregroundStyle(AppTheme.muted)
+                    Text("Sin gastos fijos todavía")
+                        .font(.title3.weight(.black))
+                        .foregroundStyle(AppTheme.ink)
+                    Text("Mete primero alquiler, luz, agua, internet, nóminas y software. Luego Caja restará lo pendiente antes de decirte si puedes invertir.")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(AppTheme.muted)
+                        .multilineTextAlignment(.center)
+                }
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 24)
+            } else {
+                ForEach(items) { item in
+                    FixedExpenseRow(
+                        item: item,
+                        period: summary?.period,
+                        onTogglePaid: { await togglePaid(item) },
+                        onEdit: { editingItem = item },
+                        onDelete: { await delete(item) }
+                    )
+                }
+            }
+        }
+        .glassPanel(padding: 16, accent: AppTheme.purple)
+    }
+
+    private func load() async {
+        guard let client = store.apiClient else { error = "API no configurada"; return }
+        loading = true
+        defer { loading = false }
+        do {
+            summary = try await client.fixedExpenses()
+            error = nil
+        } catch {
+            self.error = error.localizedDescription
+        }
+    }
+
+    private func saveNew(_ request: FixedExpenseSaveRequest) async {
+        guard let client = store.apiClient else { return }
+        do {
+            _ = try await client.createFixedExpense(request)
+            await load()
+        } catch {
+            self.error = error.localizedDescription
+        }
+    }
+
+    private func update(item: FixedExpenseItem, request: FixedExpenseSaveRequest) async {
+        guard let client = store.apiClient else { return }
+        do {
+            _ = try await client.updateFixedExpense(id: item.id, body: request)
+            await load()
+        } catch {
+            self.error = error.localizedDescription
+        }
+    }
+
+    private func togglePaid(_ item: FixedExpenseItem) async {
+        guard let client = store.apiClient else { return }
+        do {
+            if item.paid == true {
+                try await client.unmarkFixedExpensePaid(id: item.id, period: summary?.period)
+            } else {
+                try await client.markFixedExpensePaid(id: item.id, period: summary?.period, amount: item.amount)
+            }
+            await load()
+        } catch {
+            self.error = error.localizedDescription
+        }
+    }
+
+    private func delete(_ item: FixedExpenseItem) async {
+        guard let client = store.apiClient else { return }
+        do {
+            try await client.deleteFixedExpense(id: item.id)
+            await load()
+        } catch {
+            self.error = error.localizedDescription
+        }
+    }
+
+    static func icon(for category: String) -> String {
+        switch category.uppercased() {
+        case "ALQUILER": return "house.fill"
+        case "SUMINISTROS": return "bolt.fill"
+        case "TELECOM": return "wifi"
+        case "NOMINAS": return "person.2.fill"
+        case "GESTORIA": return "folder.fill"
+        case "SOFTWARE": return "desktopcomputer"
+        case "SEGUROS": return "shield.fill"
+        default: return "creditcard.fill"
+        }
+    }
+}
+
+struct FixedExpenseRow: View {
+    let item: FixedExpenseItem
+    let period: String?
+    let onTogglePaid: () async -> Void
+    let onEdit: () -> Void
+    let onDelete: () async -> Void
+    @State private var busy = false
+    @State private var confirmingDelete = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .top, spacing: 12) {
+                Image(systemName: FixedExpensesView.icon(for: item.category))
+                    .font(.headline.weight(.black))
+                    .foregroundStyle(item.paid == true ? AppTheme.green : AppTheme.amber)
+                    .frame(width: 38, height: 38)
+                    .background((item.paid == true ? AppTheme.green : AppTheme.amber).opacity(0.14))
+                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack(spacing: 6) {
+                        Text(item.name)
+                            .font(.headline.weight(.black))
+                            .foregroundStyle(AppTheme.ink)
+                        if !item.active {
+                            Tag(text: "Inactivo", systemImage: "pause.fill")
+                        }
+                    }
+                    Text(subtitle)
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(AppTheme.muted)
+                    if let notes = item.notes, !notes.isEmpty {
+                        Text(notes)
+                            .font(.caption)
+                            .foregroundStyle(AppTheme.muted)
+                            .lineLimit(2)
+                    }
+                }
+                Spacer()
+                VStack(alignment: .trailing, spacing: 4) {
+                    Text(formatMoney(item.amount, currency: item.currency))
+                        .font(.title3.weight(.black))
+                        .foregroundStyle(AppTheme.ink)
+                    Text(item.paid == true ? "Pagado" : "Pendiente")
+                        .font(.caption.weight(.black))
+                        .foregroundStyle(item.paid == true ? AppTheme.green : AppTheme.amber)
+                }
+            }
+
+            HStack(spacing: 10) {
+                Button {
+                    Task { await run(onTogglePaid) }
+                } label: {
+                    Label(item.paid == true ? "Desmarcar" : "Marcar pagado", systemImage: item.paid == true ? "arrow.uturn.left.circle.fill" : "checkmark.circle.fill")
+                        .font(.subheadline.weight(.black))
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(item.paid == true ? AppTheme.muted : AppTheme.green)
+                .disabled(busy)
+
+                Button(action: onEdit) {
+                    Image(systemName: "pencil")
+                        .font(.headline.weight(.black))
+                        .frame(width: 44, height: 36)
+                }
+                .buttonStyle(.bordered)
+
+                Button {
+                    confirmingDelete = true
+                } label: {
+                    Image(systemName: "trash")
+                        .font(.headline.weight(.black))
+                        .frame(width: 44, height: 36)
+                }
+                .buttonStyle(.bordered)
+                .tint(AppTheme.red)
+            }
+        }
+        .padding(12)
+        .background(AppTheme.surfaceSoft)
+        .overlay(RoundedRectangle(cornerRadius: 16).stroke(AppTheme.line))
+        .clipShape(RoundedRectangle(cornerRadius: 16))
+        .confirmationDialog("Eliminar gasto fijo", isPresented: $confirmingDelete, titleVisibility: .visible) {
+            Button("Eliminar", role: .destructive) {
+                Task { await run(onDelete) }
+            }
+            Button("Cancelar", role: .cancel) {}
+        } message: {
+            Text("Se eliminará \(item.name) y sus marcas de pago.")
+        }
+    }
+
+    private var subtitle: String {
+        var parts = [item.category]
+        if let dueDay = item.dueDay { parts.append("Día \(dueDay)") }
+        if let period { parts.append(period) }
+        return parts.joined(separator: " · ")
+    }
+
+    private func run(_ action: @escaping () async -> Void) async {
+        busy = true
+        await action()
+        busy = false
+    }
+}
+
+struct FixedExpenseEditorSheet: View {
+    let template: FixedExpenseTemplate?
+    let item: FixedExpenseItem?
+    let onSave: (FixedExpenseSaveRequest) async -> Void
+    @Environment(\.dismiss) private var dismiss
+    @State private var name: String
+    @State private var category: String
+    @State private var amount: String
+    @State private var dueDay: String
+    @State private var matcher: String
+    @State private var notes: String
+    @State private var active: Bool
+    @State private var saving = false
+    @State private var error: String?
+
+    init(template: FixedExpenseTemplate?, item: FixedExpenseItem?, onSave: @escaping (FixedExpenseSaveRequest) async -> Void) {
+        self.template = template
+        self.item = item
+        self.onSave = onSave
+        _name = State(initialValue: item?.name ?? template?.name ?? "")
+        _category = State(initialValue: item?.category ?? template?.category ?? "")
+        _amount = State(initialValue: item.map { String(format: "%.2f", $0.amount) } ?? "")
+        _dueDay = State(initialValue: item?.dueDay.map(String.init) ?? "")
+        _matcher = State(initialValue: item?.matcher ?? "")
+        _notes = State(initialValue: item?.notes ?? "")
+        _active = State(initialValue: item?.active ?? true)
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("Gasto") {
+                    TextField("Nombre", text: $name)
+                    TextField("Categoría", text: $category)
+                    TextField("Importe mensual", text: $amount)
+                        .keyboardType(.decimalPad)
+                    TextField("Día de pago", text: $dueDay)
+                        .keyboardType(.numberPad)
+                    Toggle("Activo", isOn: $active)
+                }
+
+                Section("Ayuda automática") {
+                    TextField("Texto para detectar en banco (opcional)", text: $matcher)
+                    TextField("Notas", text: $notes, axis: .vertical)
+                        .lineLimit(2...4)
+                }
+
+                if let error {
+                    Section {
+                        Text(error).foregroundStyle(AppTheme.red)
+                    }
+                }
+            }
+            .navigationTitle(item == nil ? "Nuevo gasto" : "Editar gasto")
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancelar") { dismiss() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button(saving ? "Guardando..." : "Guardar") {
+                        Task { await save() }
+                    }
+                    .disabled(saving)
+                }
+            }
+        }
+    }
+
+    private func save() async {
+        guard let parsedAmount = Double(amount.replacingOccurrences(of: ",", with: ".")), parsedAmount >= 0 else {
+            error = "Importe inválido"
+            return
+        }
+        let parsedDueDay = Int(dueDay.trimmingCharacters(in: .whitespacesAndNewlines))
+        let request = FixedExpenseSaveRequest(
+            name: name,
+            category: category,
+            amount: parsedAmount,
+            currency: item?.currency ?? "EUR",
+            dueDay: parsedDueDay,
+            active: active,
+            matcher: matcher.isEmpty ? nil : matcher,
+            notes: notes.isEmpty ? nil : notes
+        )
+        saving = true
+        await onSave(request)
+        saving = false
+        dismiss()
     }
 }
 

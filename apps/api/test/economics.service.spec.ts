@@ -25,6 +25,26 @@ function service(config: Record<string, string> = {}) {
   };
 }
 
+function fixedExpenseService(expenses: unknown[]) {
+  return new EconomicsService(
+    { fixedExpense: { findMany: async () => expenses } } as never,
+    { get: () => undefined } as never,
+    {} as never,
+    { spendForRange: async () => 0 } as never,
+    { accounts: async () => ({ currency: 'EUR', totalBalance: 0, balanceAvailable: false, accounts: [] }) } as never,
+    { getPurchaseMatrix: async () => ({ groups: [] }) } as never
+  ) as unknown as {
+    fixedExpenses: (period?: string) => Promise<{
+      period: string;
+      totalMonthly: number;
+      paid: number;
+      pending: number;
+      activeCount: number;
+      upcoming: Array<{ name: string }>;
+    }>;
+  };
+}
+
 describe('EconomicsService', () => {
   it('imputa coste de envio aunque el cliente tenga envio gratis', () => {
     const breakdown = service().computeOrderBreakdown({
@@ -156,5 +176,59 @@ describe('EconomicsService', () => {
 
     expect(breakdown.taxReserve).toBe(21);
     expect(breakdown.cashFree).toBeCloseTo(72.79);
+  });
+
+  it('calcula gastos fijos pendientes del mes', async () => {
+    const result = await fixedExpenseService([
+      {
+        id: 'rent',
+        name: 'Alquiler',
+        category: 'ALQUILER',
+        amount: 700,
+        currency: 'EUR',
+        dueDay: 1,
+        active: true,
+        matcher: null,
+        notes: null,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+        payments: [{ id: 'p1', amount: 700, paidAt: new Date() }]
+      },
+      {
+        id: 'internet',
+        name: 'Internet',
+        category: 'TELECOM',
+        amount: 50,
+        currency: 'EUR',
+        dueDay: 10,
+        active: true,
+        matcher: null,
+        notes: null,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+        payments: []
+      },
+      {
+        id: 'old',
+        name: 'Viejo',
+        category: 'SOFTWARE',
+        amount: 20,
+        currency: 'EUR',
+        dueDay: null,
+        active: false,
+        matcher: null,
+        notes: null,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+        payments: []
+      }
+    ]).fixedExpenses('2026-06');
+
+    expect(result.period).toBe('2026-06');
+    expect(result.totalMonthly).toBe(750);
+    expect(result.paid).toBe(700);
+    expect(result.pending).toBe(50);
+    expect(result.activeCount).toBe(2);
+    expect(result.upcoming.map((item) => item.name)).toEqual(['Internet']);
   });
 });
