@@ -42,6 +42,24 @@ export class EconomicsController {
     return this.economics.cashflow();
   }
 
+  @Get('preorders/retro-aston')
+  retroAstonPlan() {
+    return this.economics.retroAstonPlan();
+  }
+
+  @Post('preorders/retro-aston/milestones/:milestone/pay')
+  markRetroAstonPayment(
+    @Param('milestone') milestone: string,
+    @Body() body: { amount?: number; paidAt?: string; notes?: string | null }
+  ) {
+    return this.economics.markRetroAstonPayment(Number(milestone), body);
+  }
+
+  @Delete('preorders/retro-aston/milestones/:milestone/pay')
+  unmarkRetroAstonPayment(@Param('milestone') milestone: string) {
+    return this.economics.unmarkRetroAstonPayment(Number(milestone));
+  }
+
   @Get('fixed-expenses')
   fixedExpenses(@Query('period') period?: string) {
     return this.economics.fixedExpenses(period);

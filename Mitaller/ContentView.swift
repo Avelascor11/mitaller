@@ -11916,6 +11916,7 @@ struct CashflowPendingCard: View {
 struct PreorderView: View {
     @Environment(WorkshopStore.self) private var store
     @State private var summary: CashflowSummary?
+    @State private var plan: RetroAstonPlan?
     @State private var loading = false
     @State private var error: String?
 
@@ -11953,7 +11954,11 @@ struct PreorderView: View {
     private var visibleReserve: Double { todayReserve + upcomingReserve }
     private var visibleUnits: Int { todayUnits + upcomingUnits }
     private var remainingCommitment: Double { max(0, commitmentCost - visibleReserve) }
-    private var progress: Double { min(1, max(0, visibleReserve / commitmentCost)) }
+    private var progress: Double {
+        let total = plan?.totalCommitment ?? commitmentCost
+        guard total > 0 else { return 0 }
+        return min(1, max(0, (plan?.coveredTotal ?? visibleReserve) / total))
+    }
 
     var body: some View {
         NavigationStack {
@@ -11972,16 +11977,23 @@ struct PreorderView: View {
                         ProgressView().frame(maxWidth: .infinity).padding(.top, 40)
                     } else {
                         PreorderCommitmentCard(
-                            commitmentCost: commitmentCost,
+                            commitmentCost: plan?.totalCommitment ?? commitmentCost,
                             commitmentUnits: commitmentUnits,
-                            unitCost: unitCost,
-                            sellingPrice: sellingPrice,
-                            visibleReserve: visibleReserve,
-                            visibleUnits: visibleUnits,
-                            remainingCommitment: remainingCommitment,
+                            unitCost: plan?.unitCost ?? unitCost,
+                            sellingPrice: plan?.sellingPrice ?? sellingPrice,
+                            visibleReserve: plan?.coveredTotal ?? visibleReserve,
+                            visibleUnits: plan?.soldUnits ?? visibleUnits,
+                            remainingCommitment: plan?.remainingCommitment ?? remainingCommitment,
                             progress: progress,
-                            currency: summary?.currency ?? "EUR"
+                            currency: plan?.currency ?? summary?.currency ?? "EUR"
                         )
+
+                        if let plan {
+                            RetroAstonPaymentPlanCard(
+                                plan: plan,
+                                onToggleMilestone: { milestone in await toggleMilestone(milestone) }
+                            )
+                        }
 
                         LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 10) {
                             PreorderMetricTile(title: "Cobrado hoy", value: money(todayReserve), subtitle: "\(todayUnits) uds retro", color: AppTheme.green, icon: "banknote.fill")
@@ -12040,6 +12052,24 @@ struct PreorderView: View {
         error = nil
         defer { loading = false }
         do {
+            async let cash = client.cashflow()
+            async let retro = client.retroAstonPlan()
+            summary = try await cash
+            plan = try await retro
+        } catch {
+            self.error = error.localizedDescription
+        }
+    }
+
+    private func toggleMilestone(_ milestone: RetroAstonMilestone) async {
+        guard let client = store.apiClient else { return }
+        do {
+            if milestone.paid {
+                try await client.unmarkRetroAstonPayment(milestone: milestone.milestone)
+            } else {
+                try await client.markRetroAstonPayment(milestone: milestone.milestone, amount: milestone.amount)
+            }
+            plan = try await client.retroAstonPlan()
             summary = try await client.cashflow()
         } catch {
             self.error = error.localizedDescription
@@ -12047,7 +12077,7 @@ struct PreorderView: View {
     }
 
     private func money(_ value: Double) -> String {
-        formatMoney(value, currency: summary?.currency ?? "EUR")
+        formatMoney(value, currency: plan?.currency ?? summary?.currency ?? "EUR")
     }
 }
 
@@ -12109,6 +12139,155 @@ struct PreorderCommitmentCard: View {
     }
 
     private func m(_ value: Double) -> String { formatMoney(value, currency: currency) }
+}
+
+struct RetroAstonPaymentPlanCard: View {
+    let plan: RetroAstonPlan
+    let onToggleMilestone: (RetroAstonMilestone) async -> Void
+    @State private var busyMilestone: Int?
+
+    private var progress: Double {
+        guard plan.totalCommitment > 0 else { return 0 }
+        return min(1, max(0, plan.coveredTotal / plan.totalCommitment))
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(alignment: .top, spacing: 12) {
+                Image(systemName: "calendar.badge.clock")
+                    .font(.title2.weight(.black))
+                    .foregroundStyle(AppTheme.magenta)
+                    .frame(width: 42, height: 42)
+                    .background(AppTheme.magenta.opacity(0.14))
+                    .clipShape(RoundedRectangle(cornerRadius: 13, style: .continuous))
+
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("Plan de pagos Retro")
+                        .font(.title3.weight(.black))
+                        .foregroundStyle(AppTheme.ink)
+                    Text("3 pagos de \(m(plan.installmentAmount)). Fondo creado con pedidos retro.")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(AppTheme.muted)
+                }
+                Spacer()
+            }
+
+            VStack(alignment: .leading, spacing: 7) {
+                GeometryReader { proxy in
+                    ZStack(alignment: .leading) {
+                        Capsule().fill(AppTheme.surfaceSoft)
+                        Capsule()
+                            .fill(plan.canPayNext ? AppTheme.green : AppTheme.magenta)
+                            .frame(width: max(8, proxy.size.width * progress))
+                    }
+                }
+                .frame(height: 10)
+                HStack {
+                    Text("Cubierto \(m(plan.coveredTotal))")
+                        .font(.caption.weight(.heavy))
+                        .foregroundStyle(AppTheme.magenta)
+                    Spacer()
+                    Text("Pendiente \(m(plan.remainingCommitment))")
+                        .font(.caption.weight(.heavy))
+                        .foregroundStyle(plan.remainingCommitment > 0 ? AppTheme.amber : AppTheme.green)
+                }
+            }
+
+            LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 10) {
+                PreorderMetricTile(title: "Fondo disponible", value: m(plan.fundAvailable), subtitle: "\(plan.soldUnits) uds vendidas", color: plan.canPayNext ? AppTheme.green : AppTheme.amber, icon: "safe.fill")
+                PreorderMetricTile(title: "Falta próxima cuota", value: m(plan.missingForNext), subtitle: plan.nextMilestone?.label ?? "Todo pagado", color: plan.missingForNext > 0 ? AppTheme.amber : AppTheme.green, icon: "arrow.up.forward.circle.fill")
+                PreorderMetricTile(title: "Pagado", value: m(plan.paidTotal), subtitle: "\(plan.milestones.filter(\.paid).count)/\(plan.milestones.count) cuotas", color: AppTheme.green, icon: "checkmark.seal.fill")
+                PreorderMetricTile(title: "Ajuste final", value: m(plan.adjustmentAmount), subtitle: "Diferencia vs total", color: AppTheme.blue, icon: "plusminus.circle.fill")
+            }
+
+            if plan.canPayNext, let next = plan.nextMilestone {
+                Label("Ya puedes pagar \(next.label): \(m(next.amount))", systemImage: "checkmark.circle.fill")
+                    .font(.subheadline.weight(.black))
+                    .foregroundStyle(AppTheme.green)
+                    .padding(12)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(AppTheme.green.opacity(0.12))
+                    .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+            } else if let next = plan.nextMilestone {
+                Label("Faltan \(m(plan.missingForNext)) para cubrir \(next.label)", systemImage: "clock.fill")
+                    .font(.subheadline.weight(.black))
+                    .foregroundStyle(AppTheme.amber)
+                    .padding(12)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(AppTheme.amber.opacity(0.12))
+                    .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+            }
+
+            VStack(spacing: 10) {
+                ForEach(plan.milestones) { milestone in
+                    RetroAstonMilestoneRow(
+                        milestone: milestone,
+                        busy: busyMilestone == milestone.milestone,
+                        onToggle: {
+                            busyMilestone = milestone.milestone
+                            await onToggleMilestone(milestone)
+                            busyMilestone = nil
+                        }
+                    )
+                }
+            }
+        }
+        .glassPanel(padding: 16, accent: AppTheme.magenta)
+    }
+
+    private func m(_ value: Double) -> String { formatMoney(value, currency: plan.currency) }
+}
+
+struct RetroAstonMilestoneRow: View {
+    let milestone: RetroAstonMilestone
+    let busy: Bool
+    let onToggle: () async -> Void
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Image(systemName: milestone.paid ? "checkmark.circle.fill" : "circle")
+                .font(.title3.weight(.black))
+                .foregroundStyle(milestone.paid ? AppTheme.green : AppTheme.muted)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(milestone.label)
+                    .font(.subheadline.weight(.black))
+                    .foregroundStyle(AppTheme.ink)
+                Text(milestone.paid ? "Pagado \(milestone.paidAt.map(shortDate) ?? "")" : "Pendiente")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(milestone.paid ? AppTheme.green : AppTheme.muted)
+            }
+            Spacer()
+            Text(formatMoney(milestone.paidAmount ?? milestone.amount, currency: milestone.currency))
+                .font(.subheadline.weight(.black))
+                .foregroundStyle(AppTheme.ink)
+
+            Button {
+                Task { await onToggle() }
+            } label: {
+                if busy {
+                    ProgressView().controlSize(.small)
+                } else {
+                    Text(milestone.paid ? "Deshacer" : "Pagar")
+                        .font(.caption.weight(.black))
+                }
+            }
+            .buttonStyle(.borderedProminent)
+            .tint(milestone.paid ? AppTheme.muted : AppTheme.green)
+            .disabled(busy)
+        }
+        .padding(12)
+        .background(AppTheme.surfaceSoft)
+        .overlay(RoundedRectangle(cornerRadius: 14).stroke(AppTheme.line))
+        .clipShape(RoundedRectangle(cornerRadius: 14))
+    }
+
+    private func shortDate(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.dateStyle = .short
+        formatter.timeStyle = .none
+        return formatter.string(from: date)
+    }
 }
 
 struct PreorderMetricTile: View {
