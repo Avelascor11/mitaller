@@ -23,22 +23,26 @@ export class InfluencersService {
   async summary() {
     const [influencers, collaborations, submissions] = await Promise.all([
       this.prisma.influencer.findMany({ select: { stage: true } }),
-      this.prisma.collaboration.findMany({ select: { status: true } }),
+      this.prisma.collaboration.findMany({ select: { id: true, status: true, shopifyOrderId: true, shopifyOrderName: true } }),
       this.prisma.ugcSubmission.findMany({ select: { status: true } })
     ]);
+    const fulfillment = await this.fulfillmentByCollaboration(collaborations);
+    const fulfillmentValues = [...fulfillment.values()];
 
     return {
       influencers: influencers.length,
       activeCollaborations: collaborations.filter((item) => !['CLOSED', 'CANCELLED'].includes(item.status)).length,
       awaitingContent: collaborations.filter((item) => item.status === 'AWAITING_CONTENT').length,
       pendingSubmissions: submissions.filter((item) => item.status === 'PENDING').length,
+      packsShipped: fulfillmentValues.filter((item) => ['IN_TRANSIT', 'DELIVERED'].includes(item.status)).length,
+      packsDelivered: fulfillmentValues.filter((item) => item.status === 'DELIVERED').length,
       byStage: this.countBy(influencers.map((item) => item.stage)),
       byCollaborationStatus: this.countBy(collaborations.map((item) => item.status)),
       bySubmissionStatus: this.countBy(submissions.map((item) => item.status))
     };
   }
 
-  list(input: { stage?: string; q?: string }) {
+  async list(input: { stage?: string; q?: string }) {
     const where: Prisma.InfluencerWhereInput = {};
     if (input.stage) where.stage = this.enumValue(InfluencerStage, input.stage, 'stage');
     if (input.q?.trim()) {
@@ -53,7 +57,7 @@ export class InfluencersService {
       ];
     }
 
-    return this.prisma.influencer.findMany({
+    const influencers = await this.prisma.influencer.findMany({
       where,
       include: {
         collaborations: { orderBy: { updatedAt: 'desc' } },
@@ -61,6 +65,15 @@ export class InfluencersService {
       },
       orderBy: [{ updatedAt: 'desc' }, { createdAt: 'desc' }]
     });
+    const collaborations = influencers.flatMap((influencer) => influencer.collaborations);
+    const fulfillment = await this.fulfillmentByCollaboration(collaborations);
+    return influencers.map((influencer) => ({
+      ...influencer,
+      collaborations: influencer.collaborations.map((collaboration) => ({
+        ...collaboration,
+        fulfillment: fulfillment.get(collaboration.id) ?? this.emptyFulfillment(collaboration)
+      }))
+    }));
   }
 
   createInfluencer(input: CreateInfluencerBody) {
@@ -306,6 +319,110 @@ export class InfluencersService {
     return influencer;
   }
 
+  private async fulfillmentByCollaboration(collaborations: Array<{ id: string; shopifyOrderId?: string | null; shopifyOrderName?: string | null }>) {
+    const references = collaborations
+      .flatMap((collaboration) => [collaboration.shopifyOrderId, collaboration.shopifyOrderName, this.cleanOrderReference(collaboration.shopifyOrderName)])
+      .filter((value): value is string => Boolean(value?.trim()));
+    if (!references.length) return new Map<string, CollaborationFulfillment>();
+
+    const orders = await this.prisma.order.findMany({
+      where: {
+        OR: [
+          { id: { in: references } },
+          { shopifyOrderId: { in: references } },
+          { orderNumber: { in: references } }
+        ]
+      },
+      include: { shipments: { orderBy: { updatedAt: 'desc' } } }
+    });
+    const byReference = new Map<string, (typeof orders)[number]>();
+    for (const order of orders) {
+      byReference.set(order.id, order);
+      byReference.set(order.shopifyOrderId, order);
+      byReference.set(order.orderNumber, order);
+      byReference.set(order.orderNumber.replace(/^#/, ''), order);
+    }
+
+    return new Map(collaborations.map((collaboration) => {
+      const order = [
+        collaboration.shopifyOrderId,
+        collaboration.shopifyOrderName,
+        this.cleanOrderReference(collaboration.shopifyOrderName)
+      ]
+        .filter((value): value is string => Boolean(value?.trim()))
+        .map((value) => byReference.get(value))
+        .find(Boolean);
+      return [collaboration.id, order ? this.fulfillmentFromOrder(order) : this.emptyFulfillment(collaboration)] as const;
+    }));
+  }
+
+  private fulfillmentFromOrder(order: Prisma.OrderGetPayload<{ include: { shipments: true } }>): CollaborationFulfillment {
+    const shipment = order.shipments[0];
+    const status = this.collaborationFulfillmentStatus(order.operationalStatus, shipment?.status, shipment?.trackingStatus);
+    return {
+      status,
+      label: this.collaborationFulfillmentLabel(status),
+      orderId: order.id,
+      orderNumber: order.orderNumber,
+      operationalStatus: order.operationalStatus,
+      shipmentStatus: shipment?.status ?? null,
+      trackingStatus: shipment?.trackingStatus ?? null,
+      trackingNumber: shipment?.trackingNumber ?? null,
+      trackingUrl: shipment?.trackingUrl ?? null,
+      carrier: shipment?.carrier ?? null,
+      updatedAt: shipment?.trackingSyncedAt ?? shipment?.updatedAt ?? order.updatedAt
+    };
+  }
+
+  private emptyFulfillment(collaboration: { shopifyOrderId?: string | null; shopifyOrderName?: string | null }): CollaborationFulfillment {
+    const hasReference = Boolean(collaboration.shopifyOrderId?.trim() || collaboration.shopifyOrderName?.trim());
+    return {
+      status: hasReference ? 'ORDER_NOT_FOUND' : 'NO_ORDER',
+      label: hasReference ? 'Pedido no encontrado' : 'Sin pedido asociado',
+      orderId: null,
+      orderNumber: collaboration.shopifyOrderName ?? null,
+      operationalStatus: null,
+      shipmentStatus: null,
+      trackingStatus: null,
+      trackingNumber: null,
+      trackingUrl: null,
+      carrier: null,
+      updatedAt: null
+    };
+  }
+
+  private collaborationFulfillmentStatus(operationalStatus: string, shipmentStatus?: string | null, trackingStatus?: string | null) {
+    const tracking = this.normalizeText(trackingStatus ?? '');
+    if (shipmentStatus === 'DELIVERED' || tracking.includes('delivered') || tracking.includes('entregado')) return 'DELIVERED';
+    if (shipmentStatus === 'IN_TRANSIT' || operationalStatus === 'SHIPPED') return 'IN_TRANSIT';
+    if (shipmentStatus === 'LABEL_CREATED' || shipmentStatus === 'PRINTED') return 'LABEL_CREATED';
+    if (shipmentStatus === 'PARCEL_CREATED') return 'PARCEL_CREATED';
+    if (['READY_FOR_LABEL', 'LABEL_CREATED'].includes(operationalStatus)) return 'READY_TO_SHIP';
+    if (['NEW', 'WAITING_STOCK', 'WAITING_PRODUCTION', 'IN_PRODUCTION', 'PRODUCED', 'WAITING_PICKING', 'PICKED'].includes(operationalStatus)) return 'PREPARING';
+    return 'UNKNOWN';
+  }
+
+  private collaborationFulfillmentLabel(status: string) {
+    const labels: Record<string, string> = {
+      NO_ORDER: 'Sin pedido asociado',
+      ORDER_NOT_FOUND: 'Pedido no encontrado',
+      PREPARING: 'Preparando pack',
+      READY_TO_SHIP: 'Listo para enviar',
+      PARCEL_CREATED: 'Paquete creado',
+      LABEL_CREATED: 'Etiqueta creada',
+      IN_TRANSIT: 'En camino',
+      DELIVERED: 'Entregado',
+      UNKNOWN: 'Estado desconocido'
+    };
+    return labels[status] ?? status;
+  }
+
+  private cleanOrderReference(value?: string | null) {
+    const clean = value?.trim();
+    if (!clean) return null;
+    return clean.startsWith('#') ? clean : `#${clean}`;
+  }
+
   private handle(value?: string) {
     const raw = value?.trim();
     if (!raw) return '';
@@ -363,6 +480,13 @@ export class InfluencersService {
     return cleaned.slice(0, 160) || 'ugc-video.mp4';
   }
 
+  private normalizeText(value: string) {
+    return value
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .toLowerCase();
+  }
+
   private enumValue<T extends Record<string, string>>(source: T, value: string, field: string): T[keyof T] {
     const normalized = value.trim().toUpperCase();
     if (!Object.prototype.hasOwnProperty.call(source, normalized)) {
@@ -377,4 +501,18 @@ export class InfluencersService {
       return acc;
     }, {});
   }
+}
+
+interface CollaborationFulfillment {
+  status: string;
+  label: string;
+  orderId: string | null;
+  orderNumber: string | null;
+  operationalStatus: string | null;
+  shipmentStatus: string | null;
+  trackingStatus: string | null;
+  trackingNumber: string | null;
+  trackingUrl: string | null;
+  carrier: string | null;
+  updatedAt: Date | null;
 }

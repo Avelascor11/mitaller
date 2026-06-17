@@ -6788,6 +6788,8 @@ struct InfluencerSummaryGrid: View {
             InfluencerMetricTile(title: "Activas", value: summary?.activeCollaborations ?? 0, icon: "flame.fill", color: AppTheme.blue)
             InfluencerMetricTile(title: "Esperando", value: summary?.awaitingContent ?? 0, icon: "clock.badge.exclamationmark.fill", color: AppTheme.amber)
             InfluencerMetricTile(title: "UGC pendiente", value: summary?.pendingSubmissions ?? 0, icon: "video.badge.checkmark", color: AppTheme.teal)
+            InfluencerMetricTile(title: "Enviados", value: summary?.packsShipped ?? 0, icon: "shippingbox.and.arrow.forward.fill", color: AppTheme.purple)
+            InfluencerMetricTile(title: "Entregados", value: summary?.packsDelivered ?? 0, icon: "checkmark.seal.fill", color: AppTheme.green)
         }
     }
 }
@@ -7065,6 +7067,9 @@ struct CrewCollabCard: View {
             if let tier = collab.tier { Text("Nivel \(tier)").font(.caption.weight(.bold)).foregroundStyle(AppTheme.muted) }
             if let prod = collab.productSent { Text(prod).font(.footnote).foregroundStyle(AppTheme.muted) }
             if let order = collab.shopifyOrderName { Label("Pedido \(order)", systemImage: "shippingbox.fill").font(.caption.weight(.semibold)).foregroundStyle(AppTheme.muted) }
+            if let fulfillment = collab.fulfillment {
+                InfluencerFulfillmentCard(fulfillment: fulfillment)
+            }
 
             // Referral code
             if let c = code ?? collab.discountCode {
@@ -7139,6 +7144,95 @@ struct CrewCollabCard: View {
         guard let client = store.apiClient else { return }
         loadingPerf = true; defer { loadingPerf = false }
         perf = try? await client.crewPerformance(collab.id)
+    }
+}
+
+struct InfluencerFulfillmentCard: View {
+    @Environment(\.openURL) private var openURL
+    let fulfillment: InfluencerFulfillment
+
+    private var color: Color {
+        switch fulfillment.status {
+        case "DELIVERED": AppTheme.green
+        case "IN_TRANSIT": AppTheme.blue
+        case "LABEL_CREATED", "PARCEL_CREATED", "READY_TO_SHIP": AppTheme.amber
+        case "PREPARING": AppTheme.purple
+        case "ORDER_NOT_FOUND": AppTheme.red
+        default: AppTheme.muted
+        }
+    }
+
+    private var icon: String {
+        switch fulfillment.status {
+        case "DELIVERED": "checkmark.seal.fill"
+        case "IN_TRANSIT": "truck.box.fill"
+        case "LABEL_CREATED", "PARCEL_CREATED", "READY_TO_SHIP": "tag.fill"
+        case "PREPARING": "shippingbox.fill"
+        case "ORDER_NOT_FOUND": "exclamationmark.triangle.fill"
+        default: "questionmark.circle.fill"
+        }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .top, spacing: 10) {
+                Image(systemName: icon)
+                    .font(.headline.weight(.black))
+                    .foregroundStyle(color)
+                    .frame(width: 30, height: 30)
+                    .background(color.opacity(0.14), in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(fulfillment.label)
+                        .font(.subheadline.weight(.black))
+                        .foregroundStyle(AppTheme.ink)
+                    Text(subtitle)
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(AppTheme.muted)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                Spacer()
+            }
+
+            if let tracking = fulfillment.trackingNumber, !tracking.isEmpty {
+                HStack(spacing: 8) {
+                    Label(tracking, systemImage: "barcode.viewfinder")
+                        .font(.caption.weight(.heavy))
+                        .foregroundStyle(color)
+                    Spacer()
+                    if let trackingUrl = fulfillment.trackingUrl, let url = URL(string: trackingUrl) {
+                        Button {
+                            openURL(url)
+                        } label: {
+                            Label("Seguimiento", systemImage: "safari.fill")
+                                .font(.caption.weight(.bold))
+                        }
+                        .buttonStyle(.bordered)
+                        .tint(color)
+                    }
+                }
+            }
+        }
+        .padding(10)
+        .background(color.opacity(0.1), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+    }
+
+    private var subtitle: String {
+        var parts: [String] = []
+        if let orderNumber = fulfillment.orderNumber, !orderNumber.isEmpty {
+            parts.append("Pedido \(orderNumber)")
+        }
+        if let carrier = fulfillment.carrier, !carrier.isEmpty {
+            parts.append(carrier)
+        }
+        if let trackingStatus = fulfillment.trackingStatus, !trackingStatus.isEmpty {
+            parts.append(trackingStatus)
+        } else if let shipmentStatus = fulfillment.shipmentStatus, !shipmentStatus.isEmpty {
+            parts.append(shipmentStatus.replacingOccurrences(of: "_", with: " "))
+        }
+        if let updatedAt = fulfillment.updatedAt {
+            parts.append(updatedAt.formatted(.dateTime.day().month().hour().minute()))
+        }
+        return parts.isEmpty ? "Sin datos de envío todavía" : parts.joined(separator: " · ")
     }
 }
 

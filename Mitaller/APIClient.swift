@@ -989,12 +989,14 @@ struct InfluencerSummary: Decodable {
     let activeCollaborations: Int
     let awaitingContent: Int
     let pendingSubmissions: Int
+    let packsShipped: Int
+    let packsDelivered: Int
     let byStage: [String: Int]
     let byCollaborationStatus: [String: Int]
     let bySubmissionStatus: [String: Int]
 
     enum CodingKeys: String, CodingKey {
-        case influencers, activeCollaborations, awaitingContent, pendingSubmissions
+        case influencers, activeCollaborations, awaitingContent, pendingSubmissions, packsShipped, packsDelivered
         case byStage, byCollaborationStatus, bySubmissionStatus
     }
 
@@ -1004,6 +1006,8 @@ struct InfluencerSummary: Decodable {
         activeCollaborations = try container.decodeIfPresent(Int.self, forKey: .activeCollaborations) ?? 0
         awaitingContent = try container.decodeIfPresent(Int.self, forKey: .awaitingContent) ?? 0
         pendingSubmissions = try container.decodeIfPresent(Int.self, forKey: .pendingSubmissions) ?? 0
+        packsShipped = try container.decodeIfPresent(Int.self, forKey: .packsShipped) ?? 0
+        packsDelivered = try container.decodeIfPresent(Int.self, forKey: .packsDelivered) ?? 0
         byStage = try container.decodeIfPresent([String: Int].self, forKey: .byStage) ?? [:]
         byCollaborationStatus = try container.decodeIfPresent([String: Int].self, forKey: .byCollaborationStatus) ?? [:]
         bySubmissionStatus = try container.decodeIfPresent([String: Int].self, forKey: .bySubmissionStatus) ?? [:]
@@ -1081,11 +1085,26 @@ struct InfluencerCollaboration: Decodable, Identifiable, Hashable {
     let tier: String?
     let shopifyOrderName: String?
     let metaCampaignId: String?
+    let fulfillment: InfluencerFulfillment?
     let deadline: Date?
     let openedAt: Date?
     let closedAt: Date?
     let notes: String?
     let createdAt: Date?
+    let updatedAt: Date?
+}
+
+struct InfluencerFulfillment: Decodable, Hashable {
+    let status: String
+    let label: String
+    let orderId: String?
+    let orderNumber: String?
+    let operationalStatus: String?
+    let shipmentStatus: String?
+    let trackingStatus: String?
+    let trackingNumber: String?
+    let trackingUrl: String?
+    let carrier: String?
     let updatedAt: Date?
 }
 
