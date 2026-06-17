@@ -715,14 +715,15 @@ export class PurchaseService {
     item: { title: string; sku: string; imageRef?: string | null },
     mapped: { kind: string; color: string; size: string }
   ) {
-    if (!this.requiresExternalDtf(mapped)) return null;
+    if (!this.requiresExternalDtf(mapped, item.title)) return null;
     const label = this.cleanDtfDesignLabel(item.title);
     const slug = this.slugifyDtf(label || item.sku || item.title);
     if (!slug) return null;
     return { label: label || slug, slug, imageRef: item.imageRef?.trim() || null };
   }
 
-  private requiresExternalDtf(mapped: { kind: string; color: string }) {
+  private requiresExternalDtf(mapped: { kind: string; color: string }, title?: string) {
+    if (this.normalizeText(title ?? '').includes('quattro')) return true;
     const whiteColors = new Set(['BLANCA', 'BLANCO', 'WHITE']);
     if (mapped.kind === 'BAÑADOR') return true;
     if (mapped.kind !== 'CAMISETA' && mapped.kind !== 'SUDADERA') return false;
