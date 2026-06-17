@@ -627,12 +627,40 @@ export class ReturnsService {
   }
 
   async findByTracking(tracking: string) {
-    const clean = tracking.trim();
-    const record = await this.prisma.return.findFirst({
+    const clean = (tracking ?? '').trim();
+    const include = { order: true, items: { include: { orderItem: true } } } as const;
+
+    // 1) Exact match (case-insensitive) — fast path.
+    let record = await this.prisma.return.findFirst({
       where: { trackingNumber: { equals: clean, mode: 'insensitive' } },
-      include: { order: true, items: { include: { orderItem: true } } }
+      include
     });
-    if (!record) throw new NotFoundException(`No se encontró devolución con tracking ${clean}`);
+
+    // 2) Tolerant match: scanned barcodes often carry spaces, prefixes or
+    //    suffixes that differ from the stored tracking. Normalise to
+    //    alphanumerics and compare, allowing one to contain the other.
+    if (!record) {
+      const norm = (s: string) => (s ?? '').replace(/[^a-z0-9]/gi, '').toUpperCase();
+      const scanned = norm(clean);
+      if (scanned.length >= 6) {
+        const candidates = await this.prisma.return.findMany({
+          where: { trackingNumber: { not: null } },
+          include,
+          orderBy: { createdAt: 'desc' },
+          take: 500
+        });
+        record = candidates.find((r) => {
+          const stored = norm(r.trackingNumber ?? '');
+          if (!stored) return false;
+          return stored === scanned || stored.includes(scanned) || scanned.includes(stored);
+        }) ?? null;
+      }
+    }
+
+    if (!record) {
+      console.warn(`[ReturnsService] findByTracking miss — scanned="${clean}"`);
+      throw new NotFoundException(`No se encontró devolución con tracking ${clean}`);
+    }
     return record;
   }
 
