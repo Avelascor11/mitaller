@@ -92,4 +92,50 @@ describe('BankService', () => {
     expect(summary.accounts[0].currentBalance).toBeNull();
     expect(prisma.bankAccount.update).not.toHaveBeenCalled();
   });
+
+  it('usa saldo disponible si N26 no entrega saldo contable', async () => {
+    const account = {
+      id: 'bank-account-1',
+      providerAccountId: 'n26-account',
+      iban: null,
+      name: 'N26 Business',
+      currency: 'EUR',
+      ownerName: null,
+      product: null,
+      currentBalance: null,
+      availableBalance: null,
+      balanceUpdatedAt: null,
+      connectedAt: null,
+      lastSyncedAt: null,
+      connection: { institutionName: 'N26' }
+    };
+    const updated = {
+      ...account,
+      currentBalance: 812.34,
+      availableBalance: 812.34,
+      balanceUpdatedAt: new Date('2026-06-17T08:00:00Z')
+    };
+    const prisma = {
+      bankAccount: {
+        findMany: vi.fn().mockResolvedValue([account]),
+        update: vi.fn().mockResolvedValue(updated)
+      }
+    };
+    const gocardless = {
+      accountBalances: vi.fn().mockResolvedValue({
+        balances: [
+          { balanceType: 'forwardAvailable', balanceAmount: { amount: '812.34', currency: 'EUR' } }
+        ]
+      })
+    };
+
+    const summary = await serviceWith(prisma, gocardless).accounts();
+
+    expect(prisma.bankAccount.update).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ currentBalance: 812.34, availableBalance: 812.34 })
+    }));
+    expect(summary.balanceAvailable).toBe(true);
+    expect(summary.totalBalance).toBe(812.34);
+    expect(summary.accounts[0].currentBalance).toBe(812.34);
+  });
 });
