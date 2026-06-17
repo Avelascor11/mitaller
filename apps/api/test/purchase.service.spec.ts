@@ -241,4 +241,73 @@ describe('PurchaseService', () => {
       recommendedPurchaseQuantity: 0
     });
   });
+
+  it('no marca un pedido como completo si falta el DTF aunque haya prenda base', async () => {
+    const service = new PurchaseService({
+      stockItem: {
+        findMany: async ({ where }: { where: { type: string; sku?: { startsWith: string } } }) => {
+          if (where.type === 'BLANK_GARMENT') {
+            return [
+              {
+                id: 'tee-navy-m',
+                sku: 'TEE-NAVY-M',
+                supplierSku: 'TEE-NAVY-M',
+                name: 'Camiseta Navy - M',
+                color: 'Navy',
+                size: 'M',
+                levels: [{ quantity: 1 }]
+              }
+            ];
+          }
+          if (where.type === 'TRANSFER') {
+            return [
+              {
+                id: 'dtf-always',
+                sku: 'DTF-ALWAYS-RACING',
+                name: 'DTF Always Racing',
+                levels: [{ quantity: 0 }]
+              }
+            ];
+          }
+          return [];
+        }
+      },
+      productSubproductMapping: { findMany: async () => [] },
+      order: {
+        findMany: async () => [
+          {
+            id: 'order-1',
+            orderNumber: '#9701',
+            customerName: 'Test',
+            operationalStatus: 'NEW',
+            orderedAt: new Date('2026-06-17T08:00:00Z'),
+            items: [
+              {
+                id: 'item-1',
+                quantity: 1,
+                title: 'Camiseta "Always Racing" - Navy - M',
+                sku: 'ALWAYS-NAVY-M',
+                productType: 'Camiseta',
+                color: 'Navy',
+                size: 'M',
+                variantTitle: 'M',
+                unitPrice: 29.95,
+                imageUrl: null,
+                imageUrlsJson: null
+              }
+            ]
+          }
+        ]
+      }
+    } as never, { get: () => undefined } as never);
+
+    const response = await service.getFulfillableOrders();
+    expect(response.summary.full).toBe(0);
+    expect(response.summary.partial).toBe(1);
+    expect(response.orders[0].fulfillability).toBe('PARTIAL');
+    expect(response.orders[0].lines).toEqual(expect.arrayContaining([
+      expect.objectContaining({ subproductName: 'Camiseta Navy - M', canFulfill: true }),
+      expect.objectContaining({ subproductName: 'DTF Always Racing', required: 1, available: 0, canFulfill: false })
+    ]));
+  });
 });

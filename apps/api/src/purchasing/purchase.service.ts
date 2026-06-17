@@ -427,8 +427,9 @@ export class PurchaseService {
       OperationalStatus.BLOCKED
     ];
 
-    const [stockItems, productMappings, orders] = await Promise.all([
+    const [blankStockItems, transferStockItems, productMappings, orders] = await Promise.all([
       this.prisma.stockItem.findMany({ where: { type: 'BLANK_GARMENT' }, include: { levels: true } }),
+      this.prisma.stockItem.findMany({ where: { type: 'TRANSFER', sku: { startsWith: 'DTF-' } }, include: { levels: true } }),
       this.prisma.productSubproductMapping.findMany(),
       this.prisma.order.findMany({
         where: { operationalStatus: { in: pendingStatuses } },
@@ -439,7 +440,7 @@ export class PurchaseService {
 
     const mappingIndex = this.buildMappingIndex(productMappings);
     const stockIndex = new Map<string, { id: string; available: number; name: string }>();
-    for (const item of stockItems) {
+    for (const item of blankStockItems) {
       const kind = this.inferGarmentKind(`${item.name} ${item.sku} ${item.supplierSku ?? ''}`);
       const color = this.normalizeColor(item.color ?? item.name);
       const size = this.normalizeSize(item.size ?? item.name);
@@ -448,6 +449,14 @@ export class PurchaseService {
       stockIndex.set(key, {
         id: item.id,
         available: item.levels.reduce((sum, l) => sum + l.quantity, 0),
+        name: item.name
+      });
+    }
+    const dtfStockIndex = new Map<string, { id: string; available: number; name: string }>();
+    for (const item of transferStockItems) {
+      dtfStockIndex.set(item.sku, {
+        id: item.id,
+        available: item.levels.reduce((sum, level) => sum + level.quantity, 0),
         name: item.name
       });
     }
@@ -460,6 +469,7 @@ export class PurchaseService {
       const unmapped: string[] = [];
 
       const demand = new Map<string, { subproductName: string; color: string; size: string; required: number }>();
+      const dtfDemand = new Map<string, { subproductName: string; color: string; size: string; required: number }>();
       for (const item of order.items) {
         const mapped = this.mapOrderItemToBlankGarment(item, mappingIndex);
         if (!mapped) { unmapped.push(item.title); continue; }
@@ -467,12 +477,33 @@ export class PurchaseService {
         const cur = demand.get(key) ?? { subproductName: mapped.subproductName, color: mapped.color, size: mapped.size, required: 0 };
         cur.required += item.quantity;
         demand.set(key, cur);
+
+        const dtfDesign = this.mapOrderItemToDtfDesign({ ...item, imageRef: this.firstImageRef(item) }, mapped);
+        if (dtfDesign) {
+          const dtfKey = this.dtfKey(dtfDesign.slug);
+          const dtfCurrent = dtfDemand.get(dtfKey) ?? {
+            subproductName: `DTF ${dtfDesign.label}`,
+            color: 'DTF',
+            size: dtfDesign.slug,
+            required: 0
+          };
+          dtfCurrent.required += item.quantity;
+          dtfDemand.set(dtfKey, dtfCurrent);
+        }
       }
 
       let fulfillableCount = 0;
       let totalCount = 0;
       for (const [key, d] of demand) {
         const stock = stockIndex.get(key);
+        const available = stock?.available ?? 0;
+        const canFulfill = available >= d.required;
+        if (canFulfill) fulfillableCount += d.required;
+        totalCount += d.required;
+        lines.push({ key, subproductName: d.subproductName, color: d.color, size: d.size, required: d.required, available, canFulfill });
+      }
+      for (const [key, d] of dtfDemand) {
+        const stock = dtfStockIndex.get(this.dtfSku(d.size));
         const available = stock?.available ?? 0;
         const canFulfill = available >= d.required;
         if (canFulfill) fulfillableCount += d.required;

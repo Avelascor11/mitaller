@@ -4056,7 +4056,7 @@ struct FulfillableOrderDetailView: View {
                     }
                 }
 
-                SectionHeader(title: "Stock necesario", subtitle: "Prendas base a coger del almacén")
+                SectionHeader(title: "Stock necesario", subtitle: "Prendas base + DTF/impresión disponible")
                 VStack(spacing: 6) {
                     ForEach(order.lines, id: \.key) { line in
                         HStack(spacing: 8) {
