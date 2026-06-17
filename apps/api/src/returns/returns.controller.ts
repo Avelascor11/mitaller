@@ -2,6 +2,7 @@ import { Body, Controller, Delete, Get, Header, Param, Patch, Post, Put, Res, Us
 import { Throttle, ThrottlerGuard } from '@nestjs/throttler';
 import type { Response } from 'express';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
+import { CarrierReturnsService } from '../carrier-returns/carrier-returns.service';
 import { ShopifyAdapter } from '../shopify/shopify.adapter';
 import { CreateReturnDto } from './dto/create-return.dto';
 import { LookupOrderDto } from './dto/lookup-order.dto';
@@ -17,7 +18,8 @@ export class ReturnsController {
     private readonly shopify: ShopifyAdapter,
     private readonly configService: ReturnsConfigService,
     private readonly exceptionsService: ReturnsExceptionsService,
-    private readonly presence: ReturnsPresenceService
+    private readonly presence: ReturnsPresenceService,
+    private readonly carrierReturns: CarrierReturnsService
   ) {}
 
   /** Public — portal heartbeat for live visitor tracking */
@@ -124,11 +126,12 @@ export class ReturnsController {
 
   /** Shopify webhook — order paid (draft order completed) */
   @Post('webhooks/order-paid')
-  async orderPaid(@Body() payload: { id?: string | number; tags?: string; source_name?: string; source_identifier?: string | number; note?: string }) {
+  async orderPaid(@Body() payload: { id?: string | number; name?: string; tags?: string; source_name?: string; source_identifier?: string | number; note?: string }) {
     const tags = (payload.tags ?? '').toString().toLowerCase();
     const isReturnPortal = tags.includes('return-portal') || (payload.source_name === 'shopify_draft_order' && (payload.note ?? '').toLowerCase().includes('devolución pedido'));
+    const isCarrierReship = tags.includes('reenvio') || tags.includes('correos-devuelto') || (payload.note ?? '').toLowerCase().includes('envío nuevo');
 
-    if (!isReturnPortal) {
+    if (!isReturnPortal && !isCarrierReship) {
       return { received: true, ignored: true, reason: 'not a return-portal order' };
     }
 
@@ -145,6 +148,15 @@ export class ReturnsController {
     if (!identifier) {
       console.log('[Webhook order-paid] cannot identify return — note:', payload.note);
       return { received: true, ignored: true, reason: 'cannot identify return' };
+    }
+
+    if (isCarrierReship && identifier.type === 'draftOrderId') {
+      const updated = await this.carrierReturns.markPaidFromDraftOrder(identifier.value, payload.name ?? null);
+      return { received: true, processed: !!updated, carrierReturnId: updated?.id };
+    }
+    if (isCarrierReship && identifier.type === 'orderNumber') {
+      const updated = await this.carrierReturns.markPaidFromOrderNumber(identifier.value, payload.name ?? null);
+      return { received: true, processed: !!updated, carrierReturnId: updated?.id };
     }
 
     console.log('[Webhook order-paid] processing', identifier);

@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { ThrottlerModule } from '@nestjs/throttler';
 import { ActivityModule } from '../activity/activity.module';
 import { AuthModule } from '../auth/auth.module';
+import { CarrierReturnsModule } from '../carrier-returns/carrier-returns.module';
 import { KlaviyoModule } from '../klaviyo/klaviyo.module';
 import { OrdersModule } from '../orders/orders.module';
 import { PrismaModule } from '../prisma/prisma.module';
@@ -16,7 +17,7 @@ import { ReturnsController } from './returns.controller';
 import { ReturnsService } from './returns.service';
 
 @Module({
-  imports: [PrismaModule, SendcloudModule, ShopifyModule, ActivityModule, AuthModule, KlaviyoModule, OrdersModule,
+  imports: [PrismaModule, SendcloudModule, ShopifyModule, ActivityModule, AuthModule, KlaviyoModule, OrdersModule, CarrierReturnsModule,
     ThrottlerModule.forRoot([{ ttl: 60000, limit: 20 }])],
   controllers: [ReturnsController, MobileReturnsController],
   providers: [ReturnsService, ReturnsConfigService, ReturnsExceptionsService, MobileApiKeyGuard, ReturnsPresenceService],

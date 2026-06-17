@@ -483,6 +483,7 @@ export class ShopifyAdapter {
     const lineItems = input.lineItems.map((item) => ({
       ...(item.variantId ? { variantId: item.variantId } : {}),
       ...(item.variantId ? {} : { title: item.title, originalUnitPrice: (item.price ?? 0).toFixed(2) }),
+      ...(!item.variantId && item.requiresShipping !== undefined ? { requiresShipping: item.requiresShipping } : {}),
       quantity: item.quantity
     }));
 
@@ -979,9 +980,9 @@ export interface ShopifyDraftOrderInput {
     title?: string;
     price?: number;
     quantity: number;
+    requiresShipping?: boolean;
   }>;
   noteAttributes?: Array<{ key: string; value: string }>;
   /** Order-level discount. Use { valueType:'PERCENTAGE', value:100 } for a zero-cost (free) order. */
   appliedDiscount?: { valueType: 'PERCENTAGE' | 'FIXED_AMOUNT'; value: number; title?: string; description?: string };
 }
-

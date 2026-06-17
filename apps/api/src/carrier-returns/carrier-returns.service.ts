@@ -128,6 +128,8 @@ export class CarrierReturnsService {
     const ret = await this.get(id);
     await this.ensureEmail(ret);
     if (!ret.customerEmail) throw new BadRequestException('Falta el email del cliente. Añádelo antes de pedir el pago.');
+    const originalOrder = await this.findOriginalOrder(ret);
+    const shippingAddress = this.shippingAddressFromOrder(originalOrder?.shippingAddressJson, ret.customerName ?? originalOrder?.customerName ?? 'Cliente');
 
     let invoiceUrl = ret.invoiceUrl;
     let draftOrderId = ret.draftOrderId;
@@ -136,11 +138,18 @@ export class CarrierReturnsService {
         customerEmail: ret.customerEmail,
         note: `🔁 ENVÍO NUEVO del pedido ${ret.orderNumber} — devuelto por Correos. Reenviar a la dirección de ESTE pedido.`,
         tags: ['reenvio', 'correos-devuelto', `reenvio-${ret.orderNumber.replace(/^#/, '')}`],
+        shippingAddress,
         noteAttributes: [
           { key: 'Reenvío del pedido', value: ret.orderNumber },
-          { key: 'Motivo', value: ret.reason }
+          { key: 'Motivo', value: ret.reason },
+          ...(shippingAddress ? [{ key: 'Dirección base', value: this.addressLabel(shippingAddress) }] : [])
         ],
-        lineItems: [{ title: `Reenvío del pedido ${ret.orderNumber} (devuelto por Correos)`, price: ret.feeAmount, quantity: 1 }]
+        lineItems: [{
+          title: `Reenvío del pedido ${ret.orderNumber} (devuelto por Correos)`,
+          price: ret.feeAmount,
+          quantity: 1,
+          requiresShipping: true
+        }]
       });
       invoiceUrl = draft.invoiceUrl;
       draftOrderId = draft.id;
@@ -170,5 +179,73 @@ export class CarrierReturnsService {
       where: { id },
       data: { invoiceUrl, draftOrderId, status: 'EMAILED', emailedAt: new Date() }
     });
+  }
+
+  async markPaidFromDraftOrder(draftOrderId: string, reshipOrderName?: string | null) {
+    const ret = await this.prisma.carrierReturn.findFirst({
+      where: { draftOrderId, status: { in: ['EMAILED', 'PENDING'] } }
+    });
+    if (!ret) return null;
+    return this.markPaid(ret.id, reshipOrderName);
+  }
+
+  async markPaidFromOrderNumber(orderNumber: string, reshipOrderName?: string | null) {
+    const clean = orderNumber.replace(/^#/, '');
+    const ret = await this.prisma.carrierReturn.findFirst({
+      where: {
+        orderNumber: { contains: clean },
+        status: { in: ['EMAILED', 'PENDING'] }
+      },
+      orderBy: { updatedAt: 'desc' }
+    });
+    if (!ret) return null;
+    return this.markPaid(ret.id, reshipOrderName);
+  }
+
+  private markPaid(id: string, reshipOrderName?: string | null) {
+    return this.prisma.carrierReturn.update({
+      where: { id },
+      data: {
+        status: 'PAID',
+        paidAt: new Date(),
+        ...(reshipOrderName ? { reshipOrderName } : {})
+      }
+    });
+  }
+
+  private async findOriginalOrder(ret: { orderId: string | null; orderNumber: string }) {
+    return this.prisma.order.findFirst({
+      where: ret.orderId
+        ? { id: ret.orderId }
+        : { OR: [{ orderNumber: ret.orderNumber }, { orderNumber: `#${ret.orderNumber.replace(/^#/, '')}` }] }
+    });
+  }
+
+  private shippingAddressFromOrder(shippingAddressJson: unknown, fallbackName: string) {
+    if (!shippingAddressJson || typeof shippingAddressJson !== 'object') return undefined;
+    const src = shippingAddressJson as Record<string, string | undefined>;
+    const fullName = src.name ?? fallbackName;
+    const [firstName, ...rest] = fullName.trim().split(/\s+/);
+    const address1 = src.address1 ?? src.address;
+    const city = src.city;
+    const zip = src.zip ?? src.postal_code;
+    if (!address1 || !city || !zip) return undefined;
+    return {
+      firstName,
+      lastName: rest.join(' '),
+      address1,
+      address2: src.address2,
+      city,
+      province: src.province,
+      zip,
+      countryCode: src.countryCodeV2 ?? src.country_code ?? src.country ?? 'ES',
+      phone: src.phone
+    };
+  }
+
+  private addressLabel(address: NonNullable<ReturnType<CarrierReturnsService['shippingAddressFromOrder']>>) {
+    return [address.address1, address.address2, address.zip, address.city, address.province, address.countryCode]
+      .filter(Boolean)
+      .join(', ');
   }
 }
