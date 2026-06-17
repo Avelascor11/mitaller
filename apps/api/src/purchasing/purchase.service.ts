@@ -715,12 +715,18 @@ export class PurchaseService {
     item: { title: string; sku: string; imageRef?: string | null },
     mapped: { kind: string; color: string; size: string }
   ) {
-    const externalDtfColors = new Set(['NEGRA', 'NAVY', 'AZUL', 'CHARCOAL']);
-    if (mapped.kind !== 'CAMISETA' || !externalDtfColors.has(mapped.color)) return null;
+    if (!this.requiresExternalDtf(mapped)) return null;
     const label = this.cleanDtfDesignLabel(item.title);
     const slug = this.slugifyDtf(label || item.sku || item.title);
     if (!slug) return null;
     return { label: label || slug, slug, imageRef: item.imageRef?.trim() || null };
+  }
+
+  private requiresExternalDtf(mapped: { kind: string; color: string }) {
+    const whiteColors = new Set(['BLANCA', 'BLANCO', 'WHITE']);
+    if (mapped.kind === 'BAÑADOR') return true;
+    if (mapped.kind !== 'CAMISETA' && mapped.kind !== 'SUDADERA') return false;
+    return !whiteColors.has(mapped.color);
   }
 
   private firstImageRef(item: { imageUrl?: string | null; imageUrlsJson?: unknown }) {
@@ -760,14 +766,18 @@ export class PurchaseService {
 
   private cleanDtfDesignLabel(title: string) {
     let cleaned = title
-      .replace(/^camiseta\s*/i, '')
-      .replace(/^t-?shirt\s*/i, '')
       .replace(/[“”]/g, '"')
+      .replace(/^(camiseta|t-?shirt|sudadera(?:\s+con\s+capucha)?|hoodie|bañador|banador|swimsuit)\s*/i, '')
       .trim();
-    cleaned = cleaned.replace(/\s*[-/]\s*(blanco|blanca|negro|negra|black|white|navy|azul|blue|charcoal|sand|arena)\s*$/i, '');
-    cleaned = cleaned.replace(/\s*[-/]\s*(xxl|xl|l|m|s)\s*$/i, '');
-    cleaned = cleaned.replace(/\s*[-/]\s*(blanco|blanca|negro|negra|black|white|navy|azul|blue|charcoal|sand|arena)\s*$/i, '');
-    cleaned = cleaned.replace(/^"|"$/g, '').trim();
+    const colors = '(blanco|blanca|negro|negra|black|white|navy|azul|blue|royal\\s*blue|charcoal|sand|arena|mastic|marron|marrón|brown|dark\\s*chocolate|rosa|azalea|tangerine|orange)';
+    const sizes = '(xs|xxl|2xl|xl|l|m|s)';
+    for (let index = 0; index < 4; index += 1) {
+      cleaned = cleaned
+        .replace(new RegExp(`\\s*[-/,|]\\s*${sizes}\\s*$`, 'i'), '')
+        .replace(new RegExp(`\\s*[-/,|]\\s*${colors}\\s*$`, 'i'), '')
+        .trim();
+    }
+    cleaned = cleaned.replace(/^["'#\s-]+|["'\s-]+$/g, '').trim();
     return cleaned || title.trim();
   }
 
@@ -785,9 +795,16 @@ export class PurchaseService {
 
   private async ensureDtfStockItems(dtfDemand: Map<string, MatrixDemand>, existingTransfers: StockItemWithLevels[]) {
     const existingBySku = new Map(existingTransfers.map((item) => [item.sku, item]));
+    const existingByCleanSlug = new Set(
+      existingTransfers
+        .map((item) => this.cleanDtfStockLabel(item))
+        .filter((label): label is string => Boolean(label))
+        .map((label) => this.slugifyDtf(label))
+        .filter(Boolean)
+    );
     const missing = [...dtfDemand.values()]
       .map((need) => ({ sku: this.dtfSku(need.size), name: `DTF ${need.label ?? need.size}` }))
-      .filter((item) => !existingBySku.has(item.sku));
+      .filter((item) => !existingBySku.has(item.sku) && !existingByCleanSlug.has(item.sku.replace(/^DTF-/, '')));
 
     if (missing.length && typeof this.prisma.stockItem.upsert === 'function') {
       for (const item of missing) {
@@ -831,21 +848,20 @@ export class PurchaseService {
       sizes: []
     };
 
+    const normalizedTransferIndex = this.buildNormalizedDtfTransferIndex(transferIndex);
     const allSlugs = new Set([
       ...[...dtfDemand.values()].map((need) => need.size),
-      ...[...transferIndex.keys()]
-        .filter((sku) => sku.startsWith('DTF-'))
-        .map((sku) => sku.replace(/^DTF-/, ''))
+      ...normalizedTransferIndex.keys()
     ]);
 
     for (const slug of allSlugs) {
       const need = dtfDemand.get(this.dtfKey(slug));
       const sku = this.dtfSku(slug);
-      const stockItem = transferIndex.get(sku);
-      const currentInternalStock = stockItem?.levels.reduce((sum, level) => sum + level.quantity, 0) ?? 0;
+      const stockItem = this.pickDtfStockItem(transferIndex.get(sku), normalizedTransferIndex.get(slug));
+      const currentInternalStock = this.stockQuantity(stockItem);
       const minStockTarget = stockItem?.minStock ?? 0;
       const pendingOrderNeed = need?.quantity ?? 0;
-      const label = need?.label ?? stockItem?.name.replace(/^DTF\s+/i, '') ?? slug;
+      const label = need?.label ?? this.cleanDtfStockLabel(stockItem) ?? slug;
       const imageRef = need?.imageRef ?? null;
       const alreadyOrderedQuantity = stockItem ? orderedQuantities.get(stockItem.id) ?? 0 : 0;
       const recommendedPurchaseQuantity = this.calculateRecommendedPurchaseQuantity({
@@ -872,6 +888,32 @@ export class PurchaseService {
     }
 
     return group;
+  }
+
+  private buildNormalizedDtfTransferIndex(transferIndex: Map<string, StockItemWithLevels>) {
+    const normalized = new Map<string, StockItemWithLevels>();
+    for (const [sku, stockItem] of transferIndex) {
+      if (!sku.startsWith('DTF-')) continue;
+      const label = this.cleanDtfStockLabel(stockItem) ?? sku.replace(/^DTF-/, '');
+      const slug = this.slugifyDtf(label);
+      if (slug && !normalized.has(slug)) normalized.set(slug, stockItem);
+    }
+    return normalized;
+  }
+
+  private cleanDtfStockLabel(stockItem?: StockItemWithLevels | null) {
+    if (!stockItem?.name) return null;
+    return this.cleanDtfDesignLabel(stockItem.name.replace(/^DTF\s+/i, ''));
+  }
+
+  private pickDtfStockItem(exact?: StockItemWithLevels, normalized?: StockItemWithLevels) {
+    if (!exact) return normalized ?? null;
+    if (!normalized || exact.id === normalized.id) return exact;
+    return this.stockQuantity(normalized) > this.stockQuantity(exact) ? normalized : exact;
+  }
+
+  private stockQuantity(stockItem?: StockItemWithLevels | null) {
+    return stockItem?.levels.reduce((sum, level) => sum + level.quantity, 0) ?? 0;
   }
 
   private matrixKey(kind: string, color: string, size: string) {
