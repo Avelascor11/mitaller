@@ -610,6 +610,24 @@ model FixedExpensePayment {
   @@map("fixed_expense_payments")
 }
 
+model PreorderPayment {
+  id           String    @id @default(cuid())
+  preorderKey  String
+  milestone    Int
+  label        String
+  amount       Float
+  currency     String    @default("EUR")
+  dueAt        DateTime?
+  paidAt       DateTime  @default(now())
+  notes        String?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  @@unique([preorderKey, milestone])
+  @@index([preorderKey])
+  @@map("preorder_payments")
+}
+
 model ShippingRule {
   id                            String   @id @default(cuid())
   name                          String

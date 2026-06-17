@@ -651,6 +651,96 @@ export class EconomicsService {
     };
   }
 
+  async retroAstonPlan() {
+    const preorderKey = this.retroAstonPreorderKey();
+    const milestones = this.retroAstonMilestones();
+    const payments = await this.prisma.preorderPayment.findMany({
+      where: { preorderKey },
+      orderBy: { milestone: 'asc' }
+    });
+    const paidByMilestone = new Map(payments.map((payment) => [payment.milestone, payment]));
+    const orders = await this.prisma.order.findMany({
+      where: { operationalStatus: { not: OperationalStatus.CANCELLED } },
+      include: { items: true }
+    });
+    const activeOrders = orders.filter((order) => !['refunded', 'voided', 'cancelled'].includes(String(order.financialStatus ?? '').toLowerCase()));
+    const soldUnits = activeOrders.reduce((sum, order) => sum + this.retroAstonUnits(order), 0);
+    const orderCount = activeOrders.filter((order) => this.retroAstonUnits(order) > 0).length;
+    const unitCost = this.retroAstonUnitCost();
+    const totalCommitment = this.retroAstonTotalCommitment();
+    const totalReservedFromSales = +(soldUnits * unitCost).toFixed(2);
+    const paidTotal = +payments.reduce((sum, payment) => sum + this.money(payment.amount), 0).toFixed(2);
+    const fundAvailable = +Math.max(0, totalReservedFromSales - paidTotal).toFixed(2);
+    const items = milestones.map((milestone) => {
+      const payment = paidByMilestone.get(milestone.milestone);
+      return {
+        ...milestone,
+        currency: 'EUR',
+        paid: Boolean(payment),
+        paidAt: payment?.paidAt ?? null,
+        paidAmount: payment?.amount ?? null,
+        notes: payment?.notes ?? null
+      };
+    });
+    const nextMilestone = items.find((item) => !item.paid) ?? null;
+    const missingForNext = nextMilestone ? +Math.max(0, nextMilestone.amount - fundAvailable).toFixed(2) : 0;
+
+    return {
+      key: preorderKey,
+      title: 'Retro Aston',
+      currency: 'EUR',
+      totalCommitment,
+      installmentAmount: this.retroAstonInstallmentAmount(),
+      scheduledTotal: +milestones.reduce((sum, milestone) => sum + milestone.amount, 0).toFixed(2),
+      adjustmentAmount: +Math.max(0, totalCommitment - milestones.reduce((sum, milestone) => sum + milestone.amount, 0)).toFixed(2),
+      unitCost,
+      sellingPrice: this.retroAstonSellingPrice(),
+      soldUnits,
+      orderCount,
+      totalReservedFromSales,
+      paidTotal,
+      fundAvailable,
+      remainingCommitment: +Math.max(0, totalCommitment - paidTotal).toFixed(2),
+      coveredTotal: +Math.min(totalCommitment, paidTotal + fundAvailable).toFixed(2),
+      nextMilestone,
+      missingForNext,
+      canPayNext: Boolean(nextMilestone && fundAvailable >= nextMilestone.amount),
+      milestones: items
+    };
+  }
+
+  async markRetroAstonPayment(milestone: number, body: { amount?: number; paidAt?: string; notes?: string | null }) {
+    const definition = this.retroAstonMilestones().find((item) => item.milestone === milestone);
+    if (!definition) throw new BadRequestException('Cuota de preventa inválida');
+    return this.prisma.preorderPayment.upsert({
+      where: { preorderKey_milestone: { preorderKey: this.retroAstonPreorderKey(), milestone } },
+      create: {
+        preorderKey: this.retroAstonPreorderKey(),
+        milestone,
+        label: definition.label,
+        amount: this.money(body.amount ?? definition.amount),
+        currency: 'EUR',
+        dueAt: definition.dueAt,
+        paidAt: body.paidAt ? new Date(body.paidAt) : new Date(),
+        notes: body.notes ?? null
+      },
+      update: {
+        label: definition.label,
+        amount: this.money(body.amount ?? definition.amount),
+        dueAt: definition.dueAt,
+        paidAt: body.paidAt ? new Date(body.paidAt) : new Date(),
+        notes: body.notes ?? null
+      }
+    });
+  }
+
+  async unmarkRetroAstonPayment(milestone: number) {
+    await this.prisma.preorderPayment.deleteMany({
+      where: { preorderKey: this.retroAstonPreorderKey(), milestone }
+    });
+    return { ok: true, milestone };
+  }
+
   async createFixedExpense(body: {
     name: string;
     category: string;
@@ -721,6 +811,23 @@ export class EconomicsService {
 
   private retroAstonTotalCommitment() {
     return 2194.94;
+  }
+
+  private retroAstonPreorderKey() {
+    return 'RETRO_ASTON';
+  }
+
+  private retroAstonInstallmentAmount() {
+    return 721;
+  }
+
+  private retroAstonMilestones() {
+    return [1, 2, 3].map((milestone) => ({
+      milestone,
+      label: `Pago ${milestone}/3`,
+      amount: this.retroAstonInstallmentAmount(),
+      dueAt: null as Date | null
+    }));
   }
 
   private retroAstonSellingPrice() {

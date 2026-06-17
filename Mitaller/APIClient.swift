@@ -343,6 +343,22 @@ struct APIClient {
     }
     func bankAllocation() async throws -> AllocationPlan { try await get("/bank/allocation") }
     func cashflow() async throws -> CashflowSummary { try await get("/economics/cashflow") }
+    func retroAstonPlan() async throws -> RetroAstonPlan {
+        try await get("/economics/preorders/retro-aston")
+    }
+    func markRetroAstonPayment(milestone: Int, amount: Double? = nil) async throws {
+        let request = try jsonRequest(
+            path: "/economics/preorders/retro-aston/milestones/\(milestone)/pay",
+            method: "POST",
+            body: PreorderPaymentRequest(amount: amount)
+        )
+        let _: EmptyResponse = try await perform(request)
+    }
+    func unmarkRetroAstonPayment(milestone: Int) async throws {
+        var request = try self.request(path: "/economics/preorders/retro-aston/milestones/\(milestone)/pay", method: "DELETE")
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        let _: EmptyResponse = try await perform(request)
+    }
     func fixedExpenses(period: String? = nil) async throws -> FixedExpenseSummary {
         if let period { return try await get("/economics/fixed-expenses?period=\(Self.queryValue(period))") }
         return try await get("/economics/fixed-expenses")
@@ -1842,6 +1858,45 @@ struct RetroAstonPayout: Decodable {
     let unitCost: Double
     let totalCommitment: Double
     let sellingPrice: Double
+}
+
+private struct PreorderPaymentRequest: Encodable {
+    let amount: Double?
+}
+
+struct RetroAstonPlan: Decodable {
+    let key: String
+    let title: String
+    let currency: String
+    let totalCommitment: Double
+    let installmentAmount: Double
+    let scheduledTotal: Double
+    let adjustmentAmount: Double
+    let unitCost: Double
+    let sellingPrice: Double
+    let soldUnits: Int
+    let orderCount: Int
+    let totalReservedFromSales: Double
+    let paidTotal: Double
+    let fundAvailable: Double
+    let remainingCommitment: Double
+    let coveredTotal: Double
+    let nextMilestone: RetroAstonMilestone?
+    let missingForNext: Double
+    let canPayNext: Bool
+    let milestones: [RetroAstonMilestone]
+}
+
+struct RetroAstonMilestone: Decodable, Identifiable {
+    var id: Int { milestone }
+    let milestone: Int
+    let label: String
+    let amount: Double
+    let currency: String
+    let paid: Bool
+    let paidAt: Date?
+    let paidAmount: Double?
+    let notes: String?
 }
 
 struct FulfillableLine: Decodable {
