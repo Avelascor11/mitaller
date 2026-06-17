@@ -175,7 +175,7 @@ describe('PurchaseService', () => {
     });
   });
 
-  it('genera compras DTF solo para camisetas de colores externos', async () => {
+  it('genera compras DTF por diseño limpio para prendas externas', async () => {
     const service = new PurchaseService({
       stockItem: { findMany: async () => [] },
       orderItem: {
@@ -189,6 +189,16 @@ describe('PurchaseService', () => {
             size: 'M',
             variantTitle: 'M',
             order: { orderNumber: '#9436', shopifyOrderId: 'sheet:#9436' }
+          },
+          {
+            quantity: 1,
+            title: 'Sudadera "Always Racing" - Navy - XL',
+            sku: 'ALWAYS-HOODIE-NAVY-XL',
+            productType: 'Sudadera',
+            color: 'Navy',
+            size: 'XL',
+            variantTitle: 'XL',
+            order: { orderNumber: '#9583', shopifyOrderId: 'gid://shopify/Order/9583' }
           },
           {
             quantity: 3,
@@ -216,6 +226,15 @@ describe('PurchaseService', () => {
             imageRef: null
           },
           {
+            productName: 'Sudadera "Fernando is Faster" - Mastic - M',
+            productType: 'Sudadera',
+            color: 'Mastic',
+            size: 'M',
+            sku: 'FERNANDO-FASTER-MASTIC-M',
+            subproductName: 'Sudadera Mastic - M',
+            imageRef: null
+          },
+          {
             productName: 'Camiseta "Solo Interna" - Blanca - L',
             productType: 'Camiseta',
             color: 'Blanca',
@@ -230,16 +249,21 @@ describe('PurchaseService', () => {
 
     const matrix = await service.getPurchaseMatrix();
     const dtf = matrix.groups.find((group) => group.title === 'DTF EXTERNO');
-    expect(dtf?.sizes).toHaveLength(2);
+    expect(dtf?.sizes).toHaveLength(3);
     expect(dtf?.sizes.find((entry) => entry.subproductName === 'DTF Always Racing')).toMatchObject({
       subproductName: 'DTF Always Racing',
-      pendingOrderNeed: 2,
-      recommendedPurchaseQuantity: 2
+      pendingOrderNeed: 3,
+      recommendedPurchaseQuantity: 3
     });
     expect(dtf?.sizes.find((entry) => entry.subproductName === 'DTF No Risk No Story')).toMatchObject({
       pendingOrderNeed: 0,
       recommendedPurchaseQuantity: 0
     });
+    expect(dtf?.sizes.find((entry) => entry.subproductName === 'DTF Fernando is Faster')).toMatchObject({
+      pendingOrderNeed: 0,
+      recommendedPurchaseQuantity: 0
+    });
+    expect(dtf?.sizes.map((entry) => entry.subproductName)).not.toContain('DTF Sudadera "Always Racing"');
   });
 
   it('no marca un pedido como completo si falta el DTF aunque haya prenda base', async () => {
