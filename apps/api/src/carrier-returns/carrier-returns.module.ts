@@ -8,6 +8,7 @@ import { CarrierReturnsService } from './carrier-returns.service';
 @Module({
   imports: [PrismaModule, ShopifyModule, KlaviyoModule],
   controllers: [CarrierReturnsController],
-  providers: [CarrierReturnsService]
+  providers: [CarrierReturnsService],
+  exports: [CarrierReturnsService]
 })
 export class CarrierReturnsModule {}
