@@ -138,4 +138,42 @@ describe('BankService', () => {
     expect(summary.totalBalance).toBe(812.34);
     expect(summary.accounts[0].currentBalance).toBe(812.34);
   });
+
+  it('marca la conexion caducada si GoCardless suspende el consentimiento', async () => {
+    const account = {
+      id: 'bank-account-1',
+      providerAccountId: 'n26-account',
+      iban: null,
+      name: 'N26 Business',
+      currency: 'EUR',
+      ownerName: null,
+      product: null,
+      currentBalance: null,
+      availableBalance: null,
+      balanceUpdatedAt: null,
+      connectedAt: null,
+      lastSyncedAt: null,
+      connection: { institutionName: 'N26' }
+    };
+    const prisma = {
+      bankAccount: {
+        findMany: vi.fn().mockResolvedValue([account]),
+        update: vi.fn()
+      },
+      bankConnection: {
+        updateMany: vi.fn().mockResolvedValue({ count: 1 })
+      }
+    };
+    const gocardless = {
+      accountBalances: vi.fn().mockRejectedValue(new Error('GoCardless 409: {"summary":"Account suspended","detail":"This account or its consent was suspended"}'))
+    };
+
+    const summary = await serviceWith(prisma, gocardless).accounts();
+
+    expect(prisma.bankConnection.updateMany).toHaveBeenCalledWith(expect.objectContaining({
+      data: { status: 'EXPIRED' }
+    }));
+    expect(summary.balanceAvailable).toBe(false);
+    expect(summary.accounts[0].balanceError).toContain('Reconecta N26');
+  });
 });

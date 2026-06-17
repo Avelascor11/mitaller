@@ -12594,7 +12594,9 @@ struct BankBalanceCard: View {
             }
 
             if summary.balanceAvailable == false {
-                Text("No se pudo leer el saldo real ahora mismo. Pulsa Sincronizar; si sigue igual, puede faltar permiso de saldos en N26.")
+                Text(summary.accounts.contains(where: { ($0.balanceError ?? "").localizedCaseInsensitiveContains("Reconecta") || ($0.balanceError ?? "").localizedCaseInsensitiveContains("suspendida") })
+                     ? "N26 ha suspendido el permiso de lectura. Pulsa Conectar banco arriba, autoriza otra vez y después Sincronizar."
+                     : "No se pudo leer el saldo real ahora mismo. Pulsa Sincronizar; si sigue igual, puede faltar permiso de saldos en N26.")
                     .font(.caption.weight(.bold))
                     .foregroundStyle(AppTheme.amber)
                     .padding(10)

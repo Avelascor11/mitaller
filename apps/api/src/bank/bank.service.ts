@@ -418,8 +418,38 @@ export class BankService {
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e);
       this.logger.warn(`Balance fetch failed ${account.name ?? account.providerAccountId}: ${message}`);
-      return { ...account, balanceError: message, balanceTypes: [] };
+      const normalized = this.bankBalanceErrorMessage(message);
+      if (normalized.code === 'CONSENT_SUSPENDED') {
+        await this.prisma.bankConnection.updateMany({
+          where: { accounts: { some: { id: account.id } } },
+          data: { status: 'EXPIRED' }
+        }).catch(() => undefined);
+      }
+      return { ...account, balanceError: normalized.message, balanceTypes: [] };
     }
+  }
+
+  private bankBalanceErrorMessage(message: string) {
+    const normalized = message.toLowerCase();
+    if (normalized.includes('account suspended') || normalized.includes('consent was suspended') || normalized.includes('gocardless 409')) {
+      return {
+        code: 'CONSENT_SUSPENDED',
+        message: 'Conexión N26 suspendida. Reconecta N26 para renovar el permiso.'
+      };
+    }
+    if (normalized.includes('401') || normalized.includes('403') || normalized.includes('unauthorized') || normalized.includes('forbidden')) {
+      return {
+        code: 'CONSENT_EXPIRED',
+        message: 'Permiso bancario caducado o sin acceso a saldos. Reconecta N26.'
+      };
+    }
+    if (normalized.includes('429') || normalized.includes('too many')) {
+      return {
+        code: 'RATE_LIMIT',
+        message: 'N26/GoCardless está limitando consultas. Prueba de nuevo más tarde.'
+      };
+    }
+    return { code: 'UNKNOWN', message };
   }
 
   private async recentCashStats(days: number) {
