@@ -162,24 +162,27 @@ export class BankService {
       orderBy: { createdAt: 'desc' }
     });
     const refreshedAccounts = await Promise.all(accounts.map(account => this.refreshAccountBalance(account)));
-    const enriched = refreshedAccounts.map(account => ({
-      id: account.id,
-      providerAccountId: account.providerAccountId,
-      institutionName: account.connection.institutionName,
-      iban: this.maskIban(account.iban),
-      name: account.name ?? account.connection.institutionName ?? 'Cuenta bancaria',
-      currency: account.currency ?? 'EUR',
-      ownerName: account.ownerName,
-      product: account.product,
-      currentBalance: account.currentBalance ?? null,
-      availableBalance: account.availableBalance ?? null,
-      balanceUpdatedAt: account.balanceUpdatedAt ?? null,
-      connectedAt: account.connection.connectedAt,
-      lastSyncedAt: account.connection.lastSyncedAt
-    }));
+    const enriched = refreshedAccounts.map(account => {
+      const currentBalance = account.currentBalance ?? account.availableBalance ?? null;
+      return {
+        id: account.id,
+        providerAccountId: account.providerAccountId,
+        institutionName: account.connection.institutionName,
+        iban: this.maskIban(account.iban),
+        name: account.name ?? account.connection.institutionName ?? 'Cuenta bancaria',
+        currency: account.currency ?? 'EUR',
+        ownerName: account.ownerName,
+        product: account.product,
+        currentBalance,
+        availableBalance: account.availableBalance ?? account.currentBalance ?? null,
+        balanceUpdatedAt: account.balanceUpdatedAt ?? null,
+        connectedAt: account.connection.connectedAt,
+        lastSyncedAt: account.connection.lastSyncedAt
+      };
+    });
 
-    const balanceAvailable = enriched.some(account => account.currentBalance != null);
-    const totalBalance = enriched.reduce((sum, account) => sum + (account.currentBalance ?? 0), 0);
+    const balanceAvailable = enriched.some(account => account.currentBalance != null || account.availableBalance != null);
+    const totalBalance = enriched.reduce((sum, account) => sum + (account.currentBalance ?? account.availableBalance ?? 0), 0);
     return {
       currency: enriched[0]?.currency ?? 'EUR',
       totalBalance,
@@ -386,12 +389,16 @@ export class BankService {
     try {
       const balResponse = await this.accountBalancesWithRetry(account.providerAccountId);
       const balances = balResponse.balances ?? [];
-      const currentBalance = this.pickBalance(balances, ['interimBooked', 'closingBooked', 'expected', 'openingBooked', 'interimAvailable']);
-      const availableBalance = this.pickBalance(balances, ['interimAvailable', 'forwardAvailable', 'nonInvoiced', 'expected']);
+      const currentBalance = this.pickBalance(balances, ['interimBooked', 'closingBooked', 'expected', 'openingBooked', 'interimAvailable', 'forwardAvailable']);
+      const availableBalance = this.pickBalance(balances, ['interimAvailable', 'forwardAvailable', 'nonInvoiced', 'expected', 'interimBooked', 'closingBooked']);
       if (currentBalance == null && availableBalance == null) return account;
       const updated = await this.prisma.bankAccount.update({
         where: { id: account.id },
-        data: { currentBalance, availableBalance, balanceUpdatedAt: new Date() },
+        data: {
+          currentBalance: currentBalance ?? availableBalance,
+          availableBalance: availableBalance ?? currentBalance,
+          balanceUpdatedAt: new Date()
+        },
         include: { connection: true }
       });
       return updated as unknown as T;
