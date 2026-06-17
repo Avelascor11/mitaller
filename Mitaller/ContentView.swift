@@ -12643,6 +12643,20 @@ struct BankBalanceCard: View {
                             .font(.caption2.weight(.bold))
                             .foregroundStyle(AppTheme.green)
                     }
+                    if let balanceError = account.balanceError, !balanceError.isEmpty {
+                        Label(balanceError, systemImage: "exclamationmark.triangle.fill")
+                            .font(.caption2.weight(.bold))
+                            .foregroundStyle(AppTheme.amber)
+                            .padding(8)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .background(AppTheme.amber.opacity(0.12))
+                            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                    }
+                    if let balanceTypes = account.balanceTypes, !balanceTypes.isEmpty {
+                        Text("Tipos recibidos: \(balanceTypes.joined(separator: ", "))")
+                            .font(.caption2.weight(.semibold))
+                            .foregroundStyle(AppTheme.muted)
+                    }
                 }
                 .padding(12)
                 .background(AppTheme.surfaceSoft)

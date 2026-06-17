@@ -1689,6 +1689,8 @@ struct BankAccountSummary: Decodable, Identifiable {
     let currentBalance: Double?
     let availableBalance: Double?
     let balanceUpdatedAt: Date?
+    let balanceError: String?
+    let balanceTypes: [String]?
     let connectedAt: Date?
     let lastSyncedAt: Date?
 }
