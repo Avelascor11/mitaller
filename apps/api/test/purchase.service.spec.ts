@@ -209,6 +209,16 @@ describe('PurchaseService', () => {
             size: 'L',
             variantTitle: 'L',
             order: { orderNumber: '#9454', shopifyOrderId: 'gid://shopify/Order/1' }
+          },
+          {
+            quantity: 1,
+            title: 'Camiseta "Quattro" - Blanca - S',
+            sku: 'QUATTRO-BLANCA-S',
+            productType: 'Camiseta',
+            color: 'Blanca',
+            size: 'S',
+            variantTitle: 'S',
+            order: { orderNumber: '#9599', shopifyOrderId: 'gid://shopify/Order/9599' }
           }
         ]
       },
@@ -249,7 +259,7 @@ describe('PurchaseService', () => {
 
     const matrix = await service.getPurchaseMatrix();
     const dtf = matrix.groups.find((group) => group.title === 'DTF EXTERNO');
-    expect(dtf?.sizes).toHaveLength(3);
+    expect(dtf?.sizes).toHaveLength(4);
     expect(dtf?.sizes.find((entry) => entry.subproductName === 'DTF Always Racing')).toMatchObject({
       subproductName: 'DTF Always Racing',
       pendingOrderNeed: 3,
@@ -262,6 +272,10 @@ describe('PurchaseService', () => {
     expect(dtf?.sizes.find((entry) => entry.subproductName === 'DTF Fernando is Faster')).toMatchObject({
       pendingOrderNeed: 0,
       recommendedPurchaseQuantity: 0
+    });
+    expect(dtf?.sizes.find((entry) => entry.subproductName === 'DTF Quattro')).toMatchObject({
+      pendingOrderNeed: 1,
+      recommendedPurchaseQuantity: 1
     });
     expect(dtf?.sizes.map((entry) => entry.subproductName)).not.toContain('DTF Sudadera "Always Racing"');
   });
