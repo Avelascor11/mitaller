@@ -164,6 +164,8 @@ export class BankService {
     const refreshedAccounts = await Promise.all(accounts.map(account => this.refreshAccountBalance(account)));
     const enriched = refreshedAccounts.map(account => {
       const currentBalance = account.currentBalance ?? account.availableBalance ?? null;
+      const balanceError = (account as any).balanceError ?? null;
+      const balanceTypes = (account as any).balanceTypes ?? [];
       return {
         id: account.id,
         providerAccountId: account.providerAccountId,
@@ -176,6 +178,8 @@ export class BankService {
         currentBalance,
         availableBalance: account.availableBalance ?? account.currentBalance ?? null,
         balanceUpdatedAt: account.balanceUpdatedAt ?? null,
+        balanceError,
+        balanceTypes,
         connectedAt: account.connection.connectedAt,
         lastSyncedAt: account.connection.lastSyncedAt
       };
@@ -381,17 +385,26 @@ export class BankService {
     }
   }
 
-  private async refreshAccountBalance<T extends { id: string; providerAccountId: string; name?: string | null; balanceUpdatedAt?: Date | string | null; currentBalance?: number | null; availableBalance?: number | null }>(account: T): Promise<T> {
+  private async refreshAccountBalance<T extends { id: string; providerAccountId: string; name?: string | null; balanceUpdatedAt?: Date | string | null; currentBalance?: number | null; availableBalance?: number | null }>(account: T): Promise<T & { balanceError?: string | null; balanceTypes?: string[] }> {
     const balanceStale = !account.balanceUpdatedAt
       || (Date.now() - new Date(account.balanceUpdatedAt).getTime()) > 6 * 60 * 60 * 1000;
-    if (!balanceStale) return account;
+    if (!balanceStale) return { ...account, balanceError: null, balanceTypes: [] };
 
     try {
       const balResponse = await this.accountBalancesWithRetry(account.providerAccountId);
       const balances = balResponse.balances ?? [];
+      const balanceTypes = balances.map((balance: any) => balance.balanceType).filter(Boolean);
       const currentBalance = this.pickBalance(balances, ['interimBooked', 'closingBooked', 'expected', 'openingBooked', 'interimAvailable', 'forwardAvailable']);
       const availableBalance = this.pickBalance(balances, ['interimAvailable', 'forwardAvailable', 'nonInvoiced', 'expected', 'interimBooked', 'closingBooked']);
-      if (currentBalance == null && availableBalance == null) return account;
+      if (currentBalance == null && availableBalance == null) {
+        return {
+          ...account,
+          balanceError: balanceTypes.length
+            ? `GoCardless devolvio balances sin importe legible: ${balanceTypes.join(', ')}`
+            : 'GoCardless/N26 no devolvió balances para esta cuenta',
+          balanceTypes
+        };
+      }
       const updated = await this.prisma.bankAccount.update({
         where: { id: account.id },
         data: {
@@ -401,10 +414,11 @@ export class BankService {
         },
         include: { connection: true }
       });
-      return updated as unknown as T;
+      return { ...(updated as unknown as T), balanceError: null, balanceTypes };
     } catch (e) {
-      this.logger.warn(`Balance fetch failed ${account.name ?? account.providerAccountId}: ${e instanceof Error ? e.message : String(e)}`);
-      return account;
+      const message = e instanceof Error ? e.message : String(e);
+      this.logger.warn(`Balance fetch failed ${account.name ?? account.providerAccountId}: ${message}`);
+      return { ...account, balanceError: message, balanceTypes: [] };
     }
   }
 
