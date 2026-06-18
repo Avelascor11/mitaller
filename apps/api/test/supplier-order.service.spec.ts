@@ -506,4 +506,143 @@ describe('SupplierOrderService', () => {
       })
     }));
   });
+
+  it('resuelve camiseta tangerine con Gildan 5000 / 180.09', async () => {
+    const { service, prisma } = buildService({
+      matrix: {
+        groups: [{
+          garmentType: 'CAMISETA',
+          color: 'TANGERINE',
+          sizes: [{
+            stockItemId: 'stock-tangerine',
+            supplierSku: 'FR-TS-TNG-M',
+            subproductName: 'Camiseta Tangerine - M',
+            size: 'M',
+            recommendedPurchaseQuantity: 3,
+            supplierAvailableQuantity: null,
+            pendingOrderNeed: 3,
+            currentInternalStock: 0,
+            minStockTarget: 0,
+            demandOrders: [{ orderNumber: '#9601' }]
+          }]
+        }]
+      },
+      supplierArticles: [
+        {
+          supplierSku: '032420123',
+          styleCode: '032.42',
+          productName: 'B&C 032.42 T-Shirt',
+          color: 'Orange',
+          size: 'M',
+          purchasePrice: null
+        },
+        {
+          supplierSku: '180090456',
+          styleCode: '180.09',
+          productName: '5000 - Heavy Cotton Adult T-Shirt',
+          color: 'Tangerine',
+          size: 'M',
+          purchasePrice: null
+        }
+      ],
+      supplierStocks: [{ supplierSku: '180090456', availableQuantity: 22 }]
+    });
+
+    await service.generateDailyFalkRossOrder({ source: 'manual' });
+
+    expect(prisma.supplierPurchaseOrder.create).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        rawRequestJson: expect.objectContaining({
+          orderNote: expect.stringContaining('Camiseta Gildan 180.09'),
+          lines: [expect.objectContaining({
+            supplierSku: '180090456',
+            name: 'Camiseta Tangerine - M',
+            quantity: 3
+          })]
+        }),
+        lines: expect.objectContaining({
+          create: [expect.objectContaining({
+            supplierSku: '180090456',
+            name: 'Camiseta Tangerine - M',
+            supplierAvailableQuantity: 22,
+            rawDataJson: expect.objectContaining({
+              stockItemSupplierSku: 'FR-TS-TNG-M',
+              resolvedSupplierSku: '180090456',
+              resolvedStyleCode: '180.09',
+              expectedProductNumber: '180.09'
+            })
+          })]
+        })
+      })
+    }));
+  });
+
+  it('resuelve camiseta charcoal como B&C TG002 / 032.42 Dark Grey', async () => {
+    const { service, prisma } = buildService({
+      matrix: {
+        groups: [{
+          garmentType: 'CAMISETA',
+          color: 'CHARCOAL',
+          sizes: [{
+            stockItemId: 'stock-charcoal',
+            supplierSku: 'FR-TS-CHC-L',
+            subproductName: 'Camiseta Charcoal - L',
+            size: 'L',
+            recommendedPurchaseQuantity: 4,
+            supplierAvailableQuantity: null,
+            pendingOrderNeed: 4,
+            currentInternalStock: 0,
+            minStockTarget: 0,
+            demandOrders: [{ orderNumber: '#9602' }]
+          }]
+        }]
+      },
+      supplierArticles: [
+        {
+          supplierSku: '180091111',
+          styleCode: '180.09',
+          productName: '5000 - Heavy Cotton Adult T-Shirt',
+          color: 'Charcoal',
+          size: 'L',
+          purchasePrice: null
+        },
+        {
+          supplierSku: '032421234',
+          styleCode: '032.42',
+          productName: 'TG002 - #E220 T-Shirt',
+          color: 'Dark Grey',
+          size: 'L',
+          purchasePrice: null
+        }
+      ],
+      supplierStocks: [{ supplierSku: '032421234', availableQuantity: 15 }]
+    });
+
+    await service.generateDailyFalkRossOrder({ source: 'manual' });
+
+    expect(prisma.supplierPurchaseOrder.create).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        rawRequestJson: expect.objectContaining({
+          lines: [expect.objectContaining({
+            supplierSku: '032421234',
+            name: 'Camiseta Dark Grey - L',
+            quantity: 4
+          })]
+        }),
+        lines: expect.objectContaining({
+          create: [expect.objectContaining({
+            supplierSku: '032421234',
+            name: 'Camiseta Dark Grey - L',
+            supplierAvailableQuantity: 15,
+            rawDataJson: expect.objectContaining({
+              stockItemSupplierSku: 'FR-TS-CHC-L',
+              resolvedSupplierSku: '032421234',
+              resolvedStyleCode: '032.42',
+              expectedProductNumber: '032.42'
+            })
+          })]
+        })
+      })
+    }));
+  });
 });
