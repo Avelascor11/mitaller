@@ -387,6 +387,8 @@ export class SupplierOrderService {
     const articleColor = article.color ?? article.productName;
     if (expectedColor === 'AZUL') return this.normalizedToken(articleColor).includes('royal blue');
     if (expectedColor === 'SAND') return this.normalizedToken(articleColor).includes('mastic');
+    if (expectedColor === 'CHARCOAL') return this.normalizedToken(articleColor).includes('dark grey') || this.normalizedToken(articleColor).includes('dark gray');
+    if (expectedColor === 'TANGERINE') return this.normalizedToken(articleColor).includes('tangerine') || this.normalizedToken(articleColor).includes('orange');
     if (expectedColor === 'ROSA') return this.normalizedToken(articleColor).includes('azalea');
     if (expectedColor === 'MARRON') return this.normalizedToken(articleColor).includes('dark chocolate');
     return this.normalizedColor(articleColor) === expectedColor;
@@ -402,6 +404,8 @@ export class SupplierOrderService {
     const normalized = this.normalizedColor(color);
     if (normalized === 'AZUL') return 'Royal Blue';
     if (normalized === 'SAND') return 'Mastic';
+    if (normalized === 'CHARCOAL') return 'Dark Grey';
+    if (normalized === 'TANGERINE') return 'Tangerine';
     if (normalized === 'ROSA') return 'Azalea';
     if (normalized === 'MARRON') return 'Dark Chocolate';
     return null;
@@ -414,7 +418,7 @@ export class SupplierOrderService {
 
   private expectedFalkRossStyles(garmentType: string, color: string) {
     if (garmentType === 'SUDADERA') return ['WG005', '237.42', '23742'];
-    if (['MARRON', 'ROSA'].includes(this.normalizedColor(color))) return ['5000', '180.09', '18009'];
+    if (['MARRON', 'ROSA', 'TANGERINE'].includes(this.normalizedColor(color))) return ['5000', '180.09', '18009'];
     return ['TG002', '032.42', '03242'];
   }
 
