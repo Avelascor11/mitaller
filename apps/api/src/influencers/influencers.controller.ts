@@ -46,6 +46,16 @@ export class InfluencersController {
     return this.influencers.updateCollaboration(id, body);
   }
 
+  @Post('collaborations/:id/mark-received')
+  markCollaborationReceived(@Param('id') id: string) {
+    return this.influencers.markCollaborationReceived(id);
+  }
+
+  @Post('collaborations/:id/mark-content-received')
+  markCollaborationContentReceived(@Param('id') id: string) {
+    return this.influencers.markCollaborationContentReceived(id);
+  }
+
   @Post(':id/submissions')
   createSubmission(@Param('id') influencerId: string, @Body() body: CreateSubmissionBody) {
     return this.influencers.createSubmission(influencerId, body);

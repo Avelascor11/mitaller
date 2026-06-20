@@ -110,6 +110,16 @@ export interface MetaAdvisorQuestionDto {
   to?: string;
 }
 
+export interface MetaAdvisorActionSuggestion {
+  id: string;
+  label: string;
+  detail: string;
+  targetType: 'CAMPAIGN' | 'ADSET' | 'AD';
+  targetId: string;
+  severity: 'SCALE' | 'PAUSE' | 'FIX';
+  suggestedDailyBudget?: number | null;
+}
+
 export interface BestSeller {
   sku: string | null;
   title: string;
@@ -1150,7 +1160,7 @@ export class MetaService {
     };
     const response = this.buildAdvisorResponse(intent, question, context);
 
-    return {
+    const answer = {
       from: f,
       to: t,
       question,
@@ -1158,6 +1168,7 @@ export class MetaService {
       answer: response.answer,
       confidence: response.confidence,
       nextActions: response.nextActions,
+      actionSuggestions: this.advisorActionSuggestions(intent, topRecommendations, risky, winners),
       metrics: [
         { label: 'Gasto', value: this.money(summary.spend), tone: 'red' },
         { label: 'Ventas atrib.', value: this.money(summary.attributedRevenue), tone: 'green' },
@@ -1183,6 +1194,31 @@ export class MetaService {
         '¿Pago Meta ahora?'
       ]
     };
+    await this.saveAdvisorExchange(question, answer);
+    return answer;
+  }
+
+  async advisorChat(limit = 20) {
+    await this.ensureMetaAdvisorChatTable();
+    const rows = await this.prisma.$queryRawUnsafe<Array<{
+      id: string;
+      role: string;
+      text: string;
+      answer_json: unknown | null;
+      created_at: Date;
+    }>>(
+      `select id, role, text, answer_json, created_at
+       from meta_advisor_chat_messages
+       order by created_at desc
+       limit ${Math.max(1, Math.min(80, Number(limit) || 20))}`
+    );
+    return rows.reverse().map((row) => ({
+      id: row.id,
+      role: row.role,
+      text: row.text,
+      answer: row.answer_json,
+      createdAt: row.created_at.toISOString()
+    }));
   }
 
   async weekendCash(from?: string, to?: string) {
@@ -1622,7 +1658,7 @@ export class MetaService {
 
   private advisorIntent(question: string): 'PAUSE' | 'SCALE' | 'WEEKEND' | 'BILLING' | 'GENERAL' {
     const q = question.toLowerCase();
-    if (/(paus|apagar|parar|cortar|quitar|mal|flojo|flojos)/.test(q)) return 'PAUSE';
+    if (/(paus|apagar|parar|cortar|quitar|mal|flojo|flojos|bajar|baja|reducir|reduce|menos presupuesto)/.test(q)) return 'PAUSE';
     if (/(subir|escalar|aumentar|presupuesto|meter mas|invertir mas|crecer)/.test(q)) return 'SCALE';
     if (/(finde|fin de semana|sabado|sábado|domingo|weekend|caja)/.test(q)) return 'WEEKEND';
     if (/(pagar|factur|saldo|limite|límite|deuda|meta cobra)/.test(q)) return 'BILLING';
@@ -1731,6 +1767,118 @@ export class MetaService {
     if ((campaign.roas ?? 0) >= 2.2 && campaign.purchases >= 2) return 'Candidata a escalar +10-15%';
     if (campaign.purchases > 0 && (campaign.roas ?? 0) < 1.1) return 'Arreglar creatividad/oferta antes de escalar';
     return 'Mantener y seguir midiendo';
+  }
+
+  private advisorActionSuggestions(
+    intent: 'PAUSE' | 'SCALE' | 'WEEKEND' | 'BILLING' | 'GENERAL',
+    recommendations: MetaRecommendation[],
+    risky: CampaignInsight[],
+    winners: CampaignInsight[]
+  ): MetaAdvisorActionSuggestion[] {
+    const picked: MetaAdvisorActionSuggestion[] = [];
+    const pushRecommendation = (item: MetaRecommendation, label?: string) => {
+      if (!item.targetId || !['CAMPAIGN', 'ADSET', 'AD'].includes(item.targetType)) return;
+      if (!['SCALE', 'PAUSE', 'FIX'].includes(item.severity)) return;
+      picked.push({
+        id: item.id,
+        label: label ?? item.title,
+        detail: item.solution ?? item.action,
+        targetType: item.targetType as 'CAMPAIGN' | 'ADSET' | 'AD',
+        targetId: item.targetId,
+        severity: item.severity as 'SCALE' | 'PAUSE' | 'FIX',
+        suggestedDailyBudget: item.suggestedDailyBudget
+      });
+    };
+
+    if (intent === 'PAUSE' || intent === 'WEEKEND') {
+      for (const item of recommendations.filter((rec) => ['PAUSE', 'FIX'].includes(rec.severity))) {
+        pushRecommendation(item, item.severity === 'PAUSE' ? `Pausar ${item.targetName}` : `Bajar presupuesto de ${item.targetName}`);
+        if (picked.length >= 2) break;
+      }
+      if (picked.length === 0) {
+        for (const campaign of risky.slice(0, 2)) {
+          picked.push({
+            id: `advisor-fix-${campaign.id}`,
+            label: campaign.spend >= 20 ? `Pausar ${campaign.name}` : `Bajar presupuesto de ${campaign.name}`,
+            detail: `${campaign.name} lleva ${this.money(campaign.spend)} y ${campaign.purchases} compras en el rango.`,
+            targetType: 'CAMPAIGN',
+            targetId: campaign.id,
+            severity: campaign.spend >= 20 ? 'PAUSE' : 'FIX',
+            suggestedDailyBudget: null
+          });
+        }
+      }
+    } else if (intent === 'SCALE') {
+      for (const item of recommendations.filter((rec) => rec.severity === 'SCALE')) {
+        pushRecommendation(item, `Subir ${item.targetName}`);
+        if (picked.length >= 2) break;
+      }
+      if (picked.length === 0) {
+        for (const campaign of winners.slice(0, 2)) {
+          picked.push({
+            id: `advisor-scale-${campaign.id}`,
+            label: `Subir ${campaign.name}`,
+            detail: `${campaign.name} tiene ${campaign.purchases} compras y ROAS ${campaign.roas?.toFixed(2) ?? '—'}x.`,
+            targetType: 'CAMPAIGN',
+            targetId: campaign.id,
+            severity: 'SCALE',
+            suggestedDailyBudget: null
+          });
+        }
+      }
+    } else {
+      for (const item of recommendations) {
+        pushRecommendation(item);
+        if (picked.length >= 2) break;
+      }
+    }
+
+    const seen = new Set<string>();
+    return picked.filter((item) => {
+      const key = `${item.targetType}:${item.targetId}:${item.severity}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    }).slice(0, 3);
+  }
+
+  private async saveAdvisorExchange(question: string, answer: unknown) {
+    try {
+      await this.ensureMetaAdvisorChatTable();
+      const now = new Date();
+      await this.prisma.$executeRawUnsafe(
+        `insert into meta_advisor_chat_messages (id, role, text, answer_json, created_at)
+         values ($1, $2, $3, $4::jsonb, $5), ($6, $7, $8, $9::jsonb, $10)`,
+        `user-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+        'user',
+        question,
+        null,
+        now,
+        `assistant-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+        'assistant',
+        (answer as { headline?: string; answer?: string }).headline ?? 'Respuesta Meta Ads',
+        JSON.stringify(answer),
+        now
+      );
+    } catch (error) {
+      this.logger.warn(`No se pudo guardar el chat Meta Advisor: ${(error as Error).message}`);
+    }
+  }
+
+  private async ensureMetaAdvisorChatTable() {
+    await this.prisma.$executeRawUnsafe(`
+      create table if not exists meta_advisor_chat_messages (
+        id text primary key,
+        role text not null,
+        text text not null,
+        answer_json jsonb,
+        created_at timestamptz not null default now()
+      )
+    `);
+    await this.prisma.$executeRawUnsafe(`
+      create index if not exists meta_advisor_chat_messages_created_idx
+      on meta_advisor_chat_messages (created_at desc)
+    `);
   }
 
   // ---------- template (existing campaign structure) ----------

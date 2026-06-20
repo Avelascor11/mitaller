@@ -19,6 +19,72 @@ function serviceWith(prisma: Record<string, any>) {
 }
 
 describe('OrdersService', () => {
+  it('archiva pedidos de preventa retro para sacarlos de sin preparar', async () => {
+    const orders = [
+      {
+        id: 'order-retro',
+        orderNumber: '#9580',
+        items: [{
+          id: 'item-retro',
+          title: 'Camiseta Retro Aston',
+          variantTitle: 'Blanca - M',
+          sku: 'RETRO-ASTON-M',
+          productType: 'Camiseta',
+          status: 'PENDING'
+        }]
+      },
+      {
+        id: 'order-sweat',
+        orderNumber: '#9581',
+        items: [{
+          id: 'item-sweat',
+          title: 'Sudadera Retro Aston',
+          variantTitle: 'Mastic - M',
+          sku: 'RETRO-SUD-M',
+          productType: 'Sudadera',
+          status: 'PENDING'
+        }]
+      }
+    ];
+    const prisma = {
+      order: {
+        findMany: vi.fn().mockResolvedValue(orders),
+        updateMany: vi.fn().mockResolvedValue({ count: 1 })
+      },
+      productionTask: {
+        updateMany: vi.fn().mockResolvedValue({ count: 1 })
+      }
+    };
+    const activity = { log: vi.fn() };
+
+    const result = await new OrdersService(
+      prisma as never,
+      { calculate: vi.fn() } as never,
+      { importRecentOrders: vi.fn(), hasCredentials: vi.fn(() => true) } as never,
+      { buildTasks: vi.fn(() => []) } as never,
+      activity as never,
+      { get: vi.fn(() => undefined) } as never
+    ).archiveRetroPreorderOrders();
+
+    expect(result).toEqual({ archived: 1, orders: [{ id: 'order-retro', orderNumber: '#9580' }] });
+    expect(prisma.order.updateMany).toHaveBeenCalledWith({
+      where: { id: { in: ['order-retro'] } },
+      data: expect.objectContaining({
+        operationalStatus: 'SHIPPED',
+        fulfillmentStatus: 'fulfilled'
+      })
+    });
+    expect(prisma.productionTask.updateMany).toHaveBeenCalledWith({
+      where: { orderId: { in: ['order-retro'] } },
+      data: expect.objectContaining({ status: 'DONE' })
+    });
+    expect(activity.log).toHaveBeenCalledWith(expect.objectContaining({
+      entityType: 'Order',
+      entityId: 'order-retro',
+      action: 'RETRO_PREORDER_ARCHIVED'
+    }));
+  });
+
   it('cancela etiquetas pendientes cuando devuelve un pedido a sin preparar', async () => {
     const order = {
       id: 'order-1',
