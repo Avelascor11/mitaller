@@ -32,6 +32,16 @@ struct APISnapshot {
     let purchaseMatrix: [PurchaseMatrixGroup]
 }
 
+struct ArchiveRetroOrdersResponse: Decodable {
+    let archived: Int
+    let orders: [ArchivedRetroOrder]
+}
+
+struct ArchivedRetroOrder: Decodable, Identifiable {
+    let id: String
+    let orderNumber: String
+}
+
 struct APIClient {
     var baseURL: URL
     var token: String? = nil
@@ -68,6 +78,11 @@ struct APIClient {
     func importShopifyOrders() async throws {
         let request = try jsonRequest(path: "/orders/import-shopify", method: "POST", body: EmptyBody())
         let _: EmptyResponse = try await perform(request)
+    }
+
+    func archiveRetroPreorderOrders() async throws -> ArchiveRetroOrdersResponse {
+        let request = try jsonRequest(path: "/orders/archive-retro-preorder", method: "POST", body: EmptyBody())
+        return try await perform(request)
     }
 
     func startTask(id: String) async throws {
@@ -488,6 +503,9 @@ struct APIClient {
         )
         return try await perform(request)
     }
+    func metaAdvisorChat(limit: Int = 30) async throws -> [MetaAdvisorChatMessage] {
+        try await get("/meta/advisor/chat?limit=\(limit)")
+    }
 
     // MARK: - Influencers
     func influencerSummary() async throws -> InfluencerSummary {
@@ -518,6 +536,16 @@ struct APIClient {
 
     func updateInfluencer(id: String, body: InfluencerUpdateRequest) async throws -> InfluencerProfile {
         let request = try jsonRequest(path: "/influencers/\(Self.pathSegment(id))", method: "PATCH", body: body)
+        return try await perform(request)
+    }
+
+    func markInfluencerCollaborationReceived(_ collabId: String) async throws -> InfluencerCollaboration {
+        let request = try jsonRequest(path: "/influencers/collaborations/\(Self.pathSegment(collabId))/mark-received", method: "POST", body: EmptyBody())
+        return try await perform(request)
+    }
+
+    func markInfluencerCollaborationContentReceived(_ collabId: String) async throws -> InfluencerCollaboration {
+        let request = try jsonRequest(path: "/influencers/collaborations/\(Self.pathSegment(collabId))/mark-content-received", method: "POST", body: EmptyBody())
         return try await perform(request)
     }
 
@@ -900,6 +928,25 @@ struct MetaAdvisorCampaign: Decodable, Identifiable {
     let advice: String
 }
 
+struct MetaAdvisorActionSuggestion: Decodable, Identifiable {
+    let id: String
+    let label: String
+    let detail: String
+    let targetType: String
+    let targetId: String
+    let severity: String
+    let suggestedDailyBudget: Double?
+
+    var request: MetaApplyRecommendationRequest {
+        MetaApplyRecommendationRequest(
+            targetType: targetType,
+            targetId: targetId,
+            severity: severity,
+            suggestedDailyBudget: suggestedDailyBudget
+        )
+    }
+}
+
 struct MetaAdvisorAnswer: Decodable {
     let from: String
     let to: String
@@ -911,6 +958,15 @@ struct MetaAdvisorAnswer: Decodable {
     let metrics: [MetaAdvisorMetric]
     let campaigns: [MetaAdvisorCampaign]
     let suggestedQuestions: [String]
+    let actionSuggestions: [MetaAdvisorActionSuggestion]?
+}
+
+struct MetaAdvisorChatMessage: Decodable, Identifiable {
+    let id: String
+    let role: String
+    let text: String
+    let answer: MetaAdvisorAnswer?
+    let createdAt: String
 }
 
 struct MetaCampaignDetail: Decodable {

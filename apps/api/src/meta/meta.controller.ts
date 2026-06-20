@@ -50,6 +50,11 @@ export class MetaController {
     return this.meta.advisor(body);
   }
 
+  @Get('advisor/chat')
+  advisorChat(@Query('limit') limit?: string) {
+    return this.meta.advisorChat(Number(limit ?? 20));
+  }
+
   @Get('campaigns')
   campaigns(@Query('from') from?: string, @Query('to') to?: string) {
     const today = new Date().toISOString().slice(0, 10);

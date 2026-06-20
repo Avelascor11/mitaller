@@ -68,6 +68,61 @@ export class OrdersService {
     return this.stripBlobs(order);
   }
 
+  async archiveRetroPreorderOrders() {
+    const candidates = await this.prisma.order.findMany({
+      where: {
+        operationalStatus: {
+          notIn: ['READY_FOR_LABEL', 'LABEL_CREATED', 'SHIPPED', 'CANCELLED']
+        },
+        items: {
+          some: {
+            OR: [
+              { title: { contains: 'retro', mode: 'insensitive' } },
+              { variantTitle: { contains: 'retro', mode: 'insensitive' } },
+              { sku: { contains: 'retro', mode: 'insensitive' } },
+              { productType: { contains: 'retro', mode: 'insensitive' } }
+            ]
+          }
+        }
+      },
+      include: { items: true }
+    });
+
+    const retroOrders = candidates.filter((order) =>
+      order.items.some((item) => item.status !== 'CANCELLED' && this.isRetroTshirtItem(item))
+    );
+    if (!retroOrders.length) return { archived: 0, orders: [] };
+
+    const now = new Date();
+    const ids = retroOrders.map((order) => order.id);
+    await this.prisma.order.updateMany({
+      where: { id: { in: ids } },
+      data: {
+        operationalStatus: 'SHIPPED',
+        fulfillmentStatus: 'fulfilled',
+        preparedAt: now
+      }
+    });
+    await this.prisma.productionTask.updateMany({
+      where: { orderId: { in: ids } },
+      data: { status: 'DONE', completedAt: now }
+    });
+
+    for (const order of retroOrders) {
+      await this.activity.log({
+        entityType: 'Order',
+        entityId: order.id,
+        action: 'RETRO_PREORDER_ARCHIVED',
+        message: `Pedido ${order.orderNumber} archivado por preventa de camiseta retro`
+      });
+    }
+
+    return {
+      archived: retroOrders.length,
+      orders: retroOrders.map((order) => ({ id: order.id, orderNumber: order.orderNumber }))
+    };
+  }
+
   private activeOrderItemsInclude() {
     return {
       where: { status: { not: 'CANCELLED' as const } },
@@ -480,6 +535,11 @@ export class OrdersService {
       .normalize('NFD')
       .replace(/[\u0300-\u036f]/g, '')
       .toLowerCase();
+  }
+
+  private isRetroTshirtItem(item: Pick<OrderItem, 'title' | 'variantTitle' | 'sku' | 'productType'>) {
+    const normalized = this.normalizeText(`${item.title} ${item.variantTitle ?? ''} ${item.sku} ${item.productType ?? ''}`);
+    return normalized.includes('retro') && /\b(camiseta|shirt|tshirt|t-shirt|tee)\b/.test(normalized);
   }
 
   async reopenPreparation(id: string) {

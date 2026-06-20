@@ -709,6 +709,7 @@ final class WorkshopStore {
     var labelCreationOrderID: UUID?
     var labelScanOrderID: UUID?
     var isBatchProcessing = false
+    var isArchiveRetroRunning = false
     var batchProgressText: String?
     private var didBootstrap = false
     var tasks: [WorkshopTask] = []
@@ -805,6 +806,28 @@ final class WorkshopStore {
     func syncQuietlyIfIdle() async {
         guard labelCreationOrderID == nil, labelScanOrderID == nil, !isLoading else { return }
         await syncFromAPI()
+    }
+
+    func archiveRetroPreorderOrders() async {
+        guard let client = apiClient else {
+            syncError = "URL de API no valida"
+            isAPIConnected = false
+            return
+        }
+        isArchiveRetroRunning = true
+        syncError = nil
+        defer { isArchiveRetroRunning = false }
+
+        do {
+            let result = try await client.archiveRetroPreorderOrders()
+            try await loadSnapshot(from: client)
+            syncError = result.archived == 0
+                ? "No habia pedidos de camiseta retro para archivar"
+                : "Archivados \(result.archived) pedidos de camiseta retro"
+        } catch {
+            syncError = "No se pudieron archivar las retro: \(error.localizedDescription)"
+            await syncFromAPI()
+        }
     }
 
     func loadMappingWorkbench() async {
@@ -950,6 +973,32 @@ final class WorkshopStore {
             await loadInfluencers()
         } catch {
             syncError = "No se pudo actualizar influ: \(error.localizedDescription)"
+        }
+    }
+
+    func markInfluencerCollaborationReceived(_ collaboration: InfluencerCollaboration) async {
+        guard let client = apiClient else { return }
+        isInfluencerActionRunning = true
+        syncError = nil
+        defer { isInfluencerActionRunning = false }
+        do {
+            _ = try await client.markInfluencerCollaborationReceived(collaboration.id)
+            await loadInfluencers()
+        } catch {
+            syncError = "No se pudo marcar recibido: \(error.localizedDescription)"
+        }
+    }
+
+    func markInfluencerContentReceived(_ collaboration: InfluencerCollaboration) async {
+        guard let client = apiClient else { return }
+        isInfluencerActionRunning = true
+        syncError = nil
+        defer { isInfluencerActionRunning = false }
+        do {
+            _ = try await client.markInfluencerCollaborationContentReceived(collaboration.id)
+            await loadInfluencers()
+        } catch {
+            syncError = "No se pudo marcar contenido recibido: \(error.localizedDescription)"
         }
     }
 
@@ -1995,6 +2044,7 @@ struct PickingView: View {
     @State private var batchMode = false
     @State private var selectedOrderIDs: Set<UUID> = []
     @State private var showingBatchSheet = false
+    @State private var showingArchiveRetroConfirmation = false
 
     var filteredOrders: [WorkshopOrder] {
         let filtered = store.pendingPreparationOrders
@@ -2151,6 +2201,34 @@ struct PickingView: View {
                         }
                     }
 
+                    Button {
+                        showingArchiveRetroConfirmation = true
+                    } label: {
+                        HStack(spacing: 12) {
+                            Image(systemName: store.isArchiveRetroRunning ? "hourglass" : "archivebox.fill")
+                                .font(.title3.weight(.bold))
+                                .frame(width: 34, height: 34)
+                                .background(AppTheme.amber.opacity(0.18))
+                                .foregroundStyle(AppTheme.amber)
+                                .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text("Archivar camisetas retro")
+                                    .font(.headline.weight(.bold))
+                                    .foregroundStyle(AppTheme.ink)
+                                Text("Oculta la preventa retro de críticos y sin preparar.")
+                                    .font(.caption)
+                                    .foregroundStyle(AppTheme.muted)
+                            }
+                            Spacer()
+                            Image(systemName: "chevron.right")
+                                .font(.caption.weight(.bold))
+                                .foregroundStyle(AppTheme.muted)
+                        }
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(store.isArchiveRetroRunning)
+                    .glassPanel(padding: 14, accent: AppTheme.amber)
+
                     if batchMode {
                         BatchSelectionSummary(
                             count: selectedOrders.count,
@@ -2241,6 +2319,14 @@ struct PickingView: View {
                         batchMode = false
                     }
                 }
+            }
+            .confirmationDialog("Archivar preventa retro", isPresented: $showingArchiveRetroConfirmation, titleVisibility: .visible) {
+                Button("Archivar camisetas retro", role: .destructive) {
+                    Task { await store.archiveRetroPreorderOrders() }
+                }
+                Button("Cancelar", role: .cancel) {}
+            } message: {
+                Text("Los pedidos con camiseta retro dejaran de aparecer en Sin preparar y no contaran como criticos. No se borran.")
             }
         }
     }
@@ -6598,17 +6684,69 @@ enum InfluencerStageFilter: String, CaseIterable, Identifiable {
     }
 }
 
+enum InfluencerFollowupFilter: String, CaseIterable, Identifiable {
+    case all = "ALL"
+    case productSent = "PRODUCT_SENT"
+    case awaitingContent = "AWAITING_CONTENT"
+    case contentReceived = "CONTENT_RECEIVED"
+
+    var id: String { rawValue }
+
+    var label: String {
+        switch self {
+        case .all: "Todos"
+        case .productSent: "En camino"
+        case .awaitingContent: "Recordar"
+        case .contentReceived: "Contenido OK"
+        }
+    }
+
+    var icon: String {
+        switch self {
+        case .all: "person.2.fill"
+        case .productSent: "shippingbox.fill"
+        case .awaitingContent: "bell.badge.fill"
+        case .contentReceived: "video.badge.checkmark.fill"
+        }
+    }
+
+    var color: Color {
+        switch self {
+        case .all: AppTheme.purple
+        case .productSent: AppTheme.blue
+        case .awaitingContent: AppTheme.amber
+        case .contentReceived: AppTheme.green
+        }
+    }
+
+    func matches(_ influencer: InfluencerProfile) -> Bool {
+        switch self {
+        case .all:
+            return true
+        case .productSent:
+            return influencer.collaborations.contains { $0.status == "PRODUCT_SENT" }
+        case .awaitingContent:
+            return influencer.collaborations.contains { $0.status == "AWAITING_CONTENT" }
+        case .contentReceived:
+            return influencer.collaborations.contains { ["CONTENT_RECEIVED", "PUBLISHED", "CLOSED"].contains($0.status) }
+        }
+    }
+}
+
 struct InfluencersView: View {
     @Environment(WorkshopStore.self) private var store
     @State private var query = ""
     @State private var stage: InfluencerStageFilter = .all
+    @State private var followup: InfluencerFollowupFilter = .all
     @State private var showingCreate = false
     @State private var importMessage: String?
 
     var filteredInfluencers: [InfluencerProfile] {
-        store.influencers.sorted {
+        store.influencers
+            .filter { followup.matches($0) }
+            .sorted {
             ($0.updatedAt ?? .distantPast) > ($1.updatedAt ?? .distantPast)
-        }
+            }
     }
 
     var body: some View {
@@ -6682,6 +6820,26 @@ struct InfluencersView: View {
                                             .padding(.vertical, 8)
                                             .background(stage == item ? item.color.opacity(0.24) : AppTheme.surfaceSoft)
                                             .overlay(Capsule().stroke(stage == item ? item.color.opacity(0.55) : AppTheme.line, lineWidth: 1))
+                                            .clipShape(Capsule())
+                                    }
+                                }
+                            }
+                            .padding(.vertical, 2)
+                        }
+
+                        ScrollView(.horizontal, showsIndicators: false) {
+                            HStack(spacing: 8) {
+                                ForEach(InfluencerFollowupFilter.allCases) { item in
+                                    Button {
+                                        followup = item
+                                    } label: {
+                                        Label(item.label, systemImage: item.icon)
+                                            .font(.caption.weight(.black))
+                                            .foregroundStyle(followup == item ? AppTheme.ink : AppTheme.muted)
+                                            .padding(.horizontal, 12)
+                                            .padding(.vertical, 8)
+                                            .background(followup == item ? item.color.opacity(0.24) : AppTheme.surfaceSoft)
+                                            .overlay(Capsule().stroke(followup == item ? item.color.opacity(0.55) : AppTheme.line, lineWidth: 1))
                                             .clipShape(Capsule())
                                     }
                                 }
@@ -6882,12 +7040,18 @@ struct InfluencerCard: View {
 
             if let latestCollaboration {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text(latestCollaboration.title)
-                        .font(.subheadline.weight(.bold))
-                        .foregroundStyle(AppTheme.inkSoft)
-                    Text(statusLabel(latestCollaboration.status))
+                    HStack(spacing: 8) {
+                        Image(systemName: followupIcon(latestCollaboration.status))
+                            .font(.caption.weight(.black))
+                            .foregroundStyle(followupColor(latestCollaboration.status))
+                        Text(latestCollaboration.title)
+                            .font(.subheadline.weight(.bold))
+                            .foregroundStyle(AppTheme.inkSoft)
+                        Spacer()
+                    }
+                    Text(followupText(latestCollaboration))
                         .font(.caption.weight(.semibold))
-                        .foregroundStyle(AppTheme.muted)
+                        .foregroundStyle(followupColor(latestCollaboration.status))
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(12)
@@ -6907,6 +7071,40 @@ struct InfluencerCard: View {
 
     private func statusLabel(_ value: String) -> String {
         value.replacingOccurrences(of: "_", with: " ").capitalized
+    }
+
+    private func followupText(_ collab: InfluencerCollaboration) -> String {
+        switch collab.status {
+        case "PRODUCT_SENT":
+            return "Pedido enviado\(collab.shopifyOrderName.map { " · \($0)" } ?? "") · falta saber si lo recibio"
+        case "AWAITING_CONTENT":
+            return "Recibido · toca recordarle que mande contenido"
+        case "CONTENT_RECEIVED":
+            return "Contenido recibido · revisar/aprobar UGC"
+        case "PUBLISHED", "CLOSED":
+            return "Colaboracion cerrada o publicada"
+        default:
+            return statusLabel(collab.status)
+        }
+    }
+
+    private func followupIcon(_ status: String) -> String {
+        switch status {
+        case "PRODUCT_SENT": "shippingbox.fill"
+        case "AWAITING_CONTENT": "bell.badge.fill"
+        case "CONTENT_RECEIVED": "video.badge.checkmark.fill"
+        case "PUBLISHED", "CLOSED": "checkmark.seal.fill"
+        default: "sparkles"
+        }
+    }
+
+    private func followupColor(_ status: String) -> Color {
+        switch status {
+        case "PRODUCT_SENT": AppTheme.blue
+        case "AWAITING_CONTENT": AppTheme.amber
+        case "CONTENT_RECEIVED", "PUBLISHED", "CLOSED": AppTheme.green
+        default: AppTheme.muted
+        }
     }
 }
 
@@ -6936,21 +7134,25 @@ struct InfluencerDetailView: View {
         _selectedStage = State(initialValue: InfluencerStageFilter.allCases.first { $0.rawValue == influencer.stage } ?? .prospect)
     }
 
+    private var currentInfluencer: InfluencerProfile {
+        store.influencers.first(where: { $0.id == influencer.id }) ?? influencer
+    }
+
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
                 VStack(alignment: .leading, spacing: 8) {
-                    Text("@\(influencer.igHandle)")
+                    Text("@\(currentInfluencer.igHandle)")
                         .font(.system(size: 38, weight: .black, design: .rounded))
                         .foregroundStyle(AppTheme.ink)
-                    if let fullName = influencer.fullName {
+                    if let fullName = currentInfluencer.fullName {
                         Text(fullName)
                             .font(.title3.weight(.semibold))
                             .foregroundStyle(AppTheme.muted)
                     }
-                    InfluencerStageBadge(stage: influencer.stage)
+                    InfluencerStageBadge(stage: currentInfluencer.stage)
                 }
-                .glassPanel(padding: 16, accent: InfluencerStageFilter.color(for: influencer.stage))
+                .glassPanel(padding: 16, accent: InfluencerStageFilter.color(for: currentInfluencer.stage))
 
                 VStack(alignment: .leading, spacing: 10) {
                     SectionHeader(title: "Estado", subtitle: "Mueve la influ por el pipeline")
@@ -6961,28 +7163,28 @@ struct InfluencerDetailView: View {
                     }
                     .pickerStyle(.menu)
                     Button {
-                        Task { await store.updateInfluencerStage(influencer, stage: selectedStage.rawValue) }
+                        Task { await store.updateInfluencerStage(currentInfluencer, stage: selectedStage.rawValue) }
                     } label: {
                         Label("Guardar estado", systemImage: "checkmark.circle.fill")
                             .frame(maxWidth: .infinity)
                     }
                     .buttonStyle(.borderedProminent)
-                    .disabled(store.isInfluencerActionRunning || selectedStage.rawValue == influencer.stage)
+                    .disabled(store.isInfluencerActionRunning || selectedStage.rawValue == currentInfluencer.stage)
                 }
                 .glassPanel(padding: 16, accent: selectedStage.color)
 
-                if influencer.detectionScore > 0 {
+                if currentInfluencer.detectionScore > 0 {
                     VStack(alignment: .leading, spacing: 10) {
                         SectionHeader(title: "Detección automática", subtitle: "Por qué apareció desde Instagram")
                         HStack(alignment: .top, spacing: 14) {
-                            Text("\(influencer.detectionScore)%")
+                            Text("\(currentInfluencer.detectionScore)%")
                                 .font(.system(size: 34, weight: .black, design: .rounded))
                                 .foregroundStyle(AppTheme.teal)
                             VStack(alignment: .leading, spacing: 4) {
-                                Text(influencer.detectionReason ?? "Detectada desde DM")
+                                Text(currentInfluencer.detectionReason ?? "Detectada desde DM")
                                     .font(.subheadline.weight(.bold))
                                     .foregroundStyle(AppTheme.inkSoft)
-                                if let suggestedAction = influencer.suggestedAction, !suggestedAction.isEmpty {
+                                if let suggestedAction = currentInfluencer.suggestedAction, !suggestedAction.isEmpty {
                                     Text(suggestedAction)
                                         .font(.footnote.weight(.medium))
                                         .foregroundStyle(AppTheme.muted)
@@ -6994,21 +7196,24 @@ struct InfluencerDetailView: View {
                     .glassPanel(padding: 16, accent: AppTheme.teal)
                 }
 
-                if !influencer.collaborations.isEmpty {
-                    SectionHeader(title: "Colaboraciones", subtitle: "\(influencer.collaborations.count) abiertas o históricas")
-                    ForEach(influencer.collaborations) { collab in
+                if !currentInfluencer.collaborations.isEmpty {
+                    SectionHeader(title: "Seguimiento de envíos", subtitle: "Marca recibido para saber a quien recordar contenido")
+                    InfluencerFollowupSummary(influencer: currentInfluencer)
+
+                    SectionHeader(title: "Colaboraciones", subtitle: "\(currentInfluencer.collaborations.count) abiertas o históricas")
+                    ForEach(currentInfluencer.collaborations) { collab in
                         CrewCollabCard(collab: collab)
                     }
                 }
 
-                if !influencer.submissions.isEmpty {
-                    SectionHeader(title: "Vídeos UGC", subtitle: "\(influencer.submissions.count) archivos o enlaces recibidos")
-                    ForEach(influencer.submissions) { submission in
+                if !currentInfluencer.submissions.isEmpty {
+                    SectionHeader(title: "Vídeos UGC", subtitle: "\(currentInfluencer.submissions.count) archivos o enlaces recibidos")
+                    ForEach(currentInfluencer.submissions) { submission in
                         InfluencerSubmissionCard(submission: submission)
                     }
                 }
 
-                if let notes = influencer.notes, !notes.isEmpty {
+                if let notes = currentInfluencer.notes, !notes.isEmpty {
                     SectionHeader(title: "Notas", subtitle: "Contexto interno")
                     Text(notes)
                         .font(.body)
@@ -7028,13 +7233,77 @@ struct InfluencerDetailView: View {
                 }
             }
         }
-        .confirmationDialog("¿Eliminar a @\(influencer.igHandle)?", isPresented: $confirmingDelete, titleVisibility: .visible) {
+        .confirmationDialog("¿Eliminar a @\(currentInfluencer.igHandle)?", isPresented: $confirmingDelete, titleVisibility: .visible) {
             Button("Eliminar influ", role: .destructive) {
-                Task { await store.deleteInfluencer(influencer); dismiss() }
+                Task { await store.deleteInfluencer(currentInfluencer); dismiss() }
             }
             Button("Cancelar", role: .cancel) {}
         } message: {
             Text("Se borra el influencer con sus colaboraciones y vídeos. No afecta a pedidos de Shopify ya creados.")
+        }
+    }
+}
+
+struct InfluencerFollowupSummary: View {
+    let influencer: InfluencerProfile
+
+    private var latest: InfluencerCollaboration? {
+        influencer.collaborations.sorted { ($0.updatedAt ?? .distantPast) > ($1.updatedAt ?? .distantPast) }.first
+    }
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 12) {
+            Image(systemName: icon)
+                .font(.title3.weight(.black))
+                .foregroundStyle(color)
+                .frame(width: 38, height: 38)
+                .background(color.opacity(0.16))
+                .clipShape(RoundedRectangle(cornerRadius: 11, style: .continuous))
+            VStack(alignment: .leading, spacing: 4) {
+                Text(title)
+                    .font(.headline.weight(.black))
+                    .foregroundStyle(AppTheme.ink)
+                Text(subtitle)
+                    .font(.footnote.weight(.semibold))
+                    .foregroundStyle(AppTheme.muted)
+            }
+            Spacer()
+        }
+        .glassPanel(padding: 14, accent: color)
+    }
+
+    private var status: String { latest?.status ?? "OPEN" }
+    private var color: Color {
+        switch status {
+        case "PRODUCT_SENT": AppTheme.blue
+        case "AWAITING_CONTENT": AppTheme.amber
+        case "CONTENT_RECEIVED", "PUBLISHED", "CLOSED": AppTheme.green
+        default: AppTheme.purple
+        }
+    }
+    private var icon: String {
+        switch status {
+        case "PRODUCT_SENT": "shippingbox.fill"
+        case "AWAITING_CONTENT": "bell.badge.fill"
+        case "CONTENT_RECEIVED", "PUBLISHED", "CLOSED": "video.badge.checkmark.fill"
+        default: "sparkles"
+        }
+    }
+    private var title: String {
+        switch status {
+        case "PRODUCT_SENT": "Pedido enviado"
+        case "AWAITING_CONTENT": "Recibido: recordar contenido"
+        case "CONTENT_RECEIVED": "Contenido recibido"
+        case "PUBLISHED", "CLOSED": "Colaboración cerrada"
+        default: "Sin envío activo"
+        }
+    }
+    private var subtitle: String {
+        switch status {
+        case "PRODUCT_SENT": "Cuando confirme que le llegó, márcalo como recibido."
+        case "AWAITING_CONTENT": "Ya tiene el producto. Toca escribirle para pedir el vídeo/stories."
+        case "CONTENT_RECEIVED": "Revisa el UGC y apruébalo para ads."
+        default: "Crea o actualiza una colaboración para seguir el pack."
         }
     }
 }
@@ -7069,6 +7338,40 @@ struct CrewCollabCard: View {
             if let order = collab.shopifyOrderName { Label("Pedido \(order)", systemImage: "shippingbox.fill").font(.caption.weight(.semibold)).foregroundStyle(AppTheme.muted) }
             if let fulfillment = collab.fulfillment {
                 InfluencerFulfillmentCard(fulfillment: fulfillment)
+            }
+
+            if ["PRODUCT_SENT", "AWAITING_CONTENT", "CONTENT_RECEIVED"].contains(collab.status) {
+                VStack(alignment: .leading, spacing: 8) {
+                    Label(followupTitle, systemImage: followupIcon)
+                        .font(.subheadline.weight(.black))
+                        .foregroundStyle(followupColor)
+                    Text(followupSubtitle)
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(AppTheme.muted)
+                    if collab.status == "PRODUCT_SENT" {
+                        Button {
+                            Task { await store.markInfluencerCollaborationReceived(collab) }
+                        } label: {
+                            Label("Marcar como recibido", systemImage: "checkmark.circle.fill")
+                                .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .tint(AppTheme.amber)
+                        .disabled(store.isInfluencerActionRunning)
+                    } else if collab.status == "AWAITING_CONTENT" {
+                        Button {
+                            Task { await store.markInfluencerContentReceived(collab) }
+                        } label: {
+                            Label("Ya mandó contenido", systemImage: "video.badge.checkmark.fill")
+                                .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .tint(AppTheme.green)
+                        .disabled(store.isInfluencerActionRunning)
+                    }
+                }
+                .padding(10)
+                .background(followupColor.opacity(0.12), in: RoundedRectangle(cornerRadius: 10))
             }
 
             // Referral code
@@ -7127,6 +7430,42 @@ struct CrewCollabCard: View {
         VStack(alignment: .leading, spacing: 1) {
             Text(label.uppercased()).font(.system(size: 9, weight: .heavy)).foregroundStyle(AppTheme.muted)
             Text(value).font(.subheadline.weight(.heavy)).foregroundStyle(AppTheme.ink)
+        }
+    }
+
+    private var followupColor: Color {
+        switch collab.status {
+        case "PRODUCT_SENT": AppTheme.blue
+        case "AWAITING_CONTENT": AppTheme.amber
+        case "CONTENT_RECEIVED": AppTheme.green
+        default: AppTheme.muted
+        }
+    }
+
+    private var followupIcon: String {
+        switch collab.status {
+        case "PRODUCT_SENT": "shippingbox.fill"
+        case "AWAITING_CONTENT": "bell.badge.fill"
+        case "CONTENT_RECEIVED": "video.badge.checkmark.fill"
+        default: "sparkles"
+        }
+    }
+
+    private var followupTitle: String {
+        switch collab.status {
+        case "PRODUCT_SENT": "Producto enviado"
+        case "AWAITING_CONTENT": "Recibido: pendiente de contenido"
+        case "CONTENT_RECEIVED": "Contenido recibido"
+        default: collab.status.replacingOccurrences(of: "_", with: " ")
+        }
+    }
+
+    private var followupSubtitle: String {
+        switch collab.status {
+        case "PRODUCT_SENT": "Aún no sabemos si le llegó. Márcalo cuando confirme recepción."
+        case "AWAITING_CONTENT": "Ya lo recibió. Hay que recordarle que mande el vídeo/stories."
+        case "CONTENT_RECEIVED": "Ya hay contenido. Revisa si está aprobado y listo para ads."
+        default: ""
         }
     }
 
@@ -7925,8 +8264,11 @@ struct MetaAdsView: View {
     @State private var campaignSort: CampaignSort = .spend
     @State private var advisorQuestion = ""
     @State private var advisorAnswer: MetaAdvisorAnswer?
+    @State private var advisorMessages: [MetaAdvisorChatMessage] = []
     @State private var advisorLoading = false
     @State private var advisorError: String?
+    @State private var advisorNotice: String?
+    @State private var advisorActionBusy: String?
 
     enum MetaRange: String, CaseIterable, Identifiable {
         case today, week, month, custom
@@ -8035,10 +8377,14 @@ struct MetaAdsView: View {
 
                     MetaAdvisorCard(
                         question: $advisorQuestion,
-                        answer: advisorAnswer,
+                        messages: advisorMessages,
+                        fallbackAnswer: advisorAnswer,
                         loading: advisorLoading,
                         error: advisorError,
-                        onAsk: { text in Task { await askAdvisor(text) } }
+                        notice: advisorNotice,
+                        busyActionId: advisorActionBusy,
+                        onAsk: { text in Task { await askAdvisor(text) } },
+                        onApplyAction: { action in Task { await applyAdvisorAction(action) } }
                     )
 
                     if loading && summary == nil {
@@ -8162,6 +8508,7 @@ struct MetaAdsView: View {
             async let p = client.metaDailyPlan(from: r.from, to: r.to)
             async let w = client.metaWeekendCash(from: r.from, to: r.to)
             async let b = client.metaBilling()
+            async let chat = client.metaAdvisorChat(limit: 30)
             summary = try await s
             health = try? await h
             autopilot = try? await ap
@@ -8169,6 +8516,7 @@ struct MetaAdsView: View {
             dailyPlan = try? await p
             weekendCash = try? await w
             billing = try? await b
+            advisorMessages = (try? await chat) ?? advisorMessages
         } catch {
             self.error = error.localizedDescription
         }
@@ -8197,6 +8545,28 @@ struct MetaAdsView: View {
         do {
             let r = dateRange
             advisorAnswer = try await client.metaAdvisor(question: trimmed, from: r.from, to: r.to)
+            advisorQuestion = ""
+            advisorMessages = (try? await client.metaAdvisorChat(limit: 30)) ?? advisorMessages
+        } catch {
+            advisorError = error.localizedDescription
+        }
+    }
+
+    private func applyAdvisorAction(_ action: MetaAdvisorActionSuggestion) async {
+        guard let client = store.apiClient else { advisorError = "API no configurada"; return }
+        advisorActionBusy = action.id
+        advisorError = nil
+        advisorNotice = nil
+        defer { advisorActionBusy = nil }
+        do {
+            let preview = try await client.metaPreviewRecommendation(action.request)
+            guard preview.canApply else {
+                advisorError = preview.warnings.first ?? "Meta no permite aplicar esta acción ahora."
+                return
+            }
+            let result = try await client.metaApplyRecommendation(action.request)
+            advisorNotice = result.message
+            await reload()
         } catch {
             advisorError = error.localizedDescription
         }
@@ -8205,10 +8575,14 @@ struct MetaAdsView: View {
 
 struct MetaAdvisorCard: View {
     @Binding var question: String
-    let answer: MetaAdvisorAnswer?
+    let messages: [MetaAdvisorChatMessage]
+    let fallbackAnswer: MetaAdvisorAnswer?
     let loading: Bool
     let error: String?
+    let notice: String?
+    let busyActionId: String?
     let onAsk: (String) -> Void
+    let onApplyAction: (MetaAdvisorActionSuggestion) -> Void
 
     private let fallbackQuestions = [
         "¿Qué pauso hoy?",
@@ -8217,9 +8591,27 @@ struct MetaAdvisorCard: View {
         "¿Pago Meta ahora?"
     ]
 
+    private var latestAnswer: MetaAdvisorAnswer? {
+        messages.reversed().compactMap { $0.answer }.first ?? fallbackAnswer
+    }
+
     private var suggestedQuestions: [String] {
-        let items = answer?.suggestedQuestions ?? fallbackQuestions
+        let items = latestAnswer?.suggestedQuestions ?? fallbackQuestions
         return items.isEmpty ? fallbackQuestions : items
+    }
+
+    private var visibleMessages: [MetaAdvisorChatMessage] {
+        if !messages.isEmpty { return messages }
+        guard let fallbackAnswer else { return [] }
+        return [
+            MetaAdvisorChatMessage(
+                id: "fallback-assistant",
+                role: "assistant",
+                text: fallbackAnswer.headline,
+                answer: fallbackAnswer,
+                createdAt: fallbackAnswer.to
+            )
+        ]
     }
 
     var body: some View {
@@ -8233,7 +8625,7 @@ struct MetaAdvisorCard: View {
                     Text("Agente Meta Ads")
                         .font(.headline.weight(.heavy))
                         .foregroundStyle(AppTheme.ink)
-                    Text("Pregúntale qué pausar, qué escalar o cómo cuidar caja.")
+                    Text("Habla con tus datos reales y aplica cambios desde aquí.")
                         .font(.caption.weight(.medium))
                         .foregroundStyle(AppTheme.muted)
                 }
@@ -8241,8 +8633,51 @@ struct MetaAdvisorCard: View {
                 if loading { ProgressView().controlSize(.small) }
             }
 
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    ForEach(suggestedQuestions, id: \.self) { item in
+                        Button {
+                            question = item
+                            onAsk(item)
+                        } label: {
+                            Text(item)
+                                .font(.caption.weight(.heavy))
+                                .foregroundStyle(AppTheme.purple)
+                                .padding(.horizontal, 11)
+                                .padding(.vertical, 8)
+                                .background(AppTheme.purple.opacity(0.12), in: Capsule())
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+            }
+
+            VStack(spacing: 10) {
+                if visibleMessages.isEmpty {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("Pregúntame como aquí")
+                            .font(.subheadline.weight(.heavy))
+                            .foregroundStyle(AppTheme.ink)
+                        Text("Ej: “baja presupuesto”, “¿qué pauso hoy?” o “ayer vendió, hoy no”.")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(AppTheme.muted)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(12)
+                    .background(AppTheme.surfaceSoft.opacity(0.66), in: RoundedRectangle(cornerRadius: 16))
+                } else {
+                    ForEach(visibleMessages.suffix(8)) { message in
+                        MetaAdvisorMessageBubble(
+                            message: message,
+                            busyActionId: busyActionId,
+                            onApplyAction: onApplyAction
+                        )
+                    }
+                }
+            }
+
             HStack(spacing: 8) {
-                TextField("Ej: ¿qué campaña pauso hoy?", text: $question, axis: .vertical)
+                TextField("Escribe como aquí: baja presupuesto...", text: $question, axis: .vertical)
                     .textFieldStyle(.plain)
                     .font(.subheadline.weight(.semibold))
                     .padding(.horizontal, 12)
@@ -8265,96 +8700,11 @@ struct MetaAdvisorCard: View {
                 .opacity(loading || question.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? 0.45 : 1)
             }
 
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 8) {
-                    ForEach(suggestedQuestions, id: \.self) { item in
-                        Button {
-                            question = item
-                            onAsk(item)
-                        } label: {
-                            Text(item)
-                                .font(.caption.weight(.heavy))
-                                .foregroundStyle(AppTheme.purple)
-                                .padding(.horizontal, 11)
-                                .padding(.vertical, 8)
-                                .background(AppTheme.purple.opacity(0.12), in: Capsule())
-                        }
-                        .buttonStyle(.plain)
-                    }
-                }
-            }
-
-            if let answer {
-                Divider().background(AppTheme.line)
-                VStack(alignment: .leading, spacing: 10) {
-                    HStack(alignment: .top, spacing: 8) {
-                        Image(systemName: confidenceIcon(answer.confidence))
-                            .foregroundStyle(confidenceColor(answer.confidence))
-                            .padding(.top, 2)
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text(answer.headline)
-                                .font(.subheadline.weight(.heavy))
-                                .foregroundStyle(AppTheme.ink)
-                                .fixedSize(horizontal: false, vertical: true)
-                            Text(answer.answer)
-                                .font(.caption.weight(.semibold))
-                                .foregroundStyle(AppTheme.muted)
-                                .fixedSize(horizontal: false, vertical: true)
-                        }
-                    }
-
-                    LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: 2), spacing: 8) {
-                        ForEach(answer.metrics) { metric in
-                            MetaAdvisorMetricTile(metric: metric)
-                        }
-                    }
-
-                    if !answer.nextActions.isEmpty {
-                        VStack(alignment: .leading, spacing: 7) {
-                            Text("QUÉ HARÍA AHORA")
-                                .font(.system(size: 10, weight: .black))
-                                .foregroundStyle(AppTheme.muted)
-                            ForEach(Array(answer.nextActions.prefix(4).enumerated()), id: \.offset) { _, action in
-                                Label(action, systemImage: "arrow.turn.down.right")
-                                    .font(.caption.weight(.semibold))
-                                    .foregroundStyle(AppTheme.ink)
-                                    .fixedSize(horizontal: false, vertical: true)
-                            }
-                        }
-                    }
-
-                    if !answer.campaigns.isEmpty {
-                        VStack(alignment: .leading, spacing: 8) {
-                            Text("CAMPAÑAS CLAVE")
-                                .font(.system(size: 10, weight: .black))
-                                .foregroundStyle(AppTheme.muted)
-                            ForEach(answer.campaigns.prefix(5)) { campaign in
-                                HStack(alignment: .top, spacing: 8) {
-                                    Circle()
-                                        .fill(campaign.status == "ACTIVE" ? AppTheme.green : AppTheme.muted)
-                                        .frame(width: 8, height: 8)
-                                        .padding(.top, 5)
-                                    VStack(alignment: .leading, spacing: 2) {
-                                        Text(campaign.name)
-                                            .font(.caption.weight(.heavy))
-                                            .foregroundStyle(AppTheme.ink)
-                                            .lineLimit(1)
-                                        Text("\(formatMoney(campaign.spend)) · \(campaign.purchases) compras · ROAS \(campaign.roas.map { String(format: "%.2fx", $0) } ?? "—")")
-                                            .font(.caption2.weight(.semibold))
-                                            .foregroundStyle(AppTheme.muted)
-                                        Text(campaign.advice)
-                                            .font(.caption2.weight(.heavy))
-                                            .foregroundStyle(AppTheme.purple)
-                                            .fixedSize(horizontal: false, vertical: true)
-                                    }
-                                    Spacer()
-                                }
-                                .padding(10)
-                                .background(AppTheme.surfaceSoft.opacity(0.66), in: RoundedRectangle(cornerRadius: 12))
-                            }
-                        }
-                    }
-                }
+            if let notice {
+                Label(notice, systemImage: "checkmark.seal.fill")
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(AppTheme.green)
+                    .fixedSize(horizontal: false, vertical: true)
             }
 
             if let error {
@@ -8365,6 +8715,156 @@ struct MetaAdvisorCard: View {
             }
         }
         .glassPanel(padding: 16, accent: AppTheme.purple)
+    }
+}
+
+struct MetaAdvisorMessageBubble: View {
+    let message: MetaAdvisorChatMessage
+    let busyActionId: String?
+    let onApplyAction: (MetaAdvisorActionSuggestion) -> Void
+
+    private var isUser: Bool { message.role == "user" }
+
+    var body: some View {
+        HStack {
+            if isUser { Spacer(minLength: 34) }
+            VStack(alignment: .leading, spacing: 10) {
+                if isUser {
+                    Text(message.text)
+                        .font(.subheadline.weight(.bold))
+                        .foregroundStyle(.white)
+                } else if let answer = message.answer {
+                    assistantAnswer(answer)
+                } else {
+                    Text(message.text)
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(AppTheme.ink)
+                }
+            }
+            .padding(12)
+            .background(isUser ? AppTheme.purple : AppTheme.surfaceSoft.opacity(0.72), in: RoundedRectangle(cornerRadius: 18))
+            .overlay(
+                RoundedRectangle(cornerRadius: 18)
+                    .stroke(isUser ? Color.clear : AppTheme.line.opacity(0.65), lineWidth: 1)
+            )
+            if !isUser { Spacer(minLength: 20) }
+        }
+    }
+
+    @ViewBuilder
+    private func assistantAnswer(_ answer: MetaAdvisorAnswer) -> some View {
+        HStack(alignment: .top, spacing: 8) {
+            Image(systemName: confidenceIcon(answer.confidence))
+                .foregroundStyle(confidenceColor(answer.confidence))
+                .padding(.top, 2)
+            VStack(alignment: .leading, spacing: 4) {
+                Text(answer.headline)
+                    .font(.subheadline.weight(.heavy))
+                    .foregroundStyle(AppTheme.ink)
+                    .fixedSize(horizontal: false, vertical: true)
+                Text(answer.answer)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(AppTheme.muted)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+
+        LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: 2), spacing: 8) {
+            ForEach(answer.metrics) { metric in
+                MetaAdvisorMetricTile(metric: metric)
+            }
+        }
+
+        if !answer.nextActions.isEmpty {
+            VStack(alignment: .leading, spacing: 7) {
+                Text("QUÉ HARÍA AHORA")
+                    .font(.system(size: 10, weight: .black))
+                    .foregroundStyle(AppTheme.muted)
+                ForEach(Array(answer.nextActions.prefix(4).enumerated()), id: \.offset) { _, action in
+                    Label(action, systemImage: "arrow.turn.down.right")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(AppTheme.ink)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+        }
+
+        if let actions = answer.actionSuggestions, !actions.isEmpty {
+            VStack(alignment: .leading, spacing: 8) {
+                Text("ACCIONES")
+                    .font(.system(size: 10, weight: .black))
+                    .foregroundStyle(AppTheme.muted)
+                ForEach(actions) { action in
+                    HStack(alignment: .top, spacing: 8) {
+                        Image(systemName: actionIcon(action.severity))
+                            .font(.caption.weight(.heavy))
+                            .foregroundStyle(actionColor(action.severity))
+                            .frame(width: 22, height: 22)
+                            .background(actionColor(action.severity).opacity(0.14), in: Circle())
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(action.label)
+                                .font(.caption.weight(.heavy))
+                                .foregroundStyle(AppTheme.ink)
+                            Text(action.detail)
+                                .font(.caption2.weight(.semibold))
+                                .foregroundStyle(AppTheme.muted)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                        Spacer()
+                        Button {
+                            onApplyAction(action)
+                        } label: {
+                            if busyActionId == action.id {
+                                ProgressView().controlSize(.mini)
+                            } else {
+                                Text("Aplicar")
+                                    .font(.caption2.weight(.black))
+                            }
+                        }
+                        .buttonStyle(.plain)
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 7)
+                        .background(actionColor(action.severity), in: Capsule())
+                        .disabled(busyActionId != nil)
+                    }
+                    .padding(10)
+                    .background(AppTheme.surface.opacity(0.62), in: RoundedRectangle(cornerRadius: 12))
+                }
+            }
+        }
+
+        if !answer.campaigns.isEmpty {
+            VStack(alignment: .leading, spacing: 8) {
+                Text("CAMPAÑAS CLAVE")
+                    .font(.system(size: 10, weight: .black))
+                    .foregroundStyle(AppTheme.muted)
+                ForEach(answer.campaigns.prefix(5)) { campaign in
+                    HStack(alignment: .top, spacing: 8) {
+                        Circle()
+                            .fill(campaign.status == "ACTIVE" ? AppTheme.green : AppTheme.muted)
+                            .frame(width: 8, height: 8)
+                            .padding(.top, 5)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(campaign.name)
+                                .font(.caption.weight(.heavy))
+                                .foregroundStyle(AppTheme.ink)
+                                .lineLimit(1)
+                            Text("\(formatMoney(campaign.spend)) · \(campaign.purchases) compras · ROAS \(campaign.roas.map { String(format: "%.2fx", $0) } ?? "—")")
+                                .font(.caption2.weight(.semibold))
+                                .foregroundStyle(AppTheme.muted)
+                            Text(campaign.advice)
+                                .font(.caption2.weight(.heavy))
+                                .foregroundStyle(AppTheme.purple)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                        Spacer()
+                    }
+                    .padding(10)
+                    .background(AppTheme.surface.opacity(0.62), in: RoundedRectangle(cornerRadius: 12))
+                }
+            }
+        }
     }
 
     private func confidenceIcon(_ value: String) -> String {
@@ -8380,6 +8880,22 @@ struct MetaAdvisorCard: View {
         case "HIGH": AppTheme.green
         case "MEDIUM": AppTheme.amber
         default: AppTheme.blue
+        }
+    }
+
+    private func actionIcon(_ severity: String) -> String {
+        switch severity {
+        case "PAUSE": "pause.fill"
+        case "SCALE": "arrow.up.right"
+        default: "slider.horizontal.3"
+        }
+    }
+
+    private func actionColor(_ severity: String) -> Color {
+        switch severity {
+        case "PAUSE": AppTheme.red
+        case "SCALE": AppTheme.green
+        default: AppTheme.amber
         }
     }
 }

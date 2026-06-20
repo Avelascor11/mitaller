@@ -148,6 +148,32 @@ export class InfluencersService {
     });
   }
 
+  async markCollaborationReceived(id: string) {
+    const existing = await this.prisma.collaboration.findUnique({ where: { id } });
+    if (!existing) throw new NotFoundException('Colaboracion no encontrada');
+    return this.prisma.collaboration.update({
+      where: { id },
+      data: {
+        status: 'AWAITING_CONTENT',
+        notes: this.appendNote(existing.notes, `Producto recibido por la influ el ${this.todayLabel()}. Recordar contenido.`)
+      },
+      include: { influencer: true, submissions: true }
+    });
+  }
+
+  async markCollaborationContentReceived(id: string) {
+    const existing = await this.prisma.collaboration.findUnique({ where: { id } });
+    if (!existing) throw new NotFoundException('Colaboracion no encontrada');
+    return this.prisma.collaboration.update({
+      where: { id },
+      data: {
+        status: 'CONTENT_RECEIVED',
+        notes: this.appendNote(existing.notes, `Contenido recibido el ${this.todayLabel()}.`)
+      },
+      include: { influencer: true, submissions: true }
+    });
+  }
+
   async createSubmission(influencerId: string, input: CreateSubmissionBody) {
     await this.ensureInfluencer(influencerId);
     return this.prisma.ugcSubmission.create({
@@ -485,6 +511,14 @@ export class InfluencersService {
       .normalize('NFD')
       .replace(/[\u0300-\u036f]/g, '')
       .toLowerCase();
+  }
+
+  private appendNote(existing: string | null | undefined, note: string) {
+    return [existing?.trim(), note].filter(Boolean).join('\n');
+  }
+
+  private todayLabel() {
+    return new Date().toISOString().slice(0, 10);
   }
 
   private enumValue<T extends Record<string, string>>(source: T, value: string, field: string): T[keyof T] {

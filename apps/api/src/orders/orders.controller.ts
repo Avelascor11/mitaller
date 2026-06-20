@@ -16,6 +16,11 @@ export class OrdersController {
     return this.orders.findPendingPreparation();
   }
 
+  @Post('orders/archive-retro-preorder')
+  archiveRetroPreorderOrders() {
+    return this.orders.archiveRetroPreorderOrders();
+  }
+
   @Get('orders/:id')
   findOne(@Param('id') id: string) {
     return this.orders.findOne(id);

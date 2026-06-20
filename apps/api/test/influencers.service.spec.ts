@@ -137,4 +137,24 @@ describe('InfluencersService', () => {
 
     await expect(serviceWith(prisma).list({ stage: 'ENVIADO_A_MI_PRIMO' })).rejects.toThrow(BadRequestException);
   });
+
+  it('marca una colaboración como recibida y pendiente de contenido', async () => {
+    const prisma = {
+      collaboration: {
+        findUnique: vi.fn().mockResolvedValue({ id: 'collab-1', notes: 'Pack enviado' }),
+        update: vi.fn().mockResolvedValue({ id: 'collab-1', status: 'AWAITING_CONTENT' })
+      }
+    };
+
+    await serviceWith(prisma).markCollaborationReceived('collab-1');
+
+    expect(prisma.collaboration.update).toHaveBeenCalledWith({
+      where: { id: 'collab-1' },
+      data: {
+        status: 'AWAITING_CONTENT',
+        notes: expect.stringContaining('Producto recibido por la influ')
+      },
+      include: { influencer: true, submissions: true }
+    });
+  });
 });
