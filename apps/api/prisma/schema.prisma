@@ -184,6 +184,17 @@ model MetaRecommendationAction {
   @@map("meta_recommendation_actions")
 }
 
+model MetaAdvisorChatMessage {
+  id        String   @id
+  role      String
+  text      String
+  answerJson Json?   @map("answer_json")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([createdAt])
+  @@map("meta_advisor_chat_messages")
+}
+
 model Order {
   id                  String             @id @default(cuid())
   shopifyOrderId      String             @unique
