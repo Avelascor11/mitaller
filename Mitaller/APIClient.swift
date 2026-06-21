@@ -507,6 +507,16 @@ struct APIClient {
         try await get("/meta/advisor/chat?limit=\(limit)")
     }
 
+    // MARK: - IA Speedwear
+    func speedwearAIAsk(question: String) async throws -> SpeedwearAIAnswer {
+        let request = try jsonRequest(path: "/speedwear-ai/chat", method: "POST", body: SpeedwearAIQuestionRequest(question: question))
+        return try await perform(request)
+    }
+
+    func speedwearAIChat(limit: Int = 30) async throws -> [SpeedwearAIChatMessage] {
+        try await get("/speedwear-ai/chat?limit=\(limit)")
+    }
+
     // MARK: - Influencers
     func influencerSummary() async throws -> InfluencerSummary {
         try await get("/influencers/summary")
@@ -910,6 +920,10 @@ private struct MetaAdvisorQuestionRequest: Encodable {
     let to: String
 }
 
+private struct SpeedwearAIQuestionRequest: Encodable {
+    let question: String
+}
+
 struct MetaAdvisorMetric: Decodable, Identifiable {
     let label: String
     let value: String
@@ -966,6 +980,32 @@ struct MetaAdvisorChatMessage: Decodable, Identifiable {
     let role: String
     let text: String
     let answer: MetaAdvisorAnswer?
+    let createdAt: String
+}
+
+struct SpeedwearAIAnswer: Decodable {
+    let from: String
+    let to: String
+    let question: String
+    let domain: String?
+    let title: String?
+    let routedTo: String?
+    let headline: String
+    let answer: String
+    let confidence: String
+    let nextActions: [String]
+    let metrics: [MetaAdvisorMetric]
+    let campaigns: [MetaAdvisorCampaign]
+    let suggestedQuestions: [String]
+    let actionSuggestions: [MetaAdvisorActionSuggestion]?
+    let permissions: [String]?
+}
+
+struct SpeedwearAIChatMessage: Decodable, Identifiable {
+    let id: String
+    let role: String
+    let text: String
+    let answer: SpeedwearAIAnswer?
     let createdAt: String
 }
 

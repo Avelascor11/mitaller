@@ -22,6 +22,7 @@ import { ReturnsModule } from './returns/returns.module';
 import { SendcloudModule } from './sendcloud/sendcloud.module';
 import { ShipmentsModule } from './shipments/shipments.module';
 import { ShopifyModule } from './shopify/shopify.module';
+import { SpeedwearAiModule } from './speedwear-ai/speedwear-ai.module';
 import { StockModule } from './stock/stock.module';
 import { SupplierModule } from './supplier/supplier.module';
 
@@ -50,7 +51,8 @@ import { SupplierModule } from './supplier/supplier.module';
     CrewModule,
     CarrierReturnsModule,
     ShelfModule,
-    PortalConfigModule
+    PortalConfigModule,
+    SpeedwearAiModule
   ],
   controllers: [AppController]
 })

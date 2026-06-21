@@ -1436,6 +1436,8 @@ struct MainTabView: View {
         TabView {
             DashboardView()
                 .tabItem { Label("Inicio", systemImage: "house.fill") }
+            SpeedwearAIView()
+                .tabItem { Label("IA", systemImage: "sparkles") }
             PickingView()
                 .tabItem { Label("Sin preparar", systemImage: "shippingbox.fill") }
             ShippingView()
@@ -7739,6 +7741,521 @@ struct CreateInfluencerSheet: View {
         } catch {
             feedback = "No se pudo guardar: \(error.localizedDescription)"
             isError = true
+        }
+    }
+}
+
+// MARK: - IA Speedwear
+
+struct SpeedwearAIView: View {
+    @Environment(WorkshopStore.self) private var store
+    @State private var question = ""
+    @State private var messages: [SpeedwearAIChatMessage] = []
+    @State private var loading = false
+    @State private var error: String?
+    @State private var notice: String?
+    @State private var busyActionId: String?
+
+    private let quickQuestions = [
+        "¿Qué hago primero hoy?",
+        "¿Vamos bien de caja?",
+        "¿Qué tengo que comprar?",
+        "¿Qué pedidos me están quemando?",
+        "¿Qué hago con los ads hoy?",
+        "¿Qué influs tengo que perseguir?"
+    ]
+
+    private var latestAnswer: SpeedwearAIAnswer? {
+        messages.reversed().compactMap { $0.answer }.first
+    }
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 18) {
+                    HStack(spacing: 12) {
+                        Image(systemName: "sparkles")
+                            .font(.title.weight(.black))
+                            .foregroundStyle(AppTheme.purple)
+                            .frame(width: 54, height: 54)
+                            .background(AppTheme.purple.opacity(0.16), in: RoundedRectangle(cornerRadius: 18))
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("IA SPEEDWEAR")
+                                .font(.system(size: 32, weight: .black, design: .rounded))
+                                .foregroundStyle(AppTheme.ink)
+                            Text("Pedidos, caja, compras, stock, envíos, influs y ads en una sola conversación.")
+                                .font(.subheadline.weight(.semibold))
+                                .foregroundStyle(AppTheme.muted)
+                        }
+                    }
+
+                    SpeedwearAIPermissionsCard()
+
+                    if let latestAnswer {
+                        SpeedwearAIContextStrip(answer: latestAnswer)
+                    }
+
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 8) {
+                            ForEach((latestAnswer?.suggestedQuestions ?? quickQuestions), id: \.self) { item in
+                                Button {
+                                    question = item
+                                    Task { await ask(item) }
+                                } label: {
+                                    Text(item)
+                                        .font(.caption.weight(.heavy))
+                                        .foregroundStyle(AppTheme.purple)
+                                        .padding(.horizontal, 12)
+                                        .padding(.vertical, 9)
+                                        .background(AppTheme.purple.opacity(0.12), in: Capsule())
+                                }
+                                .buttonStyle(.plain)
+                                .disabled(loading)
+                            }
+                        }
+                    }
+
+                    VStack(spacing: 12) {
+                        if messages.isEmpty {
+                            SpeedwearAIEmptyState()
+                        } else {
+                            ForEach(messages.suffix(12)) { message in
+                                SpeedwearAIMessageBubble(message: message, busyActionId: busyActionId) { action in
+                                    Task { await apply(action) }
+                                }
+                            }
+                        }
+                    }
+
+                    HStack(alignment: .bottom, spacing: 10) {
+                        TextField("Pregúntame lo que sea de Speedwear...", text: $question, axis: .vertical)
+                            .textFieldStyle(.plain)
+                            .font(.subheadline.weight(.semibold))
+                            .padding(.horizontal, 14)
+                            .padding(.vertical, 12)
+                            .background(AppTheme.surfaceSoft.opacity(0.86), in: RoundedRectangle(cornerRadius: 16))
+                            .foregroundStyle(AppTheme.ink)
+                            .lineLimit(1...4)
+                            .submitLabel(.send)
+                            .onSubmit { Task { await ask(question) } }
+
+                        Button { Task { await ask(question) } } label: {
+                            if loading {
+                                ProgressView()
+                                    .controlSize(.small)
+                                    .frame(width: 48, height: 48)
+                            } else {
+                                Image(systemName: "paperplane.fill")
+                                    .font(.headline.weight(.black))
+                                    .frame(width: 48, height: 48)
+                            }
+                        }
+                        .buttonStyle(.plain)
+                        .background(AppTheme.purple, in: Circle())
+                        .foregroundStyle(.white)
+                        .disabled(loading || question.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                        .opacity(loading || question.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? 0.48 : 1)
+                    }
+                    .glassPanel(padding: 12, accent: AppTheme.purple)
+
+                    if let notice {
+                        Label(notice, systemImage: "checkmark.seal.fill")
+                            .font(.caption.weight(.bold))
+                            .foregroundStyle(AppTheme.green)
+                            .padding(10)
+                            .glassPanel(padding: 10, accent: AppTheme.green)
+                    }
+
+                    if let error {
+                        Label(error, systemImage: "exclamationmark.triangle.fill")
+                            .font(.caption.weight(.bold))
+                            .foregroundStyle(AppTheme.red)
+                            .padding(10)
+                            .glassPanel(padding: 10, accent: AppTheme.red)
+                    }
+                }
+                .padding()
+            }
+            .screenBackground()
+            .navigationTitle("IA Speedwear")
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button { Task { await loadChat() } } label: {
+                        Image(systemName: "arrow.clockwise")
+                    }
+                    .disabled(loading)
+                }
+            }
+            .task { await loadChat() }
+            .refreshable { await loadChat() }
+        }
+    }
+
+    private func loadChat() async {
+        guard let client = store.apiClient else { error = "API no configurada"; return }
+        error = nil
+        do {
+            messages = try await client.speedwearAIChat(limit: 40)
+        } catch {
+            self.error = error.localizedDescription
+        }
+    }
+
+    private func ask(_ text: String) async {
+        guard let client = store.apiClient else { error = "API no configurada"; return }
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        messages.append(SpeedwearAIChatMessage(
+            id: "pending-\(UUID().uuidString)",
+            role: "user",
+            text: trimmed,
+            answer: nil,
+            createdAt: ISO8601DateFormatter().string(from: Date())
+        ))
+        question = ""
+        loading = true
+        error = nil
+        notice = nil
+        defer { loading = false }
+        do {
+            _ = try await client.speedwearAIAsk(question: trimmed)
+            messages = (try? await client.speedwearAIChat(limit: 40)) ?? messages
+        } catch {
+            self.error = error.localizedDescription
+        }
+    }
+
+    private func apply(_ action: MetaAdvisorActionSuggestion) async {
+        guard let client = store.apiClient else { error = "API no configurada"; return }
+        busyActionId = action.id
+        error = nil
+        notice = nil
+        defer { busyActionId = nil }
+        do {
+            let preview = try await client.metaPreviewRecommendation(action.request)
+            guard preview.canApply else {
+                error = preview.warnings.first ?? "La IA no puede aplicar esta accion ahora."
+                return
+            }
+            let result = try await client.metaApplyRecommendation(action.request)
+            notice = result.message
+            await loadChat()
+        } catch {
+            self.error = error.localizedDescription
+        }
+    }
+}
+
+struct SpeedwearAIPermissionsCard: View {
+    private let capabilities: [(String, String, Color)] = [
+        ("Pedidos", "Lee Shopify y prioridades", AppTheme.blue),
+        ("Compras", "Cruza pedidos, stock y proveedor", AppTheme.amber),
+        ("Caja", "Consulta banco, gastos y reservas", AppTheme.green),
+        ("Meta Ads", "Recomienda y aplica con confirmacion", AppTheme.purple),
+        ("Influs", "Seguimiento de packs y contenido", AppTheme.magenta),
+        ("Envios", "Lee etiquetas y devueltos", AppTheme.teal)
+    ]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Label("Permisos conectados", systemImage: "key.fill")
+                    .font(.headline.weight(.heavy))
+                    .foregroundStyle(AppTheme.ink)
+                Spacer()
+                Text("GLOBAL")
+                    .font(.system(size: 10, weight: .black))
+                    .foregroundStyle(AppTheme.green)
+                    .padding(.horizontal, 9)
+                    .padding(.vertical, 5)
+                    .background(AppTheme.green.opacity(0.14), in: Capsule())
+            }
+            Text("La IA puede leer el contexto de la app. Para cambios reales, te mostrara un boton de aplicar antes de tocar nada.")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(AppTheme.muted)
+                .fixedSize(horizontal: false, vertical: true)
+            LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 10) {
+                ForEach(capabilities, id: \.0) { item in
+                    HStack(spacing: 8) {
+                        Circle().fill(item.2).frame(width: 9, height: 9)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(item.0)
+                                .font(.caption.weight(.black))
+                                .foregroundStyle(AppTheme.ink)
+                            Text(item.1)
+                                .font(.caption2.weight(.semibold))
+                                .foregroundStyle(AppTheme.muted)
+                                .lineLimit(2)
+                        }
+                        Spacer(minLength: 0)
+                    }
+                    .padding(10)
+                    .background(AppTheme.surfaceSoft.opacity(0.62), in: RoundedRectangle(cornerRadius: 14))
+                }
+            }
+        }
+        .glassPanel(padding: 16, accent: AppTheme.purple)
+    }
+}
+
+struct SpeedwearAIContextStrip: View {
+    let answer: SpeedwearAIAnswer
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Text(answer.routedTo ?? answer.title ?? "Speedwear")
+                    .font(.caption.weight(.black))
+                    .foregroundStyle(AppTheme.purple)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 6)
+                    .background(AppTheme.purple.opacity(0.14), in: Capsule())
+                Spacer()
+                Text(confidenceText(answer.confidence))
+                    .font(.caption2.weight(.black))
+                    .foregroundStyle(confidenceColor(answer.confidence))
+            }
+
+            if !answer.metrics.isEmpty {
+                LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible()), GridItem(.flexible())], spacing: 8) {
+                    ForEach(answer.metrics.prefix(6)) { metric in
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(metric.label.uppercased())
+                                .font(.system(size: 9, weight: .black))
+                                .foregroundStyle(AppTheme.muted)
+                            Text(metric.value)
+                                .font(.headline.weight(.black))
+                                .foregroundStyle(metricTone(metric.tone))
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.72)
+                        }
+                        .padding(10)
+                        .background(metricTone(metric.tone).opacity(0.10), in: RoundedRectangle(cornerRadius: 14))
+                    }
+                }
+            }
+        }
+        .glassPanel(padding: 14, accent: AppTheme.purple)
+    }
+
+    private func metricTone(_ value: String) -> Color {
+        switch value {
+        case "green": AppTheme.green
+        case "red": AppTheme.red
+        case "amber": AppTheme.amber
+        case "blue": AppTheme.blue
+        case "purple": AppTheme.purple
+        default: AppTheme.teal
+        }
+    }
+
+    private func confidenceText(_ value: String) -> String {
+        switch value {
+        case "HIGH": "Alta confianza"
+        case "LOW": "Baja confianza"
+        default: "Confianza media"
+        }
+    }
+
+    private func confidenceColor(_ value: String) -> Color {
+        switch value {
+        case "HIGH": AppTheme.green
+        case "LOW": AppTheme.amber
+        default: AppTheme.blue
+        }
+    }
+}
+
+struct SpeedwearAIEmptyState: View {
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Label("Habla normal", systemImage: "bubble.left.and.text.bubble.right.fill")
+                .font(.headline.weight(.heavy))
+                .foregroundStyle(AppTheme.ink)
+            Text("Ejemplos: \"puedo comprar 300 pegatinas\", \"que hago con los ads hoy\", \"por que compras no cuadra\" o \"que pedidos deberia priorizar\".")
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(AppTheme.muted)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .glassPanel(padding: 18, accent: AppTheme.teal)
+    }
+}
+
+struct SpeedwearAIMessageBubble: View {
+    let message: SpeedwearAIChatMessage
+    let busyActionId: String?
+    let onApplyAction: (MetaAdvisorActionSuggestion) -> Void
+
+    private var isUser: Bool { message.role == "user" }
+
+    var body: some View {
+        HStack {
+            if isUser { Spacer(minLength: 40) }
+            VStack(alignment: .leading, spacing: 10) {
+                if isUser {
+                    Text(message.text)
+                        .font(.subheadline.weight(.bold))
+                        .foregroundStyle(.white)
+                } else if let answer = message.answer {
+                    answerView(answer)
+                } else {
+                    Text(message.text)
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(AppTheme.ink)
+                }
+            }
+            .padding(13)
+            .background(isUser ? AppTheme.purple : AppTheme.surfaceSoft.opacity(0.76), in: RoundedRectangle(cornerRadius: 20))
+            .overlay(
+                RoundedRectangle(cornerRadius: 20)
+                    .stroke(isUser ? Color.clear : AppTheme.line.opacity(0.7), lineWidth: 1)
+            )
+            if !isUser { Spacer(minLength: 18) }
+        }
+    }
+
+    @ViewBuilder
+    private func answerView(_ answer: SpeedwearAIAnswer) -> some View {
+        HStack(alignment: .top, spacing: 9) {
+            Image(systemName: "sparkles")
+                .foregroundStyle(AppTheme.purple)
+                .padding(.top, 2)
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(spacing: 6) {
+                    Text(answer.title ?? "IA Speedwear")
+                        .font(.system(size: 10, weight: .black))
+                        .foregroundStyle(AppTheme.purple)
+                    Text("·")
+                        .font(.caption2.weight(.black))
+                        .foregroundStyle(AppTheme.muted)
+                    Text(answer.routedTo ?? "Global")
+                        .font(.system(size: 10, weight: .black))
+                        .foregroundStyle(AppTheme.muted)
+                }
+                Text(answer.headline)
+                    .font(.subheadline.weight(.black))
+                    .foregroundStyle(AppTheme.ink)
+                    .fixedSize(horizontal: false, vertical: true)
+                Text(answer.answer)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(AppTheme.muted)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+
+        if !answer.metrics.isEmpty {
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 6) {
+                    ForEach(answer.metrics) { metric in
+                        Text("\(metric.label): \(metric.value)")
+                            .font(.caption2.weight(.heavy))
+                            .foregroundStyle(metricTone(metric.tone))
+                            .padding(.horizontal, 9)
+                            .padding(.vertical, 6)
+                            .background(metricTone(metric.tone).opacity(0.10), in: Capsule())
+                    }
+                }
+            }
+        }
+
+        if !answer.nextActions.isEmpty {
+            VStack(alignment: .leading, spacing: 7) {
+                Text("QUE HARIA")
+                    .font(.system(size: 10, weight: .black))
+                    .foregroundStyle(AppTheme.muted)
+                ForEach(Array(answer.nextActions.prefix(5).enumerated()), id: \.offset) { _, action in
+                    Label(action, systemImage: "checkmark")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(AppTheme.ink)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+        }
+
+        if let actions = answer.actionSuggestions, !actions.isEmpty {
+            VStack(alignment: .leading, spacing: 8) {
+                Text("PUEDO APLICAR")
+                    .font(.system(size: 10, weight: .black))
+                    .foregroundStyle(AppTheme.muted)
+                ForEach(actions) { action in
+                    HStack(alignment: .top, spacing: 8) {
+                        Image(systemName: actionIcon(action.severity))
+                            .font(.caption.weight(.heavy))
+                            .foregroundStyle(actionColor(action.severity))
+                            .frame(width: 22, height: 22)
+                            .background(actionColor(action.severity).opacity(0.14), in: Circle())
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(action.label)
+                                .font(.caption.weight(.heavy))
+                                .foregroundStyle(AppTheme.ink)
+                            Text(action.detail)
+                                .font(.caption2.weight(.semibold))
+                                .foregroundStyle(AppTheme.muted)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                        Spacer()
+                        Button {
+                            onApplyAction(action)
+                        } label: {
+                            if busyActionId == action.id {
+                                ProgressView().controlSize(.mini)
+                            } else {
+                                Text("Aplicar")
+                                    .font(.caption2.weight(.black))
+                            }
+                        }
+                        .buttonStyle(.plain)
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 7)
+                        .background(actionColor(action.severity), in: Capsule())
+                        .disabled(busyActionId != nil)
+                    }
+                    .padding(10)
+                    .background(AppTheme.surface.opacity(0.62), in: RoundedRectangle(cornerRadius: 12))
+                }
+            }
+        }
+
+        if let permissions = answer.permissions, !permissions.isEmpty {
+            VStack(alignment: .leading, spacing: 6) {
+                Text("ACCESO USADO")
+                    .font(.system(size: 10, weight: .black))
+                    .foregroundStyle(AppTheme.muted)
+                ForEach(permissions.prefix(4), id: \.self) { permission in
+                    Label(permission, systemImage: "key.fill")
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(AppTheme.muted)
+                }
+            }
+        }
+    }
+
+    private func metricTone(_ value: String) -> Color {
+        switch value {
+        case "green": AppTheme.green
+        case "red": AppTheme.red
+        case "amber": AppTheme.amber
+        case "blue": AppTheme.blue
+        case "purple": AppTheme.purple
+        default: AppTheme.teal
+        }
+    }
+
+    private func actionIcon(_ severity: String) -> String {
+        switch severity {
+        case "PAUSE": "pause.fill"
+        case "SCALE": "arrow.up.right"
+        default: "slider.horizontal.3"
+        }
+    }
+
+    private func actionColor(_ severity: String) -> Color {
+        switch severity {
+        case "PAUSE": AppTheme.red
+        case "SCALE": AppTheme.green
+        default: AppTheme.amber
         }
     }
 }
