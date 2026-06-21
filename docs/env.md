@@ -91,6 +91,14 @@ Mitaller usa GoCardless Bank Account Data para conectar N26 por Open Banking/PSD
 
 Postgres guarda los metadatos del video, no el archivo pesado. El archivo vive en `UGC_STORAGE_DIR`. Si el servicio corre en Railway sin Volume persistente, los videos pueden perderse al redeploy. Para volumen alto, el siguiente paso natural es cambiar `UGC_STORAGE_PROVIDER` a Cloudflare R2/S3.
 
+## IA Speedwear
+
+- `OPENAI_API_KEY`: clave de OpenAI para activar conversación real en la pestaña IA Speedwear. Si falta, la app sigue funcionando en modo fallback con reglas internas.
+- `OPENAI_MODEL`: modelo usado por la IA. Por defecto `gpt-4.1-mini`.
+- `OPENAI_BASE_URL`: endpoint compatible con OpenAI Responses API. Por defecto `https://api.openai.com/v1`.
+
+IA Speedwear lee contexto operativo de pedidos, compras, stock, envíos, caja, influs y Meta Ads. Las acciones reales siguen requiriendo confirmación en la app.
+
 ## Klaviyo
 
 - `KLAVIYO_API_KEY`: clave privada de Klaviyo para enviar eventos de devoluciones. No subir a GitHub. Si no está configurada, la API ignora esos eventos y no bloquea el flujo.
