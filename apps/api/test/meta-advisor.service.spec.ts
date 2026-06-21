@@ -79,8 +79,9 @@ describe('MetaService advisor', () => {
       to: '2026-06-11'
     });
 
-    expect(result.headline).toContain('Revisaría');
+    expect(result.headline).toContain('bajaría');
     expect(result.answer).toContain('Prospecting camiseta');
+    expect(result.nextActions[0]).toContain('Prospecting camiseta');
     expect(result.campaigns[0]).toEqual(expect.objectContaining({
       id: 'camp-1',
       advice: 'Pausar si sigue sin compras'

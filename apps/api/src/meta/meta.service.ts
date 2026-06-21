@@ -1692,46 +1692,46 @@ export class MetaService {
     if (intent === 'PAUSE') {
       if (risky.length === 0) {
         return {
-          headline: 'No pausaría nada fuerte ahora',
-          answer: `Con ${this.money(summary.spend)} gastados y ROAS ${summary.roas == null ? '—' : `${summary.roas.toFixed(2)}x`}, no veo campañas activas con gasto suficiente y señales claras de corte.`,
+          headline: 'Yo no tocaría fuerte todavía',
+          answer: `Te entiendo. Ahora mismo no veo una campaña con señales claras para cortarla sin más. Llevas ${this.money(summary.spend)} gastados y el ROAS está en ${summary.roas == null ? '—' : `${summary.roas.toFixed(2)}x`}. Mi lectura: vigilaría, pero no haría un apagón por miedo.`,
           confidence,
-          nextActions: ['Mantén el seguimiento', 'Revisa de nuevo cuando una campaña supere 8-12 € de gasto sin compras']
+          nextActions: ['Dejarlo correr un poco más', 'Volver a revisar cuando una campaña pase de 8-12 € sin compras']
         };
       }
       const names = risky.slice(0, 3).map((campaign) => `${campaign.name} (${this.money(campaign.spend)}, ${campaign.purchases} compras, ROAS ${campaign.roas?.toFixed(2) ?? '—'})`);
       return {
-        headline: `Revisaría ${risky.length} campaña(s) antes de seguir gastando`,
-        answer: `Mi lectura: las candidatas a pausar o arreglar son ${names.join('; ')}. Si una pasa de 20 € sin compras, la pausaría. Si tiene compras pero ROAS bajo, antes probaría creativo/oferta.`,
+        headline: 'Sí, aquí bajaría el riesgo',
+        answer: `No tocaría todo a ciegas. Miraría primero ${names.join('; ')}. Si una campaña ya va por encima de 20 € sin compras, ahí sí sería bastante agresivo. Si ha vendido algo pero con ROAS flojo, prefiero bajar presupuesto antes que apagarla del todo.`,
         confidence,
         nextActions: risky.slice(0, 3).map((campaign) => campaign.purchases === 0
-          ? `Pausar o bajar ${campaign.name} si no tiene compras al refrescar`
-          : `Arreglar ${campaign.name}: mantener solo si el ROAS sube por encima de 1.5x`)
+          ? `Bajar o pausar ${campaign.name}`
+          : `Bajar ${campaign.name} y revisar si el ROAS remonta`)
       };
     }
 
     if (intent === 'SCALE') {
       if (winners.length === 0) {
         return {
-          headline: 'Ahora no escalaría presupuesto',
-          answer: 'No veo campañas activas con al menos 2 compras y ROAS sólido. Escalar sin esa base puede quemar caja, sobre todo si Shopify tarda en pagar.',
+          headline: 'Yo no subiría todavía',
+          answer: 'Ahora mismo no veo una ganadora clara con 2+ compras y ROAS sólido. Sé que da rabia cuando ayer funcionó, pero subir por ansiedad suele salir caro. Primero confirmaría que hoy vuelve a comprar.',
           confidence,
-          nextActions: ['Esperar más muestra o ventas', 'Escalar solo cuando una campaña tenga 2+ compras y ROAS mayor de 2.2x']
+          nextActions: ['No subir presupuesto ahora', 'Esperar una venta o más muestra antes de escalar']
         };
       }
       return {
-        headline: `Puedes escalar ${winners.length} campaña(s) con cuidado`,
-        answer: `Las mejores señales están en ${winners.slice(0, 3).map((campaign) => `${campaign.name} (ROAS ${campaign.roas?.toFixed(2)}x)`).join(', ')}. Yo subiría poco a poco, no de golpe.`,
+        headline: 'Aquí sí hay algo que empujar',
+        answer: `Las mejores señales están en ${winners.slice(0, 3).map((campaign) => `${campaign.name} (ROAS ${campaign.roas?.toFixed(2)}x)`).join(', ')}. La tocaría con cuidado: subir poco, mirar mañana, y no duplicar presupuesto de golpe.`,
         confidence,
-        nextActions: winners.slice(0, 3).map((campaign) => `Subir ${campaign.name} un 10-15% y revisar mañana`)
+        nextActions: winners.slice(0, 3).map((campaign) => `Subir ${campaign.name} un 10-15%`)
       };
     }
 
     if (intent === 'WEEKEND') {
       const actions = weekendCash?.actions?.length ? weekendCash.actions : ['Usa el gasto diario real y el cobro pendiente de Shopify antes de subir presupuesto'];
       return {
-        headline: weekendCash?.headline ?? 'Revisa caja antes de tocar ads',
+        headline: weekendCash?.headline ?? 'Yo protegería caja antes de tocar ads',
         answer: weekendCash
-          ? `Para este rango, Meta lleva ${this.money(weekendCash.spend)} y el límite prudente es ${this.money(weekendCash.maxWeekendSpend)}. Quedan ${this.money(weekendCash.remainingWeekendSpend)} de margen prudente.`
+          ? `Aquí sería bastante prudente. Meta lleva ${this.money(weekendCash.spend)} y el límite sano que tengo marcado es ${this.money(weekendCash.maxWeekendSpend)}. Margen real: ${this.money(weekendCash.remainingWeekendSpend)}. En finde no buscaría récords; buscaría no liarla con caja.`
           : 'No he podido leer la caja de fin de semana, así que trataría el presupuesto con prudencia.',
         confidence: weekendCash ? confidence : 'MEDIUM' as const,
         nextActions: actions
@@ -1742,7 +1742,7 @@ export class MetaService {
       return {
         headline: billing?.headline ?? 'No he podido leer el saldo de Meta',
         answer: billing
-          ? `Saldo pendiente: ${this.money(billing.balanceDue)}. Tu aviso está en ${this.money(billing.warningThreshold)} y el límite en ${this.money(billing.paymentLimit)}.`
+          ? `Ahora mismo hay ${this.money(billing.balanceDue)} pendientes. Tu aviso está en ${this.money(billing.warningThreshold)} y el límite en ${this.money(billing.paymentLimit)}. Si quieres evitar sustos, yo lo pagaría antes de que se junte con el gasto de mañana.`
           : 'No he podido consultar facturación ahora mismo.',
         confidence: billing ? confidence : 'MEDIUM' as const,
         nextActions: [billing?.action ?? 'Abre Meta Billing y revisa el saldo manualmente']
@@ -1751,10 +1751,10 @@ export class MetaService {
 
     const firstRecommendation = topRecommendations[0];
     return {
-      headline: firstRecommendation?.title ?? 'Lectura general de Meta Ads',
+      headline: firstRecommendation ? 'Te diría esto' : 'Estoy mirando tus ads',
       answer: firstRecommendation
-        ? `${firstRecommendation.reason} Mi acción sería: ${firstRecommendation.action}`
-        : `Hoy llevas ${this.money(summary.spend)}, ${summary.purchases} compras y ROAS ${summary.roas == null ? '—' : `${summary.roas.toFixed(2)}x`}. Pregúntame por pausar, escalar, caja de finde o saldo de Meta para ir al grano.`,
+        ? `${firstRecommendation.reason} Traducido: ${firstRecommendation.action}`
+        : `Hoy llevas ${this.money(summary.spend)}, ${summary.purchases} compras y ROAS ${summary.roas == null ? '—' : `${summary.roas.toFixed(2)}x`}. Pregúntame como me lo dirías a mí: “¿bajo algo?”, “¿me estoy pasando?” o “¿qué harías hoy?”.`,
       confidence,
       nextActions: topRecommendations.slice(0, 3).map((recommendation) => recommendation.action)
         .concat(topRecommendations.length ? [] : ['Mirar campañas con gasto sin compras', 'Escalar solo ganadoras con ROAS alto'])

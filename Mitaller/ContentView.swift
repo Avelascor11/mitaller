@@ -8539,13 +8539,21 @@ struct MetaAdsView: View {
         guard let client = store.apiClient else { advisorError = "API no configurada"; return }
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
+        let pending = MetaAdvisorChatMessage(
+            id: "pending-\(UUID().uuidString)",
+            role: "user",
+            text: trimmed,
+            answer: nil,
+            createdAt: ISO8601DateFormatter().string(from: Date())
+        )
+        advisorMessages.append(pending)
+        advisorQuestion = ""
         advisorLoading = true
         advisorError = nil
         defer { advisorLoading = false }
         do {
             let r = dateRange
             advisorAnswer = try await client.metaAdvisor(question: trimmed, from: r.from, to: r.to)
-            advisorQuestion = ""
             advisorMessages = (try? await client.metaAdvisorChat(limit: 30)) ?? advisorMessages
         } catch {
             advisorError = error.localizedDescription
@@ -8622,10 +8630,10 @@ struct MetaAdvisorCard: View {
                     .foregroundStyle(AppTheme.purple)
                     .frame(width: 32)
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("Agente Meta Ads")
+                    Text("Asesor Ads")
                         .font(.headline.weight(.heavy))
                         .foregroundStyle(AppTheme.ink)
-                    Text("Habla con tus datos reales y aplica cambios desde aquí.")
+                    Text("Pregúntame normal. Yo miro los datos y te digo qué haría.")
                         .font(.caption.weight(.medium))
                         .foregroundStyle(AppTheme.muted)
                 }
@@ -8655,10 +8663,10 @@ struct MetaAdvisorCard: View {
             VStack(spacing: 10) {
                 if visibleMessages.isEmpty {
                     VStack(alignment: .leading, spacing: 6) {
-                        Text("Pregúntame como aquí")
+                        Text("Pregúntame sin formato")
                             .font(.subheadline.weight(.heavy))
                             .foregroundStyle(AppTheme.ink)
-                        Text("Ej: “baja presupuesto”, “¿qué pauso hoy?” o “ayer vendió, hoy no”.")
+                        Text("Ej: “me estoy rayando”, “baja presupuesto” o “ayer vendió y hoy no”.")
                             .font(.caption.weight(.semibold))
                             .foregroundStyle(AppTheme.muted)
                     }
@@ -8677,7 +8685,7 @@ struct MetaAdvisorCard: View {
             }
 
             HStack(spacing: 8) {
-                TextField("Escribe como aquí: baja presupuesto...", text: $question, axis: .vertical)
+                TextField("Escribe como aquí...", text: $question, axis: .vertical)
                     .textFieldStyle(.plain)
                     .font(.subheadline.weight(.semibold))
                     .padding(.horizontal, 12)
@@ -8754,8 +8762,8 @@ struct MetaAdvisorMessageBubble: View {
     @ViewBuilder
     private func assistantAnswer(_ answer: MetaAdvisorAnswer) -> some View {
         HStack(alignment: .top, spacing: 8) {
-            Image(systemName: confidenceIcon(answer.confidence))
-                .foregroundStyle(confidenceColor(answer.confidence))
+            Image(systemName: "sparkles")
+                .foregroundStyle(AppTheme.purple)
                 .padding(.top, 2)
             VStack(alignment: .leading, spacing: 4) {
                 Text(answer.headline)
@@ -8769,19 +8777,28 @@ struct MetaAdvisorMessageBubble: View {
             }
         }
 
-        LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: 2), spacing: 8) {
-            ForEach(answer.metrics) { metric in
-                MetaAdvisorMetricTile(metric: metric)
+        if !answer.metrics.isEmpty {
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 6) {
+                    ForEach(answer.metrics) { metric in
+                        Text("\(metric.label): \(metric.value)")
+                            .font(.caption2.weight(.heavy))
+                            .foregroundStyle(metricTone(metric.tone))
+                            .padding(.horizontal, 9)
+                            .padding(.vertical, 6)
+                            .background(metricTone(metric.tone).opacity(0.10), in: Capsule())
+                    }
+                }
             }
         }
 
         if !answer.nextActions.isEmpty {
             VStack(alignment: .leading, spacing: 7) {
-                Text("QUÉ HARÍA AHORA")
+                Text("MI DECISIÓN")
                     .font(.system(size: 10, weight: .black))
                     .foregroundStyle(AppTheme.muted)
                 ForEach(Array(answer.nextActions.prefix(4).enumerated()), id: \.offset) { _, action in
-                    Label(action, systemImage: "arrow.turn.down.right")
+                    Label(action, systemImage: "checkmark")
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(AppTheme.ink)
                         .fixedSize(horizontal: false, vertical: true)
@@ -8836,7 +8853,7 @@ struct MetaAdvisorMessageBubble: View {
 
         if !answer.campaigns.isEmpty {
             VStack(alignment: .leading, spacing: 8) {
-                Text("CAMPAÑAS CLAVE")
+                Text("LO QUE ESTOY MIRANDO")
                     .font(.system(size: 10, weight: .black))
                     .foregroundStyle(AppTheme.muted)
                 ForEach(answer.campaigns.prefix(5)) { campaign in
@@ -8853,7 +8870,7 @@ struct MetaAdvisorMessageBubble: View {
                             Text("\(formatMoney(campaign.spend)) · \(campaign.purchases) compras · ROAS \(campaign.roas.map { String(format: "%.2fx", $0) } ?? "—")")
                                 .font(.caption2.weight(.semibold))
                                 .foregroundStyle(AppTheme.muted)
-                            Text(campaign.advice)
+                            Text("Mi lectura: \(campaign.advice)")
                                 .font(.caption2.weight(.heavy))
                                 .foregroundStyle(AppTheme.purple)
                                 .fixedSize(horizontal: false, vertical: true)
@@ -8880,6 +8897,16 @@ struct MetaAdvisorMessageBubble: View {
         case "HIGH": AppTheme.green
         case "MEDIUM": AppTheme.amber
         default: AppTheme.blue
+        }
+    }
+
+    private func metricTone(_ value: String) -> Color {
+        switch value {
+        case "green": AppTheme.green
+        case "red": AppTheme.red
+        case "amber": AppTheme.amber
+        case "blue": AppTheme.blue
+        default: AppTheme.purple
         }
     }
 
