@@ -57,6 +57,18 @@ Puedes consultar metodos disponibles con `GET /shipments/shipping-methods`. En l
 
 Para imprimir etiquetas automaticamente en el taller, instala la Honeywell PC42d en macOS y pon su nombre CUPS exacto en `LABEL_PRINTER_NAME`. Activa `AUTO_PRINT_LABELS=true`. Para etiquetas 100x150 mm usa `LABEL_PAPER_SIZE=Custom.100x150mm`. El backend descarga el PDF de Sendcloud y lo envia con `lp` justo despues de crear la etiqueta.
 
+## Impresion DTF automatica
+
+- `DTF_AUTO_PRINT_ENABLED`: en Railway, si vale `true`, la API crea trabajos de impresion DTF cada pocos minutos cuando haya pedidos sin preparar que necesiten DTF y no exista stock DTF suficiente.
+- `PRINT_AGENT_TOKEN`: secreto compartido entre Railway y el ordenador del taller para proteger las colas de impresion.
+- `DTF_PRINT_ENABLED`: en el ordenador del taller, si vale `true`, el `print-agent` tambien recoge trabajos DTF.
+- `DTF_HOT_FOLDER`: carpeta de entrada del RIP/software DTF. Recomendado si la impresora automatica trabaja con hot folder.
+- `DTF_PRINTER_NAME`: nombre de impresora del sistema si no hay hot folder.
+- `DTF_PRINT_SETTINGS`: ajustes de SumatraPDF en Windows para impresion directa. Por defecto `fit`.
+- `DTF_PRINT_QUEUE_BATCH_SIZE`: numero maximo de trabajos que Railway entrega al agente en cada ronda. Por defecto `3`.
+
+Flujo recomendado: Railway calcula lo que falta, crea `DtfPrintJob`, el PC del taller descarga el archivo del diseno y lo deja en `DTF_HOT_FOLDER` tantas veces como unidades falten. Cuando el agente confirma el envio, la API suma esas unidades al stock DTF en `TALLER`.
+
 ## Economia
 
 - `ECONOMICS_SHIPPING_COST_STANDARD_ES`: coste estimado para Correos Estandar nacional 0-1 kg. Por defecto `3.81`.

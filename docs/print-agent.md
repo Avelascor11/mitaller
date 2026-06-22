@@ -9,6 +9,11 @@ App iPhone -> Railway -> Sendcloud etiqueta creada
                          |
                          v
 Ordenador taller -> print-agent -> Honeywell PC42d
+
+Pedidos sin preparar -> Railway calcula DTF faltante
+                         |
+                         v
+Ordenador taller -> print-agent -> DTF hot folder / impresora DTF
 ```
 
 Soportado en macOS, Linux y Windows.
@@ -23,10 +28,17 @@ LABEL_PRINTER_NAME=
 LABEL_PAPER_SIZE=Custom.100x150mm
 PRINT_AGENT_POLL_SECONDS=15
 PRINT_AGENT_DRY_RUN=false
+PRINT_AGENT_TOKEN=
 
 # Windows
 LABEL_PRINTER_BIN=
 LABEL_PRINT_SETTINGS=noscale
+
+# DTF
+DTF_PRINT_ENABLED=false
+DTF_HOT_FOLDER=
+DTF_PRINTER_NAME=
+DTF_PRINT_SETTINGS=fit
 
 # Sendcloud (necesario para descargar etiquetas privadas)
 SENDCLOUD_PUBLIC_KEY=
@@ -34,6 +46,8 @@ SENDCLOUD_SECRET_KEY=
 ```
 
 Si `LABEL_PRINTER_NAME` no esta definido, usa `Honeywell_PC42d`.
+
+Para DTF, lo recomendado es usar `DTF_HOT_FOLDER` si el software/RIP de la impresora tiene una carpeta de entrada automatica. El agente copia un archivo por unidad pendiente, por ejemplo si faltan 3 transfers del mismo diseno deja 3 archivos en esa carpeta. Si no hay hot folder, define `DTF_PRINTER_NAME` para imprimir mediante el sistema operativo.
 
 Para ver el nombre exacto de la impresora:
 

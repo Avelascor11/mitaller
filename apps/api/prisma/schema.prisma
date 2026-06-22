@@ -93,6 +93,14 @@ enum ShipmentStatus {
   ERROR
 }
 
+enum DtfPrintJobStatus {
+  PENDING
+  PROCESSING
+  PRINTED
+  FAILED
+  CANCELLED
+}
+
 enum ReturnStatus {
   REQUESTED
   LABEL_CREATED
@@ -307,6 +315,7 @@ model StockItem {
   recipeComponents   RecipeComponent[]
   purchaseNeeds      PurchaseNeed[]
   supplierOrderLines SupplierPurchaseOrderLine[]
+  dtfPrintJobs       DtfPrintJob[]
 }
 
 model StockLocation {
@@ -525,6 +534,31 @@ model Shipment {
   createdAt          DateTime       @default(now())
   updatedAt          DateTime       @updatedAt
   order              Order          @relation(fields: [orderId], references: [id], onDelete: Cascade)
+}
+
+model DtfPrintJob {
+  id            String            @id @default(cuid())
+  dedupeKey     String            @unique
+  sku           String
+  designName    String
+  imageUrl      String?
+  quantity      Int
+  status        DtfPrintJobStatus @default(PENDING)
+  source        String            @default("AUTO_ORDER_DTF")
+  orderNumbers  String[]
+  metadataJson  Json?
+  lockedAt      DateTime?
+  printedAt     DateTime?
+  failedAt      DateTime?
+  errorMessage  String?
+  printResult   Json?
+  stockItemId   String?
+  createdAt     DateTime          @default(now())
+  updatedAt     DateTime          @updatedAt
+  stockItem     StockItem?        @relation(fields: [stockItemId], references: [id], onDelete: SetNull)
+
+  @@index([status, createdAt])
+  @@index([sku])
 }
 
 model BankConnection {

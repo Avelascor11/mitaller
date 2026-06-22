@@ -30,6 +30,7 @@ struct APISnapshot {
     let stock: [StockRow]
     let purchaseNeeds: [PurchaseNeed]
     let purchaseMatrix: [PurchaseMatrixGroup]
+    let dtfPrintJobs: [DtfPrintJob]
 }
 
 struct ArchiveRetroOrdersResponse: Decodable {
@@ -65,13 +66,15 @@ struct APIClient {
         async let stock: [StockDTO] = get("/stock")
         async let purchaseNeeds: [PurchaseNeedDTO] = get("/purchase-needs/today")
         async let purchaseMatrix: PurchaseMatrixDTO = get("/purchase-needs/matrix")
+        async let dtfPrintJobs: [DtfPrintJobDTO] = get("/dtf-print/jobs")
 
         return try await APISnapshot(
             orders: orders.map(\.workshopOrder),
             tasks: tasks.map(\.workshopTask),
             stock: stock.flatMap(\.stockRows),
             purchaseNeeds: purchaseNeeds.map(\.purchaseNeed),
-            purchaseMatrix: purchaseMatrix.groups.map(\.purchaseMatrixGroup)
+            purchaseMatrix: purchaseMatrix.groups.map(\.purchaseMatrixGroup),
+            dtfPrintJobs: dtfPrintJobs.map(\.dtfPrintJob)
         )
     }
 
@@ -305,6 +308,17 @@ struct APIClient {
             body: ManualPrintRequest(filename: filename, pdfBase64: pdfData.base64EncodedString())
         )
         return try await perform(request)
+    }
+
+    func dtfPrintJobs() async throws -> [DtfPrintJob] {
+        let rows: [DtfPrintJobDTO] = try await get("/dtf-print/jobs")
+        return rows.map(\.dtfPrintJob)
+    }
+
+    func generateDtfPrintJobs() async throws -> DtfPrintGenerateResult {
+        let request = try jsonRequest(path: "/dtf-print/jobs/generate", method: "POST", body: EmptyBody())
+        let response: DtfPrintGenerateResultDTO = try await perform(request)
+        return response.dtfPrintGenerateResult
     }
 
     func economicsToday() async throws -> EconomicsSummary { try await get("/economics/today") }
@@ -2510,6 +2524,48 @@ private struct PurchaseDemandOrderDTO: Decodable {
             quantity: quantity
         )
     }
+}
+
+private struct DtfPrintJobDTO: Decodable {
+    let id: String
+    let sku: String
+    let designName: String
+    let imageUrl: String?
+    let quantity: Int
+    let status: String
+    let orderNumbers: [String]?
+    let createdAt: Date?
+    let printedAt: Date?
+    let errorMessage: String?
+
+    var dtfPrintJob: DtfPrintJob {
+        DtfPrintJob(
+            id: id,
+            sku: sku,
+            designName: designName,
+            imageUrl: imageUrl,
+            quantity: quantity,
+            status: status,
+            orderNumbers: orderNumbers ?? [],
+            createdAt: createdAt,
+            printedAt: printedAt,
+            errorMessage: errorMessage
+        )
+    }
+}
+
+private struct DtfPrintGenerateResultDTO: Decodable {
+    let created: [DtfPrintJobDTO]?
+    let skipped: [DtfPrintSkippedDTO]?
+
+    var dtfPrintGenerateResult: DtfPrintGenerateResult {
+        DtfPrintGenerateResult(createdCount: created?.count ?? 0, skippedCount: skipped?.count ?? 0)
+    }
+}
+
+private struct DtfPrintSkippedDTO: Decodable {
+    let sku: String?
+    let reason: String?
 }
 
 extension PriorityLevel {

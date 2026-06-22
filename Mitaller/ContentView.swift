@@ -670,6 +670,45 @@ struct PurchaseMatrixGroup: Identifiable {
     }
 }
 
+struct DtfPrintJob: Identifiable {
+    let id: String
+    let sku: String
+    let designName: String
+    let imageUrl: String?
+    let quantity: Int
+    let status: String
+    let orderNumbers: [String]
+    let createdAt: Date?
+    let printedAt: Date?
+    let errorMessage: String?
+
+    var statusLabel: String {
+        switch status {
+        case "PENDING": "Pendiente"
+        case "PROCESSING": "Procesando"
+        case "PRINTED": "Impreso"
+        case "FAILED": "Error"
+        case "CANCELLED": "Cancelado"
+        default: status
+        }
+    }
+
+    var statusColor: Color {
+        switch status {
+        case "PENDING": AppTheme.amber
+        case "PROCESSING": AppTheme.blue
+        case "PRINTED": AppTheme.green
+        case "FAILED": AppTheme.red
+        default: AppTheme.muted
+        }
+    }
+}
+
+struct DtfPrintGenerateResult {
+    let createdCount: Int
+    let skippedCount: Int
+}
+
 struct StockReceipt: Decodable, Identifiable {
     let id: String
     let status: String
@@ -717,6 +756,7 @@ final class WorkshopStore {
     var stock: [StockRow] = []
     var purchaseNeeds: [PurchaseNeed] = []
     var purchaseMatrix: [PurchaseMatrixGroup] = []
+    var dtfPrintJobs: [DtfPrintJob] = []
     var supplierPurchaseOrders: [SupplierPurchaseOrder] = []
     var supplierPurchaseOrderMessage: String?
     var isSupplierPurchaseActionRunning = false
@@ -1073,8 +1113,24 @@ final class WorkshopStore {
         stock = snapshot.stock
         purchaseNeeds = snapshot.purchaseNeeds
         purchaseMatrix = snapshot.purchaseMatrix
+        dtfPrintJobs = snapshot.dtfPrintJobs
         isAPIConnected = true
         lastSyncText = Date().formatted(.dateTime.hour().minute().second())
+    }
+
+    func generateDtfPrintJobs() async {
+        guard let client = apiClient else { return }
+        syncError = nil
+        do {
+            let result = try await client.generateDtfPrintJobs()
+            dtfPrintJobs = try await client.dtfPrintJobs()
+            try await loadSnapshot(from: client)
+            syncError = result.createdCount == 0
+                ? "DTF: no habia nada nuevo que imprimir"
+                : "DTF: \(result.createdCount) trabajos enviados a cola"
+        } catch {
+            syncError = "No se pudo preparar impresion DTF: \(error.localizedDescription)"
+        }
     }
 
     func start(_ task: WorkshopTask) {
@@ -3575,6 +3631,24 @@ struct DTFView: View {
         }
     }
 
+    private var pendingPrintJobs: [DtfPrintJob] {
+        store.dtfPrintJobs.filter { $0.status == "PENDING" || $0.status == "PROCESSING" }
+    }
+
+    private var failedPrintJobs: [DtfPrintJob] {
+        store.dtfPrintJobs.filter { $0.status == "FAILED" }
+    }
+
+    private var printedToday: Int {
+        let calendar = Calendar.current
+        return store.dtfPrintJobs
+            .filter { job in
+                guard job.status == "PRINTED", let printedAt = job.printedAt else { return false }
+                return calendar.isDateInToday(printedAt)
+            }
+            .reduce(0) { $0 + $1.quantity }
+    }
+
     var body: some View {
         NavigationStack {
             ScrollView {
@@ -3594,6 +3668,23 @@ struct DTFView: View {
                         MetricTile(title: "Pedir", value: dtfGroup?.totalRecommended ?? 0, color: AppTheme.magenta, icon: "cart.badge.plus")
                         MetricTile(title: "Pedidos", value: dtfGroup?.totalPending ?? 0, color: AppTheme.blue, icon: "shippingbox.fill")
                         MetricTile(title: "Stock", value: dtfGroup?.totalStock ?? 0, color: AppTheme.green, icon: "archivebox.fill")
+                        MetricTile(title: "Cola", value: pendingPrintJobs.reduce(0) { $0 + $1.quantity }, color: AppTheme.amber, icon: "printer.fill")
+                        MetricTile(title: "Hoy", value: printedToday, color: AppTheme.teal, icon: "checkmark.seal.fill")
+                    }
+
+                    Button {
+                        Task { await store.generateDtfPrintJobs() }
+                    } label: {
+                        Label("Preparar cola de impresion DTF", systemImage: "printer.filled.and.paper")
+                            .font(.headline.weight(.black))
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(AppTheme.magenta)
+                    .disabled(store.isLoading || (dtfGroup?.totalRecommended ?? 0) == 0)
+
+                    if !store.dtfPrintJobs.isEmpty {
+                        DtfPrintQueuePanel(jobs: store.dtfPrintJobs, failedJobs: failedPrintJobs)
                     }
 
                     TextField("Buscar diseño DTF", text: $query)
@@ -3676,6 +3767,90 @@ struct DTFDesignCard: View {
         }
         .buttonStyle(.plain)
         .disabled(entry.sku == nil)
+    }
+}
+
+struct DtfPrintQueuePanel: View {
+    let jobs: [DtfPrintJob]
+    let failedJobs: [DtfPrintJob]
+
+    private var visibleJobs: [DtfPrintJob] {
+        jobs
+            .filter { $0.status == "PENDING" || $0.status == "PROCESSING" || $0.status == "FAILED" }
+            .sorted {
+                if $0.status == $1.status {
+                    return ($0.createdAt ?? .distantPast) > ($1.createdAt ?? .distantPast)
+                }
+                return statusRank($0.status) < statusRank($1.status)
+            }
+            .prefix(8)
+            .map { $0 }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 10) {
+                Image(systemName: failedJobs.isEmpty ? "printer.fill" : "exclamationmark.triangle.fill")
+                    .foregroundStyle(failedJobs.isEmpty ? AppTheme.teal : AppTheme.red)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Cola impresora DTF")
+                        .font(.headline.weight(.black))
+                        .foregroundStyle(AppTheme.ink)
+                    Text("El PC del taller recoge estos diseños y los manda a la DTF.")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(AppTheme.muted)
+                }
+                Spacer()
+            }
+
+            ForEach(visibleJobs) { job in
+                HStack(alignment: .top, spacing: 10) {
+                    Text("x\(job.quantity)")
+                        .font(.title3.weight(.black))
+                        .foregroundStyle(job.statusColor)
+                        .frame(width: 44, alignment: .leading)
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(job.designName)
+                            .font(.subheadline.weight(.black))
+                            .foregroundStyle(AppTheme.ink)
+                            .lineLimit(1)
+                        if !job.orderNumbers.isEmpty {
+                            Text(job.orderNumbers.map { "#\($0)" }.joined(separator: ", "))
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(AppTheme.muted)
+                                .lineLimit(1)
+                        }
+                        if let error = job.errorMessage, !error.isEmpty {
+                            Text(error)
+                                .font(.caption2.weight(.bold))
+                                .foregroundStyle(AppTheme.red)
+                                .lineLimit(2)
+                        }
+                    }
+                    Spacer()
+                    Text(job.statusLabel)
+                        .font(.caption2.weight(.black))
+                        .foregroundStyle(job.statusColor)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 5)
+                        .background(job.statusColor.opacity(0.16))
+                        .clipShape(Capsule())
+                }
+                .padding(10)
+                .background(AppTheme.surfaceSoft)
+                .clipShape(RoundedRectangle(cornerRadius: 14))
+            }
+        }
+        .glassPanel()
+    }
+
+    private func statusRank(_ status: String) -> Int {
+        switch status {
+        case "FAILED": 0
+        case "PROCESSING": 1
+        case "PENDING": 2
+        default: 3
+        }
     }
 }
 

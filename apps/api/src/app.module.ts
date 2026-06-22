@@ -5,6 +5,7 @@ import { ActivityModule } from './activity/activity.module';
 import { AppController } from './app.controller';
 import { AuthModule } from './auth/auth.module';
 import { BankModule } from './bank/bank.module';
+import { DtfPrintModule } from './dtf-print/dtf-print.module';
 import { EconomicsModule } from './economics/economics.module';
 import { ManualPrintModule } from './manual-print/manual-print.module';
 import { MetaModule } from './meta/meta.module';
@@ -34,6 +35,7 @@ import { SupplierModule } from './supplier/supplier.module';
     ActivityModule,
     AuthModule,
     BankModule,
+    DtfPrintModule,
     OrdersModule,
     ProductionModule,
     StockModule,
