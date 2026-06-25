@@ -119,4 +119,34 @@ describe('EmployeesService', () => {
     expect(upserts[0].create.units).toBe(2);
     expect(upserts[1].create.units).toBe(1);
   });
+
+  it('permite guardar horas manuales de un empleado para un dia', async () => {
+    let deletedWhere: any;
+    let createdData: any;
+    const service = new EmployeesService(
+      {
+        employee: { findUnique: async () => ({ id: 'emp-1' }) },
+        employeeShift: {
+          deleteMany: async ({ where }: any) => {
+            deletedWhere = where;
+            return { count: 1 };
+          },
+          create: async ({ data }: any) => {
+            createdData = data;
+            return { id: 'shift-1', ...data };
+          }
+        }
+      } as never,
+      { orderBreakdown: async () => ({ netMargin: 0 }) } as never,
+      { get: () => undefined } as never
+    );
+
+    const shift = await service.setManualHours('emp-1', { date: '2026-06-25', hours: 4.5 });
+
+    expect(deletedWhere.employeeId).toBe('emp-1');
+    expect(deletedWhere.notes.startsWith).toBe('MANUAL_HOURS:2026-06-25');
+    expect(createdData.notes).toContain('MANUAL_HOURS:2026-06-25');
+    expect((createdData.endedAt.getTime() - createdData.startedAt.getTime()) / 60000).toBe(270);
+    expect(shift.employeeId).toBe('emp-1');
+  });
 });

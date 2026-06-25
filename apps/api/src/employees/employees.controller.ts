@@ -45,6 +45,11 @@ export class EmployeesController {
     return this.employees.clockOut(id, body.breakMinutes);
   }
 
+  @Post(':id/manual-hours')
+  setManualHours(@Param('id') id: string, @Body() body: { date?: string; hours?: number; notes?: string | null }) {
+    return this.employees.setManualHours(id, body);
+  }
+
   @Post(':id/orders')
   assignOrder(@Param('id') id: string, @Body() body: {
     orderId?: string;

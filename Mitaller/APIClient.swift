@@ -358,6 +358,15 @@ struct APIClient {
         let request = try jsonRequest(path: "/employees/\(Self.pathSegment(id))/clock-out", method: "POST", body: EmployeeClockOutRequest(breakMinutes: breakMinutes))
         return try await perform(request)
     }
+    func setEmployeeManualHours(id: String, date: Date, hours: Double, notes: String? = nil) async throws -> EmployeeShift {
+        let formatter = DateFormatter.apiDay
+        let request = try jsonRequest(
+            path: "/employees/\(Self.pathSegment(id))/manual-hours",
+            method: "POST",
+            body: EmployeeManualHoursRequest(date: formatter.string(from: date), hours: hours, notes: notes)
+        )
+        return try await perform(request)
+    }
     func assignOrderToEmployee(employeeId: String, orderNumber: String, role: String = "PREPARACION", units: Int = 1, minutesSpent: Int = 0) async throws -> EmployeeOrderContribution {
         let request = try jsonRequest(
             path: "/employees/\(Self.pathSegment(employeeId))/orders",
@@ -1845,6 +1854,12 @@ struct EmployeeSaveRequest: Encodable {
 
 struct EmployeeClockOutRequest: Encodable {
     let breakMinutes: Int
+}
+
+struct EmployeeManualHoursRequest: Encodable {
+    let date: String
+    let hours: Double
+    let notes: String?
 }
 
 struct EmployeeAssignOrderRequest: Encodable {

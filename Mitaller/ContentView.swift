@@ -11684,8 +11684,10 @@ struct EmployeesView: View {
     @State private var selectedBatchOrderIDs: Set<String> = []
     @State private var orderNumber = ""
     @State private var orderMinutes = "20"
+    @State private var manualHours = ""
     @State private var assigning = false
     @State private var workSessionBusy = false
+    @State private var manualHoursBusy = false
 
     var body: some View {
         NavigationStack {
@@ -11743,6 +11745,15 @@ struct EmployeesView: View {
                         busy: workSessionBusy,
                         onStart: { Task { await startWorkSession() } },
                         onFinish: { employee, session in Task { await finishWorkSession(employee: employee, session: session) } }
+                    )
+
+                    EmployeeManualHoursCard(
+                        employees: employees,
+                        selectedEmployeeId: $selectedEmployeeId,
+                        selectedDay: selectedDay,
+                        hours: $manualHours,
+                        busy: manualHoursBusy,
+                        onSave: { Task { await saveManualHours() } }
                     )
 
                     EmployeeAssignOrderCard(
@@ -11881,6 +11892,26 @@ struct EmployeesView: View {
         defer { workSessionBusy = false }
         do {
             _ = try await client.finishEmployeeWorkSession(employeeId: employee.id, sessionId: session.id)
+            await reload()
+        } catch {
+            self.error = error.localizedDescription
+        }
+    }
+
+    private func saveManualHours() async {
+        guard let client = store.apiClient else { error = "API no configurada"; return }
+        let normalized = manualHours.replacingOccurrences(of: ",", with: ".")
+        guard let hours = Double(normalized), hours > 0, hours <= 24 else {
+            error = "Pon horas validas, por ejemplo 4,5"
+            return
+        }
+        guard !selectedEmployeeId.isEmpty else { error = "Elige un empleado"; return }
+        manualHoursBusy = true
+        error = nil
+        defer { manualHoursBusy = false }
+        do {
+            _ = try await client.setEmployeeManualHours(id: selectedEmployeeId, date: selectedDay, hours: hours, notes: "Correccion manual desde app")
+            manualHours = ""
             await reload()
         } catch {
             self.error = error.localizedDescription
@@ -12162,6 +12193,51 @@ private struct EmployeeWorkOrderToggle: View {
             .overlay(RoundedRectangle(cornerRadius: 12).stroke(selected ? AppTheme.green.opacity(0.45) : AppTheme.lineSoft, lineWidth: 1))
         }
         .buttonStyle(.plain)
+    }
+}
+
+private struct EmployeeManualHoursCard: View {
+    let employees: [EmployeeRecord]
+    @Binding var selectedEmployeeId: String
+    let selectedDay: Date
+    @Binding var hours: String
+    let busy: Bool
+    let onSave: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            VStack(alignment: .leading, spacing: 4) {
+                Label("Se me olvidó fichar", systemImage: "clock.badge.exclamationmark.fill")
+                    .font(.headline.weight(.heavy))
+                    .foregroundStyle(AppTheme.ink)
+                Text("Añade o reemplaza las horas manuales del día \(selectedDay.formatted(.dateTime.day().month(.abbreviated))).")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(AppTheme.muted)
+            }
+
+            Picker("Empleado", selection: $selectedEmployeeId) {
+                ForEach(employees) { employee in
+                    Text(employee.name).tag(employee.id)
+                }
+            }
+            .pickerStyle(.menu)
+            .disabled(employees.isEmpty || busy)
+
+            TextField("Horas trabajadas, ej. 4,5", text: $hours)
+                .keyboardType(.decimalPad)
+                .padding(12)
+                .background(AppTheme.surfaceSoft)
+                .clipShape(RoundedRectangle(cornerRadius: 12))
+
+            Button(action: onSave) {
+                Label(busy ? "Guardando..." : "Guardar horas de ese día", systemImage: "square.and.pencil")
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.borderedProminent)
+            .tint(AppTheme.amber)
+            .disabled(busy || employees.isEmpty || hours.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+        }
+        .glassPanel(padding: 14, accent: AppTheme.amber)
     }
 }
 

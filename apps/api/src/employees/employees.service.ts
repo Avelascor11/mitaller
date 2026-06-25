@@ -27,6 +27,12 @@ interface WorkSessionBody {
   role?: string;
 }
 
+interface ManualHoursBody {
+  date?: string;
+  hours?: number;
+  notes?: string | null;
+}
+
 @Injectable()
 export class EmployeesService {
   constructor(
@@ -113,6 +119,37 @@ export class EmployeesService {
       data: {
         endedAt: new Date(),
         breakMinutes: Math.max(0, Math.trunc(Number(breakMinutes ?? open.breakMinutes ?? 0)))
+      }
+    });
+    return this.shiftDto(shift);
+  }
+
+  async setManualHours(employeeId: string, body: ManualHoursBody) {
+    await this.ensureEmployee(employeeId);
+    const hours = Number(body.hours);
+    if (!Number.isFinite(hours) || hours <= 0 || hours > 24) {
+      throw new BadRequestException('Indica horas validas entre 0 y 24');
+    }
+    const dayKey = this.parseDayKey(body.date);
+    const startedAt = new Date(`${dayKey}T09:00:00.000`);
+    const endedAt = new Date(startedAt.getTime() + Math.round(hours * 60) * 60000);
+    const marker = `MANUAL_HOURS:${dayKey}`;
+    const notes = [marker, this.cleanNullable(body.notes)].filter(Boolean).join(' · ');
+
+    await this.prisma.employeeShift.deleteMany({
+      where: {
+        employeeId,
+        notes: { startsWith: marker }
+      }
+    });
+
+    const shift = await this.prisma.employeeShift.create({
+      data: {
+        employeeId,
+        startedAt,
+        endedAt,
+        breakMinutes: 0,
+        notes
       }
     });
     return this.shiftDto(shift);
@@ -374,6 +411,20 @@ export class EmployeesService {
       throw new BadRequestException('Rango de fechas invalido');
     }
     return start <= end ? { start, end } : { start: end, end: start };
+  }
+
+  private parseDayKey(value?: string) {
+    if (!value) {
+      const now = new Date();
+      const year = now.getFullYear();
+      const month = `${now.getMonth() + 1}`.padStart(2, '0');
+      const day = `${now.getDate()}`.padStart(2, '0');
+      return `${year}-${month}-${day}`;
+    }
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) throw new BadRequestException('Fecha invalida');
+    const parsed = new Date(`${value}T12:00:00.000`);
+    if (Number.isNaN(parsed.getTime())) throw new BadRequestException('Fecha invalida');
+    return value;
   }
 
   private shiftHoursInRange(shift: any, start: Date, end: Date) {
