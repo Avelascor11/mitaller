@@ -245,6 +245,7 @@ model Order {
   stockMovements      StockMovement[]
   shipments           Shipment[]
   returns             Return[]
+  employeeContributions EmployeeOrderContribution[]
 }
 
 model OrderItem {
@@ -664,6 +665,56 @@ model FixedExpensePayment {
   @@unique([fixedExpenseId, period])
   @@index([period])
   @@map("fixed_expense_payments")
+}
+
+model Employee {
+  id              String                      @id @default(cuid())
+  name            String
+  role            String?
+  active          Boolean                     @default(true)
+  hourlyRate      Float                       @default(8)
+  orderBonusRate  Float                       @default(0.35)
+  marginShareRate Float                       @default(0.08)
+  notes           String?
+  createdAt       DateTime                    @default(now())
+  updatedAt       DateTime                    @updatedAt
+  shifts          EmployeeShift[]
+  contributions   EmployeeOrderContribution[]
+
+  @@index([active, name])
+  @@map("employees")
+}
+
+model EmployeeShift {
+  id           String    @id @default(cuid())
+  employeeId   String
+  startedAt    DateTime  @default(now())
+  endedAt      DateTime?
+  breakMinutes Int       @default(0)
+  notes        String?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+  employee     Employee  @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+
+  @@index([employeeId, startedAt])
+  @@index([endedAt])
+  @@map("employee_shifts")
+}
+
+model EmployeeOrderContribution {
+  id         String    @id @default(cuid())
+  employeeId String
+  orderId    String
+  role       String    @default("PREPARACION")
+  units      Int       @default(1)
+  createdAt  DateTime  @default(now())
+  employee   Employee  @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  order      Order     @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  @@unique([employeeId, orderId, role])
+  @@index([orderId])
+  @@index([createdAt])
+  @@map("employee_order_contributions")
 }
 
 model PreorderPayment {

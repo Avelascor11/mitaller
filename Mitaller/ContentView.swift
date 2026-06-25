@@ -1520,6 +1520,8 @@ struct MainTabView: View {
                 .tabItem { Label("Caja", systemImage: "banknote.fill") }
             FixedExpensesView()
                 .tabItem { Label("Gastos", systemImage: "calendar.badge.exclamationmark") }
+            EmployeesView()
+                .tabItem { Label("Empleados", systemImage: "person.badge.clock.fill") }
             DevolucionesView()
                 .tabItem { Label("Devoluciones", systemImage: "arrow.uturn.left.circle.fill") }
             CarrierReturnsView()
@@ -11665,6 +11667,396 @@ struct CustomEconomicsDatePicker: View {
         from = today
         to = today
         onApply()
+    }
+}
+
+struct EmployeesView: View {
+    @Environment(WorkshopStore.self) private var store
+    @State private var summary: EmployeeSummary?
+    @State private var employees: [EmployeeRecord] = []
+    @State private var selectedDay = Calendar.current.startOfDay(for: Date())
+    @State private var loading = false
+    @State private var error: String?
+    @State private var newName = ""
+    @State private var newRole = ""
+    @State private var newHourlyRate = "8"
+    @State private var selectedEmployeeId = ""
+    @State private var orderNumber = ""
+    @State private var assigning = false
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 16) {
+                    VStack(alignment: .leading, spacing: 5) {
+                        Text("Empleados")
+                            .font(.system(size: 30, weight: .heavy, design: .rounded))
+                            .foregroundStyle(AppTheme.ink)
+                        Text("Control horario y sueldo recomendado segun margen.")
+                            .font(.subheadline.weight(.medium))
+                            .foregroundStyle(AppTheme.muted)
+                    }
+
+                    DatePicker("Dia", selection: $selectedDay, displayedComponents: .date)
+                        .datePickerStyle(.compact)
+                        .font(.headline.weight(.bold))
+                        .padding(14)
+                        .background(AppTheme.surfaceSoft)
+                        .clipShape(RoundedRectangle(cornerRadius: 16))
+                        .onChange(of: selectedDay) { _, _ in Task { await reload() } }
+
+                    if let summary {
+                        EmployeeTotalsCard(summary: summary)
+                    } else if loading {
+                        ProgressView().frame(maxWidth: .infinity)
+                    }
+
+                    if let error {
+                        Text(error)
+                            .font(.footnote.weight(.semibold))
+                            .foregroundStyle(AppTheme.red)
+                            .padding(10)
+                            .glassPanel(padding: 10, accent: AppTheme.red)
+                    }
+
+                    SectionHeader(title: "Equipo", subtitle: "Fichar, revisar horas y ver si el pago encaja con margen")
+                    if let summary, summary.employees.isEmpty {
+                        EmptyStateCard(title: "Sin empleados", subtitle: "Crea el primero abajo para empezar a fichar.")
+                    } else {
+                        ForEach(summary?.employees ?? []) { row in
+                            EmployeeRowCard(
+                                row: row,
+                                currency: summary?.currency ?? "EUR",
+                                onClockToggle: { Task { await toggleClock(row) } }
+                            )
+                        }
+                    }
+
+                    EmployeeAssignOrderCard(
+                        employees: employees,
+                        selectedEmployeeId: $selectedEmployeeId,
+                        orderNumber: $orderNumber,
+                        assigning: assigning,
+                        onAssign: { Task { await assignOrder() } }
+                    )
+
+                    EmployeeCreateCard(
+                        name: $newName,
+                        role: $newRole,
+                        hourlyRate: $newHourlyRate,
+                        loading: loading,
+                        onCreate: { Task { await createEmployee() } }
+                    )
+                }
+                .padding()
+            }
+            .screenBackground()
+            .globalSearch()
+            .navigationTitle("Empleados")
+            .toolbar {
+                Button { Task { await reload() } } label: {
+                    Image(systemName: "arrow.clockwise")
+                }.disabled(loading)
+            }
+            .task { await reload() }
+            .refreshable { await reload() }
+        }
+    }
+
+    private func reload() async {
+        guard let client = store.apiClient else { error = "API no configurada"; return }
+        loading = true
+        error = nil
+        defer { loading = false }
+        do {
+            async let employeeList = client.employees()
+            async let employeeSummary = client.employeeSummary(from: selectedDay, to: selectedDay)
+            employees = try await employeeList
+            summary = try await employeeSummary
+            if selectedEmployeeId.isEmpty {
+                selectedEmployeeId = employees.first?.id ?? ""
+            }
+        } catch {
+            self.error = error.localizedDescription
+        }
+    }
+
+    private func createEmployee() async {
+        guard let client = store.apiClient else { error = "API no configurada"; return }
+        let name = newName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !name.isEmpty else { error = "Pon el nombre del empleado"; return }
+        let role = newRole.trimmingCharacters(in: .whitespacesAndNewlines)
+        loading = true
+        error = nil
+        defer { loading = false }
+        do {
+            let rate = Double(newHourlyRate.replacingOccurrences(of: ",", with: "."))
+            _ = try await client.createEmployee(EmployeeSaveRequest(
+                name: name,
+                role: role.isEmpty ? nil : role,
+                hourlyRate: rate
+            ))
+            newName = ""
+            newRole = ""
+            await reload()
+        } catch {
+            self.error = error.localizedDescription
+        }
+    }
+
+    private func toggleClock(_ row: EmployeeSummaryRow) async {
+        guard let client = store.apiClient else { error = "API no configurada"; return }
+        loading = true
+        error = nil
+        defer { loading = false }
+        do {
+            if row.openShift {
+                _ = try await client.clockOutEmployee(id: row.employee.id)
+            } else {
+                _ = try await client.clockInEmployee(id: row.employee.id)
+            }
+            await reload()
+        } catch {
+            self.error = error.localizedDescription
+        }
+    }
+
+    private func assignOrder() async {
+        guard let client = store.apiClient else { error = "API no configurada"; return }
+        let cleanedOrder = orderNumber.trimmingCharacters(in: .whitespacesAndNewlines).replacingOccurrences(of: "#", with: "")
+        guard !selectedEmployeeId.isEmpty else { error = "Elige un empleado"; return }
+        guard !cleanedOrder.isEmpty else { error = "Pon el numero de pedido"; return }
+        assigning = true
+        error = nil
+        defer { assigning = false }
+        do {
+            _ = try await client.assignOrderToEmployee(employeeId: selectedEmployeeId, orderNumber: cleanedOrder)
+            orderNumber = ""
+            await reload()
+        } catch {
+            self.error = error.localizedDescription
+        }
+    }
+}
+
+private struct EmployeeTotalsCard: View {
+    let summary: EmployeeSummary
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(alignment: .top) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Label("Sueldo recomendado", systemImage: "person.text.rectangle.fill")
+                        .font(.headline.weight(.heavy))
+                        .foregroundStyle(AppTheme.ink)
+                    Text("Tope sano: \(Int((summary.maxLaborMarginRate * 100).rounded()))% del margen asignado.")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(AppTheme.muted)
+                }
+                Spacer()
+                Text(formatMoney(summary.totals.suggestedPay, currency: summary.currency))
+                    .font(.system(size: 30, weight: .heavy, design: .rounded))
+                    .foregroundStyle(AppTheme.green)
+            }
+
+            LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 10) {
+                MoneyTile(label: "Margen equipo", value: summary.totals.generatedMargin, currency: summary.currency, color: AppTheme.blue)
+                EmployeeMiniMetric(title: "Horas", value: String(format: "%.2f", summary.totals.hours), color: AppTheme.purple, icon: "clock.fill")
+                EmployeeMiniMetric(title: "Pedidos", value: "\(summary.totals.orders)", color: AppTheme.amber, icon: "shippingbox.fill")
+                EmployeeMiniMetric(title: "% Mano obra", value: summary.totals.laborCostPct.map { "\(Int($0.rounded()))%" } ?? "-", color: AppTheme.magenta, icon: "percent")
+            }
+
+            ReserveLine(label: "Horas base", value: summary.totals.basePay, currency: summary.currency, color: AppTheme.blue)
+            ReserveLine(label: "Bonus pedidos", value: summary.totals.orderBonus, currency: summary.currency, color: AppTheme.amber)
+            ReserveLine(label: "Bonus margen", value: summary.totals.marginBonus, currency: summary.currency, color: AppTheme.green)
+        }
+        .glassPanel(padding: 18, accent: AppTheme.green)
+    }
+}
+
+private struct EmployeeRowCard: View {
+    let row: EmployeeSummaryRow
+    let currency: String
+    let onClockToggle: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .top) {
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack {
+                        Text(row.employee.name)
+                            .font(.title3.weight(.heavy))
+                            .foregroundStyle(AppTheme.ink)
+                        if row.openShift {
+                            Text("Fichado")
+                                .font(.caption.weight(.heavy))
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 4)
+                                .background(AppTheme.greenSoft)
+                                .foregroundStyle(AppTheme.green)
+                                .clipShape(Capsule())
+                        }
+                    }
+                    Text(row.employee.role ?? "Taller")
+                        .font(.caption.weight(.bold))
+                        .foregroundStyle(AppTheme.muted)
+                }
+                Spacer()
+                Button(action: onClockToggle) {
+                    Label(row.openShift ? "Salida" : "Entrada", systemImage: row.openShift ? "stop.fill" : "play.fill")
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(row.openShift ? AppTheme.red : AppTheme.green)
+            }
+
+            LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 10) {
+                EmployeeMiniMetric(title: "Horas", value: String(format: "%.2f", row.hours), color: AppTheme.blue, icon: "clock.fill")
+                EmployeeMiniMetric(title: "Pedidos", value: "\(row.orders)", color: AppTheme.amber, icon: "shippingbox.fill")
+                EmployeeMiniMetric(title: "Margen", value: formatMoney(row.generatedMargin, currency: currency), color: AppTheme.green, icon: "chart.line.uptrend.xyaxis")
+                EmployeeMiniMetric(title: "Pagar", value: formatMoney(row.suggestedPay, currency: currency), color: row.status == "OK" ? AppTheme.purple : AppTheme.red, icon: "eurosign.circle.fill")
+            }
+
+            if let pct = row.laborCostPct {
+                Text("Coste empleado: \(Int(pct.rounded()))% del margen asignado.")
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(row.status == "OK" ? AppTheme.muted : AppTheme.red)
+            }
+            if let warning = row.warning {
+                Text(warning)
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(row.status == "OK" ? AppTheme.muted : AppTheme.amber)
+            }
+            if !row.recentOrders.isEmpty {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Pedidos tocados")
+                        .font(.caption.weight(.heavy))
+                        .foregroundStyle(AppTheme.muted)
+                    ForEach(row.recentOrders) { order in
+                        HStack {
+                            Text("#\(order.orderNumber)")
+                                .font(.caption.weight(.heavy))
+                                .foregroundStyle(AppTheme.ink)
+                            Text(order.customerName)
+                                .font(.caption)
+                                .foregroundStyle(AppTheme.muted)
+                                .lineLimit(1)
+                            Spacer()
+                            Text(order.role)
+                                .font(.caption2.weight(.heavy))
+                                .foregroundStyle(AppTheme.blue)
+                        }
+                    }
+                }
+            }
+        }
+        .glassPanel(padding: 14, accent: row.status == "OK" ? AppTheme.blue : AppTheme.amber)
+    }
+}
+
+private struct EmployeeAssignOrderCard: View {
+    let employees: [EmployeeRecord]
+    @Binding var selectedEmployeeId: String
+    @Binding var orderNumber: String
+    let assigning: Bool
+    let onAssign: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Label("Asignar pedido trabajado", systemImage: "shippingbox.and.arrow.backward.fill")
+                .font(.headline.weight(.heavy))
+                .foregroundStyle(AppTheme.ink)
+
+            Picker("Empleado", selection: $selectedEmployeeId) {
+                ForEach(employees) { employee in
+                    Text(employee.name).tag(employee.id)
+                }
+            }
+            .pickerStyle(.menu)
+            .disabled(employees.isEmpty)
+
+            TextField("Pedido, ej. 9599", text: $orderNumber)
+                .keyboardType(.numberPad)
+                .textInputAutocapitalization(.never)
+                .padding(12)
+                .background(AppTheme.surfaceSoft)
+                .clipShape(RoundedRectangle(cornerRadius: 12))
+
+            Button(action: onAssign) {
+                Label(assigning ? "Asignando..." : "Sumar pedido al sueldo", systemImage: "plus.circle.fill")
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.borderedProminent)
+            .disabled(assigning || employees.isEmpty || orderNumber.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+        }
+        .glassPanel(padding: 14, accent: AppTheme.purple)
+    }
+}
+
+private struct EmployeeCreateCard: View {
+    @Binding var name: String
+    @Binding var role: String
+    @Binding var hourlyRate: String
+    let loading: Bool
+    let onCreate: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Label("Nuevo empleado", systemImage: "person.badge.plus.fill")
+                .font(.headline.weight(.heavy))
+                .foregroundStyle(AppTheme.ink)
+
+            TextField("Nombre", text: $name)
+                .padding(12)
+                .background(AppTheme.surfaceSoft)
+                .clipShape(RoundedRectangle(cornerRadius: 12))
+
+            TextField("Rol, ej. Taller / Packing", text: $role)
+                .padding(12)
+                .background(AppTheme.surfaceSoft)
+                .clipShape(RoundedRectangle(cornerRadius: 12))
+
+            TextField("€/hora", text: $hourlyRate)
+                .keyboardType(.decimalPad)
+                .padding(12)
+                .background(AppTheme.surfaceSoft)
+                .clipShape(RoundedRectangle(cornerRadius: 12))
+
+            Button(action: onCreate) {
+                Label("Crear empleado", systemImage: "plus")
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.bordered)
+            .disabled(loading || name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+        }
+        .glassPanel(padding: 14, accent: AppTheme.blue)
+    }
+}
+
+private struct EmployeeMiniMetric: View {
+    let title: String
+    let value: String
+    let color: Color
+    let icon: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Image(systemName: icon)
+                .font(.headline)
+                .foregroundStyle(color)
+            Text(value)
+                .font(.title3.weight(.heavy))
+                .foregroundStyle(AppTheme.ink)
+                .lineLimit(1)
+                .minimumScaleFactor(0.65)
+            Text(title)
+                .font(.caption.weight(.bold))
+                .foregroundStyle(AppTheme.muted)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(12)
+        .background(AppTheme.surfaceSoft)
+        .clipShape(RoundedRectangle(cornerRadius: 14))
+        .overlay(RoundedRectangle(cornerRadius: 14).stroke(color.opacity(0.25), lineWidth: 1))
     }
 }
 

@@ -10,6 +10,7 @@ import { EconomicsService } from './economics.service';
 @Module({
   imports: [PrismaModule, ShopifyModule, MetaModule, BankModule, PurchasingModule],
   controllers: [EconomicsController],
-  providers: [EconomicsService]
+  providers: [EconomicsService],
+  exports: [EconomicsService]
 })
 export class EconomicsModule {}

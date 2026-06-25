@@ -79,6 +79,15 @@ Flujo recomendado: Railway calcula lo que falta, crea `DtfPrintJob`, el PC del t
 - `ECONOMICS_WASTE_RATE`: merma estimada sobre coste de producto/impresion. Por defecto `0.02` (2%).
 - `ECONOMICS_TAX_RESERVE_RATE`: reserva fiscal para proteger flujo de caja. Por defecto `0.15` (15%).
 
+## Empleados
+
+Estas variables solo afectan al calculo interno de gestion. No sustituyen la nomina legal, convenio, impuestos ni Seguridad Social.
+
+- `EMPLOYEE_DEFAULT_HOURLY_RATE`: tarifa base por hora al crear un empleado. Por defecto `8`.
+- `EMPLOYEE_DEFAULT_ORDER_BONUS`: bonus por pedido asignado al empleado. Por defecto `0.35`.
+- `EMPLOYEE_DEFAULT_MARGIN_SHARE`: porcentaje de margen positivo que se suma como bonus. Por defecto `0.08` (8%).
+- `EMPLOYEE_MAX_LABOR_MARGIN_RATE`: limite sano recomendado de coste laboral sobre margen asignado. Por defecto `0.25` (25%).
+
 ## Banco / PSD2
 
 Mitaller usa GoCardless Bank Account Data para conectar N26 por Open Banking/PSD2. No guardes usuario ni contrasena del banco en la app.

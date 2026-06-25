@@ -334,6 +334,39 @@ struct APIClient {
         try await get("/economics/order/\(Self.pathSegment(id))")
     }
 
+    func employees() async throws -> [EmployeeRecord] { try await get("/employees") }
+    func employeeSummary(from: Date? = nil, to: Date? = nil) async throws -> EmployeeSummary {
+        let formatter = DateFormatter.apiDay
+        if let from, let to {
+            return try await get("/employees/summary?from=\(formatter.string(from: from))&to=\(formatter.string(from: to))")
+        }
+        return try await get("/employees/summary")
+    }
+    func createEmployee(_ body: EmployeeSaveRequest) async throws -> EmployeeRecord {
+        let request = try jsonRequest(path: "/employees", method: "POST", body: body)
+        return try await perform(request)
+    }
+    func updateEmployee(id: String, body: EmployeeSaveRequest) async throws -> EmployeeRecord {
+        let request = try jsonRequest(path: "/employees/\(Self.pathSegment(id))", method: "PATCH", body: body)
+        return try await perform(request)
+    }
+    func clockInEmployee(id: String) async throws -> EmployeeShift {
+        let request = try jsonRequest(path: "/employees/\(Self.pathSegment(id))/clock-in", method: "POST", body: EmptyBody())
+        return try await perform(request)
+    }
+    func clockOutEmployee(id: String, breakMinutes: Int = 0) async throws -> EmployeeShift {
+        let request = try jsonRequest(path: "/employees/\(Self.pathSegment(id))/clock-out", method: "POST", body: EmployeeClockOutRequest(breakMinutes: breakMinutes))
+        return try await perform(request)
+    }
+    func assignOrderToEmployee(employeeId: String, orderNumber: String, role: String = "PREPARACION", units: Int = 1) async throws -> EmployeeOrderContribution {
+        let request = try jsonRequest(
+            path: "/employees/\(Self.pathSegment(employeeId))/orders",
+            method: "POST",
+            body: EmployeeAssignOrderRequest(orderNumber: orderNumber, role: role, units: units)
+        )
+        return try await perform(request)
+    }
+
     func bankStatus() async throws -> BankStatus {
         try await get("/bank/status")
     }
@@ -1662,6 +1695,116 @@ struct EconomicsSummary: Decodable {
     let adsReserve: Double?
     let orderCount: Int
     let orders: [OrderBreakdown]
+}
+
+struct EmployeeRecord: Decodable, Identifiable, Hashable {
+    let id: String
+    let name: String
+    let role: String?
+    let active: Bool
+    let hourlyRate: Double
+    let orderBonusRate: Double
+    let marginShareRate: Double
+    let notes: String?
+    let openShift: EmployeeShift?
+}
+
+struct EmployeeShift: Decodable, Identifiable, Hashable {
+    let id: String
+    let employeeId: String
+    let startedAt: Date?
+    let endedAt: Date?
+    let breakMinutes: Int
+}
+
+struct EmployeeSummary: Decodable {
+    let from: String
+    let to: String
+    let currency: String
+    let maxLaborMarginRate: Double
+    let totals: EmployeeSummaryTotals
+    let employees: [EmployeeSummaryRow]
+}
+
+struct EmployeeSummaryTotals: Decodable {
+    let hours: Double
+    let orders: Int
+    let units: Int
+    let generatedMargin: Double
+    let basePay: Double
+    let orderBonus: Double
+    let marginBonus: Double
+    let suggestedPay: Double
+    let laborCostPct: Double?
+}
+
+struct EmployeeSummaryRow: Decodable, Identifiable {
+    var id: String { employee.id }
+    let employee: EmployeeRecord
+    let hours: Double
+    let openShift: Bool
+    let orders: Int
+    let units: Int
+    let generatedMargin: Double
+    let basePay: Double
+    let orderBonus: Double
+    let marginBonus: Double
+    let suggestedPay: Double
+    let maxRecommendedByMargin: Double
+    let laborCostPct: Double?
+    let status: String
+    let warning: String?
+    let recentOrders: [EmployeeRecentOrder]
+}
+
+struct EmployeeRecentOrder: Decodable, Identifiable {
+    let id: String
+    let role: String
+    let units: Int
+    let createdAt: Date?
+    let orderId: String
+    let orderNumber: String
+    let customerName: String
+}
+
+struct EmployeeOrderContribution: Decodable {
+    let id: String
+    let employeeId: String
+    let orderId: String
+    let orderNumber: String
+    let customerName: String
+    let role: String
+    let units: Int
+}
+
+struct EmployeeSaveRequest: Encodable {
+    let name: String?
+    let role: String?
+    let active: Bool?
+    let hourlyRate: Double?
+    let orderBonusRate: Double?
+    let marginShareRate: Double?
+    let notes: String?
+
+    init(name: String? = nil, role: String? = nil, active: Bool? = nil, hourlyRate: Double? = nil, orderBonusRate: Double? = nil, marginShareRate: Double? = nil, notes: String? = nil) {
+        self.name = name
+        self.role = role
+        self.active = active
+        self.hourlyRate = hourlyRate
+        self.orderBonusRate = orderBonusRate
+        self.marginShareRate = marginShareRate
+        self.notes = notes
+    }
+}
+
+struct EmployeeClockOutRequest: Encodable {
+    let breakMinutes: Int
+}
+
+struct EmployeeAssignOrderRequest: Encodable {
+    let orderNumber: String
+    let role: String
+    let units: Int
 }
 
 struct GrowthControlSummary: Decodable {
