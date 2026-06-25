@@ -11689,6 +11689,21 @@ struct EmployeesView: View {
     @State private var workSessionBusy = false
     @State private var manualHoursBusy = false
 
+    private var employeeSelectableOrders: [WorkshopOrder] {
+        let pending = store.pendingPreparationOrders
+        let finished = store.orders
+            .filter { $0.preparedAt != nil }
+            .sorted { left, right in
+                (left.preparedAt ?? left.createdAt ?? .distantPast) > (right.preparedAt ?? right.createdAt ?? .distantPast)
+            }
+
+        var seen = Set<String>()
+        return (pending + finished).filter { order in
+            guard let id = order.remoteID else { return false }
+            return seen.insert(id).inserted
+        }
+    }
+
     var body: some View {
         NavigationStack {
             ScrollView {
@@ -11739,7 +11754,7 @@ struct EmployeesView: View {
 
                     EmployeeWorkSessionCard(
                         employees: employees,
-                        orders: store.pendingPreparationOrders,
+                        orders: employeeSelectableOrders,
                         selectedEmployeeId: $selectedEmployeeId,
                         selectedOrderIDs: $selectedBatchOrderIDs,
                         busy: workSessionBusy,
@@ -11802,7 +11817,7 @@ struct EmployeesView: View {
                 selectedEmployeeId = employees.first?.id ?? ""
             }
             selectedBatchOrderIDs = selectedBatchOrderIDs.filter { id in
-                store.pendingPreparationOrders.contains { $0.remoteID == id }
+                employeeSelectableOrders.contains { $0.remoteID == id }
             }
         } catch {
             self.error = error.localizedDescription
@@ -12062,7 +12077,7 @@ private struct EmployeeWorkSessionCard: View {
     }
 
     private var selectableOrders: [WorkshopOrder] {
-        Array(orders.filter { $0.remoteID != nil }.prefix(40))
+        Array(orders.filter { $0.remoteID != nil }.prefix(80))
     }
 
     var body: some View {
@@ -12071,7 +12086,7 @@ private struct EmployeeWorkSessionCard: View {
                 Label("¿Qué pedidos vas a preparar?", systemImage: "checklist.checked")
                     .font(.headline.weight(.heavy))
                     .foregroundStyle(AppTheme.ink)
-                Text("Elige empleado, marca pedidos y empieza. Al finalizar se reparte el tiempo automaticamente.")
+                Text("Elige pendientes o finalizados recientes. Al finalizar se reparte el tiempo automaticamente.")
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(AppTheme.muted)
             }
@@ -12116,7 +12131,7 @@ private struct EmployeeWorkSessionCard: View {
                 .clipShape(RoundedRectangle(cornerRadius: 14))
             } else {
                 if selectableOrders.isEmpty {
-                    Text("No hay pedidos sin preparar disponibles.")
+                    Text("No hay pedidos disponibles para asignar.")
                         .font(.caption.weight(.bold))
                         .foregroundStyle(AppTheme.muted)
                         .padding(12)
@@ -12159,6 +12174,28 @@ private struct EmployeeWorkOrderToggle: View {
     let selected: Bool
     let onToggle: () -> Void
 
+    private var statusTitle: String {
+        order.preparedAt == nil ? "Pendiente" : "Finalizado"
+    }
+
+    private var statusColor: Color {
+        order.preparedAt == nil ? AppTheme.amber : AppTheme.green
+    }
+
+    private var statusSoftColor: Color {
+        order.preparedAt == nil ? AppTheme.amberSoft : AppTheme.greenSoft
+    }
+
+    private var dateText: String? {
+        if let prepared = order.preparedAtShort {
+            return "Hecho \(prepared)"
+        }
+        if let created = order.createdAtShort {
+            return "Pedido \(created)"
+        }
+        return nil
+    }
+
     var body: some View {
         Button(action: onToggle) {
             HStack(spacing: 10) {
@@ -12177,11 +12214,24 @@ private struct EmployeeWorkOrderToggle: View {
                             .background(order.priority.softColor)
                             .foregroundStyle(order.priority.color)
                             .clipShape(Capsule())
+                        Text(statusTitle)
+                            .font(.caption2.weight(.heavy))
+                            .padding(.horizontal, 7)
+                            .padding(.vertical, 3)
+                            .background(statusSoftColor)
+                            .foregroundStyle(statusColor)
+                            .clipShape(Capsule())
                     }
                     Text("\(order.totalUnits) uds · \(order.customer)")
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(AppTheme.muted)
                         .lineLimit(1)
+                    if let dateText {
+                        Label(dateText, systemImage: order.preparedAt == nil ? "calendar" : "checkmark.seal.fill")
+                            .font(.caption2.weight(.heavy))
+                            .foregroundStyle(order.preparedAt == nil ? AppTheme.muted : AppTheme.green)
+                            .lineLimit(1)
+                    }
                 }
                 Spacer()
                 Image(systemName: order.hasMultipleItems ? "square.stack.3d.up.fill" : "tshirt.fill")
