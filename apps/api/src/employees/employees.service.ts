@@ -18,6 +18,7 @@ interface AssignOrderBody {
   orderNumber?: string;
   role?: string;
   units?: number;
+  minutesSpent?: number;
 }
 
 @Injectable()
@@ -111,11 +112,12 @@ export class EmployeesService {
     const order = await this.findOrder(body.orderId, body.orderNumber);
     const role = (body.role?.trim() || 'PREPARACION').toUpperCase();
     const units = Math.max(1, Math.trunc(Number(body.units ?? 1)));
+    const minutesSpent = Math.max(0, Math.trunc(Number(body.minutesSpent ?? 0)));
 
     const contribution = await this.prisma.employeeOrderContribution.upsert({
       where: { employeeId_orderId_role: { employeeId, orderId: order.id, role } },
-      create: { employeeId, orderId: order.id, role, units },
-      update: { units }
+      create: { employeeId, orderId: order.id, role, units, minutesSpent },
+      update: { units, minutesSpent }
     });
     return this.contributionDto(contribution, order);
   }
@@ -152,7 +154,10 @@ export class EmployeesService {
 
     const maxLaborMarginRate = this.maxLaborMarginRate();
     const rows = employees.map((employee) => {
-      const hours = employee.shifts.reduce((sum, shift) => sum + this.shiftHoursInRange(shift, start, end), 0);
+      const shiftHours = employee.shifts.reduce((sum, shift) => sum + this.shiftHoursInRange(shift, start, end), 0);
+      const orderMinutes = employee.contributions.reduce((sum, contribution) => sum + (contribution.minutesSpent ?? 0), 0);
+      const orderHours = orderMinutes / 60;
+      const paidHours = Math.max(shiftHours, orderHours);
       const orderCount = employee.contributions.length;
       const units = employee.contributions.reduce((sum, contribution) => sum + contribution.units, 0);
       const generatedMargin = employee.contributions.reduce((sum, contribution) => {
@@ -160,7 +165,7 @@ export class EmployeesService {
         const split = contributorsPerOrder.get(contribution.orderId) ?? 1;
         return sum + (margin / split);
       }, 0);
-      const basePay = hours * employee.hourlyRate;
+      const basePay = paidHours * employee.hourlyRate;
       const orderBonus = orderCount * employee.orderBonusRate;
       const marginBonus = Math.max(0, generatedMargin) * employee.marginShareRate;
       const suggestedPay = basePay + orderBonus + marginBonus;
@@ -170,7 +175,10 @@ export class EmployeesService {
 
       return {
         employee: this.employeeDto(employee),
-        hours: this.round(hours),
+        hours: this.round(paidHours),
+        shiftHours: this.round(shiftHours),
+        orderHours: this.round(orderHours),
+        orderMinutes,
         openShift: employee.shifts.some((shift) => !shift.endedAt),
         orders: orderCount,
         units,
@@ -187,6 +195,7 @@ export class EmployeesService {
           id: contribution.id,
           role: contribution.role,
           units: contribution.units,
+          minutesSpent: contribution.minutesSpent ?? 0,
           createdAt: contribution.createdAt,
           orderId: contribution.order.id,
           orderNumber: contribution.order.orderNumber,
@@ -197,6 +206,9 @@ export class EmployeesService {
 
     const totals = rows.reduce((acc, row) => {
       acc.hours += row.hours;
+      acc.shiftHours += row.shiftHours;
+      acc.orderHours += row.orderHours;
+      acc.orderMinutes += row.orderMinutes;
       acc.orders += row.orders;
       acc.units += row.units;
       acc.generatedMargin += row.generatedMargin;
@@ -205,7 +217,7 @@ export class EmployeesService {
       acc.marginBonus += row.marginBonus;
       acc.suggestedPay += row.suggestedPay;
       return acc;
-    }, { hours: 0, orders: 0, units: 0, generatedMargin: 0, basePay: 0, orderBonus: 0, marginBonus: 0, suggestedPay: 0 });
+    }, { hours: 0, shiftHours: 0, orderHours: 0, orderMinutes: 0, orders: 0, units: 0, generatedMargin: 0, basePay: 0, orderBonus: 0, marginBonus: 0, suggestedPay: 0 });
 
     const laborCostPct = totals.generatedMargin > 0 ? (totals.suggestedPay / totals.generatedMargin) * 100 : null;
 
@@ -216,6 +228,9 @@ export class EmployeesService {
       maxLaborMarginRate,
       totals: {
         hours: this.round(totals.hours),
+        shiftHours: this.round(totals.shiftHours),
+        orderHours: this.round(totals.orderHours),
+        orderMinutes: totals.orderMinutes,
         orders: totals.orders,
         units: totals.units,
         generatedMargin: this.money(totals.generatedMargin),
@@ -315,6 +330,7 @@ export class EmployeesService {
       customerName: order.customerName,
       role: contribution.role,
       units: contribution.units,
+      minutesSpent: contribution.minutesSpent ?? 0,
       createdAt: contribution.createdAt
     };
   }

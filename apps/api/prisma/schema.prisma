@@ -702,14 +702,15 @@ model EmployeeShift {
 }
 
 model EmployeeOrderContribution {
-  id         String    @id @default(cuid())
-  employeeId String
-  orderId    String
-  role       String    @default("PREPARACION")
-  units      Int       @default(1)
-  createdAt  DateTime  @default(now())
-  employee   Employee  @relation(fields: [employeeId], references: [id], onDelete: Cascade)
-  order      Order     @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  id           String    @id @default(cuid())
+  employeeId   String
+  orderId      String
+  role         String    @default("PREPARACION")
+  units        Int       @default(1)
+  minutesSpent Int       @default(0)
+  createdAt    DateTime  @default(now())
+  employee     Employee  @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  order        Order     @relation(fields: [orderId], references: [id], onDelete: Cascade)
 
   @@unique([employeeId, orderId, role])
   @@index([orderId])

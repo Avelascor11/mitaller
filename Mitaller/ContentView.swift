@@ -11682,6 +11682,7 @@ struct EmployeesView: View {
     @State private var newHourlyRate = "8"
     @State private var selectedEmployeeId = ""
     @State private var orderNumber = ""
+    @State private var orderMinutes = "20"
     @State private var assigning = false
 
     var body: some View {
@@ -11736,6 +11737,7 @@ struct EmployeesView: View {
                         employees: employees,
                         selectedEmployeeId: $selectedEmployeeId,
                         orderNumber: $orderNumber,
+                        orderMinutes: $orderMinutes,
                         assigning: assigning,
                         onAssign: { Task { await assignOrder() } }
                     )
@@ -11824,13 +11826,15 @@ struct EmployeesView: View {
     private func assignOrder() async {
         guard let client = store.apiClient else { error = "API no configurada"; return }
         let cleanedOrder = orderNumber.trimmingCharacters(in: .whitespacesAndNewlines).replacingOccurrences(of: "#", with: "")
+        let minutes = Int(orderMinutes.trimmingCharacters(in: .whitespacesAndNewlines)) ?? 0
         guard !selectedEmployeeId.isEmpty else { error = "Elige un empleado"; return }
         guard !cleanedOrder.isEmpty else { error = "Pon el numero de pedido"; return }
+        guard minutes > 0 else { error = "Pon los minutos que ha llevado el pedido"; return }
         assigning = true
         error = nil
         defer { assigning = false }
         do {
-            _ = try await client.assignOrderToEmployee(employeeId: selectedEmployeeId, orderNumber: cleanedOrder)
+            _ = try await client.assignOrderToEmployee(employeeId: selectedEmployeeId, orderNumber: cleanedOrder, minutesSpent: minutes)
             orderNumber = ""
             await reload()
         } catch {
@@ -11861,9 +11865,14 @@ private struct EmployeeTotalsCard: View {
 
             LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 10) {
                 MoneyTile(label: "Margen equipo", value: summary.totals.generatedMargin, currency: summary.currency, color: AppTheme.blue)
-                EmployeeMiniMetric(title: "Horas", value: String(format: "%.2f", summary.totals.hours), color: AppTheme.purple, icon: "clock.fill")
+                EmployeeMiniMetric(title: "Horas pago", value: String(format: "%.2f", summary.totals.hours), color: AppTheme.purple, icon: "clock.fill")
                 EmployeeMiniMetric(title: "Pedidos", value: "\(summary.totals.orders)", color: AppTheme.amber, icon: "shippingbox.fill")
                 EmployeeMiniMetric(title: "% Mano obra", value: summary.totals.laborCostPct.map { "\(Int($0.rounded()))%" } ?? "-", color: AppTheme.magenta, icon: "percent")
+            }
+
+            HStack(spacing: 8) {
+                EmployeeMiniMetric(title: "Fichadas", value: String(format: "%.2f", summary.totals.shiftHours ?? summary.totals.hours), color: AppTheme.blue, icon: "person.crop.circle.badge.clock.fill")
+                EmployeeMiniMetric(title: "En pedidos", value: String(format: "%.2f", summary.totals.orderHours ?? 0), color: AppTheme.teal, icon: "timer")
             }
 
             ReserveLine(label: "Horas base", value: summary.totals.basePay, currency: summary.currency, color: AppTheme.blue)
@@ -11910,11 +11919,16 @@ private struct EmployeeRowCard: View {
             }
 
             LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 10) {
-                EmployeeMiniMetric(title: "Horas", value: String(format: "%.2f", row.hours), color: AppTheme.blue, icon: "clock.fill")
+                EmployeeMiniMetric(title: "Horas pago", value: String(format: "%.2f", row.hours), color: AppTheme.blue, icon: "clock.fill")
+                EmployeeMiniMetric(title: "En pedidos", value: String(format: "%.2f", row.orderHours ?? 0), color: AppTheme.teal, icon: "timer")
                 EmployeeMiniMetric(title: "Pedidos", value: "\(row.orders)", color: AppTheme.amber, icon: "shippingbox.fill")
                 EmployeeMiniMetric(title: "Margen", value: formatMoney(row.generatedMargin, currency: currency), color: AppTheme.green, icon: "chart.line.uptrend.xyaxis")
                 EmployeeMiniMetric(title: "Pagar", value: formatMoney(row.suggestedPay, currency: currency), color: row.status == "OK" ? AppTheme.purple : AppTheme.red, icon: "eurosign.circle.fill")
             }
+
+            Text("Fichadas \(String(format: "%.2f", row.shiftHours ?? row.hours)) h · Pedidos \(String(format: "%.2f", row.orderHours ?? 0)) h · Se paga la mayor.")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(AppTheme.muted)
 
             if let pct = row.laborCostPct {
                 Text("Coste empleado: \(Int(pct.rounded()))% del margen asignado.")
@@ -11941,6 +11955,11 @@ private struct EmployeeRowCard: View {
                                 .foregroundStyle(AppTheme.muted)
                                 .lineLimit(1)
                             Spacer()
+                            if let minutes = order.minutesSpent, minutes > 0 {
+                                Text("\(minutes) min")
+                                    .font(.caption2.weight(.heavy))
+                                    .foregroundStyle(AppTheme.teal)
+                            }
                             Text(order.role)
                                 .font(.caption2.weight(.heavy))
                                 .foregroundStyle(AppTheme.blue)
@@ -11957,6 +11976,7 @@ private struct EmployeeAssignOrderCard: View {
     let employees: [EmployeeRecord]
     @Binding var selectedEmployeeId: String
     @Binding var orderNumber: String
+    @Binding var orderMinutes: String
     let assigning: Bool
     let onAssign: () -> Void
 
@@ -11981,12 +12001,18 @@ private struct EmployeeAssignOrderCard: View {
                 .background(AppTheme.surfaceSoft)
                 .clipShape(RoundedRectangle(cornerRadius: 12))
 
+            TextField("Minutos empleados, ej. 18", text: $orderMinutes)
+                .keyboardType(.numberPad)
+                .padding(12)
+                .background(AppTheme.surfaceSoft)
+                .clipShape(RoundedRectangle(cornerRadius: 12))
+
             Button(action: onAssign) {
                 Label(assigning ? "Asignando..." : "Sumar pedido al sueldo", systemImage: "plus.circle.fill")
                     .frame(maxWidth: .infinity)
             }
             .buttonStyle(.borderedProminent)
-            .disabled(assigning || employees.isEmpty || orderNumber.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            .disabled(assigning || employees.isEmpty || orderNumber.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || (Int(orderMinutes.trimmingCharacters(in: .whitespacesAndNewlines)) ?? 0) <= 0)
         }
         .glassPanel(padding: 14, accent: AppTheme.purple)
     }

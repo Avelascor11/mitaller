@@ -358,11 +358,11 @@ struct APIClient {
         let request = try jsonRequest(path: "/employees/\(Self.pathSegment(id))/clock-out", method: "POST", body: EmployeeClockOutRequest(breakMinutes: breakMinutes))
         return try await perform(request)
     }
-    func assignOrderToEmployee(employeeId: String, orderNumber: String, role: String = "PREPARACION", units: Int = 1) async throws -> EmployeeOrderContribution {
+    func assignOrderToEmployee(employeeId: String, orderNumber: String, role: String = "PREPARACION", units: Int = 1, minutesSpent: Int = 0) async throws -> EmployeeOrderContribution {
         let request = try jsonRequest(
             path: "/employees/\(Self.pathSegment(employeeId))/orders",
             method: "POST",
-            body: EmployeeAssignOrderRequest(orderNumber: orderNumber, role: role, units: units)
+            body: EmployeeAssignOrderRequest(orderNumber: orderNumber, role: role, units: units, minutesSpent: minutesSpent)
         )
         return try await perform(request)
     }
@@ -1728,6 +1728,9 @@ struct EmployeeSummary: Decodable {
 
 struct EmployeeSummaryTotals: Decodable {
     let hours: Double
+    let shiftHours: Double?
+    let orderHours: Double?
+    let orderMinutes: Int?
     let orders: Int
     let units: Int
     let generatedMargin: Double
@@ -1742,6 +1745,9 @@ struct EmployeeSummaryRow: Decodable, Identifiable {
     var id: String { employee.id }
     let employee: EmployeeRecord
     let hours: Double
+    let shiftHours: Double?
+    let orderHours: Double?
+    let orderMinutes: Int?
     let openShift: Bool
     let orders: Int
     let units: Int
@@ -1761,6 +1767,7 @@ struct EmployeeRecentOrder: Decodable, Identifiable {
     let id: String
     let role: String
     let units: Int
+    let minutesSpent: Int?
     let createdAt: Date?
     let orderId: String
     let orderNumber: String
@@ -1775,6 +1782,7 @@ struct EmployeeOrderContribution: Decodable {
     let customerName: String
     let role: String
     let units: Int
+    let minutesSpent: Int?
 }
 
 struct EmployeeSaveRequest: Encodable {
@@ -1805,6 +1813,7 @@ struct EmployeeAssignOrderRequest: Encodable {
     let orderNumber: String
     let role: String
     let units: Int
+    let minutesSpent: Int
 }
 
 struct GrowthControlSummary: Decodable {

@@ -51,6 +51,7 @@ export class EmployeesController {
     orderNumber?: string;
     role?: string;
     units?: number;
+    minutesSpent?: number;
   }) {
     return this.employees.assignOrder(id, body);
   }
