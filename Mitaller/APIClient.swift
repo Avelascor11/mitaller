@@ -1216,6 +1216,7 @@ struct InfluencerFulfillment: Decodable, Hashable {
     let trackingUrl: String?
     let carrier: String?
     let updatedAt: Date?
+    let matchSource: String?
 }
 
 struct CrewApproveResult: Decodable {

@@ -23,7 +23,20 @@ export class InfluencersService {
   async summary() {
     const [influencers, collaborations, submissions] = await Promise.all([
       this.prisma.influencer.findMany({ select: { stage: true } }),
-      this.prisma.collaboration.findMany({ select: { id: true, status: true, shopifyOrderId: true, shopifyOrderName: true } }),
+      this.prisma.collaboration.findMany({
+        select: {
+          id: true,
+          status: true,
+          title: true,
+          productSent: true,
+          discountCode: true,
+          requestedCode: true,
+          shopifyOrderId: true,
+          shopifyOrderName: true,
+          notes: true,
+          influencer: { select: { igHandle: true, fullName: true, email: true } }
+        }
+      }),
       this.prisma.ugcSubmission.findMany({ select: { status: true } })
     ]);
     const fulfillment = await this.fulfillmentByCollaboration(collaborations);
@@ -65,7 +78,16 @@ export class InfluencersService {
       },
       orderBy: [{ updatedAt: 'desc' }, { createdAt: 'desc' }]
     });
-    const collaborations = influencers.flatMap((influencer) => influencer.collaborations);
+    const collaborations = influencers.flatMap((influencer) =>
+      influencer.collaborations.map((collaboration) => ({
+        ...collaboration,
+        influencer: {
+          igHandle: influencer.igHandle,
+          fullName: influencer.fullName,
+          email: influencer.email
+        }
+      }))
+    );
     const fulfillment = await this.fulfillmentByCollaboration(collaborations);
     return influencers.map((influencer) => ({
       ...influencer,
@@ -345,19 +367,32 @@ export class InfluencersService {
     return influencer;
   }
 
-  private async fulfillmentByCollaboration(collaborations: Array<{ id: string; shopifyOrderId?: string | null; shopifyOrderName?: string | null }>) {
+  private async fulfillmentByCollaboration(collaborations: CollaborationLookup[]) {
     const references = collaborations
-      .flatMap((collaboration) => [collaboration.shopifyOrderId, collaboration.shopifyOrderName, this.cleanOrderReference(collaboration.shopifyOrderName)])
+      .flatMap((collaboration) => this.orderReferencesFor(collaboration))
       .filter((value): value is string => Boolean(value?.trim()));
-    if (!references.length) return new Map<string, CollaborationFulfillment>();
+    const emails = [...new Set(collaborations.map((collaboration) => collaboration.influencer?.email).filter((value): value is string => Boolean(value?.trim())).map((value) => value.toLowerCase()))];
+    const names = [...new Set(collaborations.map((collaboration) => collaboration.influencer?.fullName).filter((value): value is string => Boolean(value?.trim() && value.trim().length >= 4)))];
+    const handles = [...new Set(collaborations.map((collaboration) => collaboration.influencer?.igHandle).filter((value): value is string => Boolean(value?.trim() && value.trim().length >= 3)))];
+    if (!references.length && !emails.length && !names.length && !handles.length) {
+      return new Map<string, CollaborationFulfillment>();
+    }
+
+    const orderWhere: Prisma.OrderWhereInput[] = [];
+    if (references.length) {
+      orderWhere.push(
+        { id: { in: references } },
+        { shopifyOrderId: { in: references } },
+        { orderNumber: { in: references } }
+      );
+    }
+    if (emails.length) orderWhere.push({ customerEmail: { in: emails, mode: 'insensitive' } });
+    for (const name of names) orderWhere.push({ customerName: { contains: name.trim(), mode: 'insensitive' } });
+    for (const handle of handles) orderWhere.push({ customerName: { contains: handle.trim().replace(/^@/, ''), mode: 'insensitive' } });
 
     const orders = await this.prisma.order.findMany({
       where: {
-        OR: [
-          { id: { in: references } },
-          { shopifyOrderId: { in: references } },
-          { orderNumber: { in: references } }
-        ]
+        OR: orderWhere
       },
       include: { shipments: { orderBy: { updatedAt: 'desc' } } }
     });
@@ -370,19 +405,16 @@ export class InfluencersService {
     }
 
     return new Map(collaborations.map((collaboration) => {
-      const order = [
-        collaboration.shopifyOrderId,
-        collaboration.shopifyOrderName,
-        this.cleanOrderReference(collaboration.shopifyOrderName)
-      ]
-        .filter((value): value is string => Boolean(value?.trim()))
+      const explicitOrder = this.orderReferencesFor(collaboration)
         .map((value) => byReference.get(value))
         .find(Boolean);
-      return [collaboration.id, order ? this.fulfillmentFromOrder(order) : this.emptyFulfillment(collaboration)] as const;
+      const detectedOrder = explicitOrder ?? this.detectOrderForCollaboration(collaboration, orders);
+      const matchSource = explicitOrder ? 'reference' : detectedOrder ? this.detectOrderMatchSource(collaboration, detectedOrder) : null;
+      return [collaboration.id, detectedOrder ? this.fulfillmentFromOrder(detectedOrder, matchSource) : this.emptyFulfillment(collaboration)] as const;
     }));
   }
 
-  private fulfillmentFromOrder(order: Prisma.OrderGetPayload<{ include: { shipments: true } }>): CollaborationFulfillment {
+  private fulfillmentFromOrder(order: Prisma.OrderGetPayload<{ include: { shipments: true } }>, matchSource: string | null): CollaborationFulfillment {
     const shipment = order.shipments[0];
     const status = this.collaborationFulfillmentStatus(order.operationalStatus, shipment?.status, shipment?.trackingStatus);
     return {
@@ -396,7 +428,8 @@ export class InfluencersService {
       trackingNumber: shipment?.trackingNumber ?? null,
       trackingUrl: shipment?.trackingUrl ?? null,
       carrier: shipment?.carrier ?? null,
-      updatedAt: shipment?.trackingSyncedAt ?? shipment?.updatedAt ?? order.updatedAt
+      updatedAt: shipment?.trackingSyncedAt ?? shipment?.updatedAt ?? order.updatedAt,
+      matchSource
     };
   }
 
@@ -413,7 +446,8 @@ export class InfluencersService {
       trackingNumber: null,
       trackingUrl: null,
       carrier: null,
-      updatedAt: null
+      updatedAt: null,
+      matchSource: null
     };
   }
 
@@ -447,6 +481,66 @@ export class InfluencersService {
     const clean = value?.trim();
     if (!clean) return null;
     return clean.startsWith('#') ? clean : `#${clean}`;
+  }
+
+  private orderReferencesFor(collaboration: CollaborationLookup) {
+    const textReferences = [
+      collaboration.shopifyOrderId,
+      collaboration.shopifyOrderName,
+      this.cleanOrderReference(collaboration.shopifyOrderName),
+      ...this.extractOrderReferences([
+        collaboration.title,
+        collaboration.productSent,
+        collaboration.notes,
+        collaboration.discountCode,
+        collaboration.requestedCode
+      ].filter(Boolean).join(' '))
+    ];
+    return [...new Set(textReferences.filter((value): value is string => Boolean(value?.trim())))];
+  }
+
+  private extractOrderReferences(value: string) {
+    const references = new Set<string>();
+    const matches = value.match(/#?\b\d{4,7}\b/g) ?? [];
+    for (const match of matches) {
+      const digits = match.replace(/\D/g, '');
+      if (digits.length >= 4) {
+        references.add(`#${digits}`);
+        references.add(digits);
+      }
+    }
+    return [...references];
+  }
+
+  private detectOrderForCollaboration(
+    collaboration: CollaborationLookup,
+    orders: Array<Prisma.OrderGetPayload<{ include: { shipments: true } }>>
+  ) {
+    const email = collaboration.influencer?.email?.trim().toLowerCase();
+    const name = this.normalizeText(collaboration.influencer?.fullName ?? '');
+    const handle = this.normalizeText(collaboration.influencer?.igHandle ?? '').replace(/^@/, '');
+    const candidates = orders.filter((order) => {
+      const orderEmail = order.customerEmail?.trim().toLowerCase();
+      const orderName = this.normalizeText(order.customerName ?? '');
+      if (email && orderEmail === email) return true;
+      if (name && name.length >= 4 && orderName.includes(name)) return true;
+      if (handle && handle.length >= 3 && orderName.includes(handle)) return true;
+      return false;
+    });
+    return candidates.sort((left, right) => right.updatedAt.getTime() - left.updatedAt.getTime())[0] ?? null;
+  }
+
+  private detectOrderMatchSource(
+    collaboration: CollaborationLookup,
+    order: Prisma.OrderGetPayload<{ include: { shipments: true } }>
+  ) {
+    const email = collaboration.influencer?.email?.trim().toLowerCase();
+    if (email && order.customerEmail?.trim().toLowerCase() === email) return 'email';
+    const name = this.normalizeText(collaboration.influencer?.fullName ?? '');
+    if (name && this.normalizeText(order.customerName ?? '').includes(name)) return 'name';
+    const handle = this.normalizeText(collaboration.influencer?.igHandle ?? '').replace(/^@/, '');
+    if (handle && this.normalizeText(order.customerName ?? '').includes(handle)) return 'handle';
+    return 'detected';
   }
 
   private handle(value?: string) {
@@ -537,6 +631,22 @@ export class InfluencersService {
   }
 }
 
+interface CollaborationLookup {
+  id: string;
+  title?: string | null;
+  productSent?: string | null;
+  discountCode?: string | null;
+  requestedCode?: string | null;
+  shopifyOrderId?: string | null;
+  shopifyOrderName?: string | null;
+  notes?: string | null;
+  influencer?: {
+    igHandle?: string | null;
+    fullName?: string | null;
+    email?: string | null;
+  } | null;
+}
+
 interface CollaborationFulfillment {
   status: string;
   label: string;
@@ -549,4 +659,5 @@ interface CollaborationFulfillment {
   trackingUrl: string | null;
   carrier: string | null;
   updatedAt: Date | null;
+  matchSource: string | null;
 }

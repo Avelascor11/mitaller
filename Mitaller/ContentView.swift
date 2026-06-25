@@ -7218,9 +7218,9 @@ struct InfluencerCard: View {
             if let latestCollaboration {
                 VStack(alignment: .leading, spacing: 4) {
                     HStack(spacing: 8) {
-                        Image(systemName: followupIcon(latestCollaboration.status))
+                        Image(systemName: followupIcon(latestCollaboration))
                             .font(.caption.weight(.black))
-                            .foregroundStyle(followupColor(latestCollaboration.status))
+                            .foregroundStyle(followupColor(latestCollaboration))
                         Text(latestCollaboration.title)
                             .font(.subheadline.weight(.bold))
                             .foregroundStyle(AppTheme.inkSoft)
@@ -7228,7 +7228,7 @@ struct InfluencerCard: View {
                     }
                     Text(followupText(latestCollaboration))
                         .font(.caption.weight(.semibold))
-                        .foregroundStyle(followupColor(latestCollaboration.status))
+                        .foregroundStyle(followupColor(latestCollaboration))
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(12)
@@ -7251,6 +7251,9 @@ struct InfluencerCard: View {
     }
 
     private func followupText(_ collab: InfluencerCollaboration) -> String {
+        if collab.fulfillment?.status == "DELIVERED", collab.status == "PRODUCT_SENT" {
+            return "Pedido entregado\(collab.fulfillment?.orderNumber.map { " · \($0)" } ?? "") · toca pedir contenido"
+        }
         switch collab.status {
         case "PRODUCT_SENT":
             return "Pedido enviado\(collab.shopifyOrderName.map { " · \($0)" } ?? "") · falta saber si lo recibio"
@@ -7265,22 +7268,24 @@ struct InfluencerCard: View {
         }
     }
 
-    private func followupIcon(_ status: String) -> String {
-        switch status {
-        case "PRODUCT_SENT": "shippingbox.fill"
-        case "AWAITING_CONTENT": "bell.badge.fill"
-        case "CONTENT_RECEIVED": "video.badge.checkmark.fill"
-        case "PUBLISHED", "CLOSED": "checkmark.seal.fill"
-        default: "sparkles"
+    private func followupIcon(_ collab: InfluencerCollaboration) -> String {
+        if collab.fulfillment?.status == "DELIVERED", collab.status == "PRODUCT_SENT" { return "checkmark.seal.fill" }
+        switch collab.status {
+        case "PRODUCT_SENT": return "shippingbox.fill"
+        case "AWAITING_CONTENT": return "bell.badge.fill"
+        case "CONTENT_RECEIVED": return "video.badge.checkmark.fill"
+        case "PUBLISHED", "CLOSED": return "checkmark.seal.fill"
+        default: return "sparkles"
         }
     }
 
-    private func followupColor(_ status: String) -> Color {
-        switch status {
-        case "PRODUCT_SENT": AppTheme.blue
-        case "AWAITING_CONTENT": AppTheme.amber
-        case "CONTENT_RECEIVED", "PUBLISHED", "CLOSED": AppTheme.green
-        default: AppTheme.muted
+    private func followupColor(_ collab: InfluencerCollaboration) -> Color {
+        if collab.fulfillment?.status == "DELIVERED", collab.status == "PRODUCT_SENT" { return AppTheme.amber }
+        switch collab.status {
+        case "PRODUCT_SENT": return AppTheme.blue
+        case "AWAITING_CONTENT": return AppTheme.amber
+        case "CONTENT_RECEIVED", "PUBLISHED", "CLOSED": return AppTheme.green
+        default: return AppTheme.muted
         }
     }
 }
@@ -7449,11 +7454,16 @@ struct InfluencerFollowupSummary: View {
         .glassPanel(padding: 14, accent: color)
     }
 
-    private var status: String { latest?.status ?? "OPEN" }
+    private var status: String {
+        if latest?.fulfillment?.status == "DELIVERED", latest?.status == "PRODUCT_SENT" {
+            return "DELIVERED_PENDING_CONTENT"
+        }
+        return latest?.status ?? "OPEN"
+    }
     private var color: Color {
         switch status {
         case "PRODUCT_SENT": AppTheme.blue
-        case "AWAITING_CONTENT": AppTheme.amber
+        case "DELIVERED_PENDING_CONTENT", "AWAITING_CONTENT": AppTheme.amber
         case "CONTENT_RECEIVED", "PUBLISHED", "CLOSED": AppTheme.green
         default: AppTheme.purple
         }
@@ -7461,6 +7471,7 @@ struct InfluencerFollowupSummary: View {
     private var icon: String {
         switch status {
         case "PRODUCT_SENT": "shippingbox.fill"
+        case "DELIVERED_PENDING_CONTENT": "checkmark.seal.fill"
         case "AWAITING_CONTENT": "bell.badge.fill"
         case "CONTENT_RECEIVED", "PUBLISHED", "CLOSED": "video.badge.checkmark.fill"
         default: "sparkles"
@@ -7469,6 +7480,7 @@ struct InfluencerFollowupSummary: View {
     private var title: String {
         switch status {
         case "PRODUCT_SENT": "Pedido enviado"
+        case "DELIVERED_PENDING_CONTENT": "Entregado: marcar recibido"
         case "AWAITING_CONTENT": "Recibido: recordar contenido"
         case "CONTENT_RECEIVED": "Contenido recibido"
         case "PUBLISHED", "CLOSED": "Colaboración cerrada"
@@ -7478,6 +7490,7 @@ struct InfluencerFollowupSummary: View {
     private var subtitle: String {
         switch status {
         case "PRODUCT_SENT": "Cuando confirme que le llegó, márcalo como recibido."
+        case "DELIVERED_PENDING_CONTENT": "El tracking lo da como entregado. Márcalo recibido y recuérdale el contenido."
         case "AWAITING_CONTENT": "Ya tiene el producto. Toca escribirle para pedir el vídeo/stories."
         case "CONTENT_RECEIVED": "Revisa el UGC y apruébalo para ads."
         default: "Crea o actualiza una colaboración para seguir el pack."
@@ -7611,38 +7624,44 @@ struct CrewCollabCard: View {
     }
 
     private var followupColor: Color {
+        if collab.fulfillment?.status == "DELIVERED", collab.status == "PRODUCT_SENT" { return AppTheme.amber }
         switch collab.status {
-        case "PRODUCT_SENT": AppTheme.blue
-        case "AWAITING_CONTENT": AppTheme.amber
-        case "CONTENT_RECEIVED": AppTheme.green
-        default: AppTheme.muted
+        case "PRODUCT_SENT": return AppTheme.blue
+        case "AWAITING_CONTENT": return AppTheme.amber
+        case "CONTENT_RECEIVED": return AppTheme.green
+        default: return AppTheme.muted
         }
     }
 
     private var followupIcon: String {
+        if collab.fulfillment?.status == "DELIVERED", collab.status == "PRODUCT_SENT" { return "checkmark.seal.fill" }
         switch collab.status {
-        case "PRODUCT_SENT": "shippingbox.fill"
-        case "AWAITING_CONTENT": "bell.badge.fill"
-        case "CONTENT_RECEIVED": "video.badge.checkmark.fill"
-        default: "sparkles"
+        case "PRODUCT_SENT": return "shippingbox.fill"
+        case "AWAITING_CONTENT": return "bell.badge.fill"
+        case "CONTENT_RECEIVED": return "video.badge.checkmark.fill"
+        default: return "sparkles"
         }
     }
 
     private var followupTitle: String {
+        if collab.fulfillment?.status == "DELIVERED", collab.status == "PRODUCT_SENT" { return "Entregado por tracking" }
         switch collab.status {
-        case "PRODUCT_SENT": "Producto enviado"
-        case "AWAITING_CONTENT": "Recibido: pendiente de contenido"
-        case "CONTENT_RECEIVED": "Contenido recibido"
-        default: collab.status.replacingOccurrences(of: "_", with: " ")
+        case "PRODUCT_SENT": return "Producto enviado"
+        case "AWAITING_CONTENT": return "Recibido: pendiente de contenido"
+        case "CONTENT_RECEIVED": return "Contenido recibido"
+        default: return collab.status.replacingOccurrences(of: "_", with: " ")
         }
     }
 
     private var followupSubtitle: String {
+        if collab.fulfillment?.status == "DELIVERED", collab.status == "PRODUCT_SENT" {
+            return "El pedido aparece entregado. Márcalo como recibido para moverlo a recordar contenido."
+        }
         switch collab.status {
-        case "PRODUCT_SENT": "Aún no sabemos si le llegó. Márcalo cuando confirme recepción."
-        case "AWAITING_CONTENT": "Ya lo recibió. Hay que recordarle que mande el vídeo/stories."
-        case "CONTENT_RECEIVED": "Ya hay contenido. Revisa si está aprobado y listo para ads."
-        default: ""
+        case "PRODUCT_SENT": return "Aún no sabemos si le llegó. Márcalo cuando confirme recepción."
+        case "AWAITING_CONTENT": return "Ya lo recibió. Hay que recordarle que mande el vídeo/stories."
+        case "CONTENT_RECEIVED": return "Ya hay contenido. Revisa si está aprobado y listo para ads."
+        default: return ""
         }
     }
 
@@ -7748,7 +7767,20 @@ struct InfluencerFulfillmentCard: View {
         if let updatedAt = fulfillment.updatedAt {
             parts.append(updatedAt.formatted(.dateTime.day().month().hour().minute()))
         }
+        if let matchSource = fulfillment.matchSource, !matchSource.isEmpty {
+            parts.append("detectado por \(matchSourceLabel(matchSource))")
+        }
         return parts.isEmpty ? "Sin datos de envío todavía" : parts.joined(separator: " · ")
+    }
+
+    private func matchSourceLabel(_ source: String) -> String {
+        switch source {
+        case "reference": "pedido"
+        case "email": "email"
+        case "name": "nombre"
+        case "handle": "@"
+        default: "señal"
+        }
     }
 }
 

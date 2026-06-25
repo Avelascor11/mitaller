@@ -128,6 +128,80 @@ describe('InfluencersService', () => {
     });
   });
 
+  it('detecta el pedido de una influ por email aunque la colaboración no tenga referencia Shopify', async () => {
+    const prisma = {
+      influencer: {
+        findMany: vi.fn().mockResolvedValue([
+          {
+            id: 'influ-1',
+            igHandle: 'sofiaugc',
+            fullName: 'Sofia UGC',
+            email: 'sofia@example.com',
+            collaborations: [
+              {
+                id: 'collab-1',
+                influencerId: 'influ-1',
+                title: 'Pack regalo',
+                status: 'PRODUCT_SENT',
+                shopifyOrderId: null,
+                shopifyOrderName: null,
+                productSent: 'Camiseta Fernando',
+                discountCode: null,
+                requestedCode: 'SOFIA',
+                notes: null
+              }
+            ],
+            submissions: []
+          }
+        ])
+      },
+      order: {
+        findMany: vi.fn().mockResolvedValue([
+          {
+            id: 'order-1',
+            shopifyOrderId: 'gid://shopify/Order/9710',
+            orderNumber: '#9710',
+            customerName: 'Sofia UGC',
+            customerEmail: 'sofia@example.com',
+            operationalStatus: 'SHIPPED',
+            updatedAt: new Date('2026-06-20T10:00:00Z'),
+            shipments: [
+              {
+                id: 'shipment-1',
+                status: 'DELIVERED',
+                trackingStatus: 'Entregado',
+                trackingNumber: 'TRACK9710',
+                trackingUrl: 'https://tracking.test/TRACK9710',
+                carrier: 'Correos',
+                trackingSyncedAt: new Date('2026-06-21T11:00:00Z'),
+                updatedAt: new Date('2026-06-21T11:00:00Z')
+              }
+            ]
+          }
+        ])
+      }
+    };
+
+    const result = await serviceWith(prisma).list({});
+
+    expect(result[0].collaborations[0]).toMatchObject({
+      fulfillment: {
+        status: 'DELIVERED',
+        label: 'Entregado',
+        orderNumber: '#9710',
+        trackingNumber: 'TRACK9710',
+        matchSource: 'email'
+      }
+    });
+    expect(prisma.order.findMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({
+        OR: expect.arrayContaining([
+          { customerEmail: { in: ['sofia@example.com'], mode: 'insensitive' } }
+        ])
+      })
+    }));
+  });
+
   it('rechaza fases no soportadas', async () => {
     const prisma = {
       influencer: { findMany: vi.fn() },
