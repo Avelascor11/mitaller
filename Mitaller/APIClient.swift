@@ -366,6 +366,22 @@ struct APIClient {
         )
         return try await perform(request)
     }
+    func startEmployeeWorkSession(employeeId: String, orderIds: [String], role: String = "PREPARACION") async throws -> EmployeeWorkSession {
+        let request = try jsonRequest(
+            path: "/employees/\(Self.pathSegment(employeeId))/work-sessions",
+            method: "POST",
+            body: EmployeeStartWorkSessionRequest(orderIds: orderIds, role: role)
+        )
+        return try await perform(request)
+    }
+    func finishEmployeeWorkSession(employeeId: String, sessionId: String) async throws -> EmployeeWorkSessionFinishResult {
+        let request = try jsonRequest(
+            path: "/employees/\(Self.pathSegment(employeeId))/work-sessions/\(Self.pathSegment(sessionId))/finish",
+            method: "POST",
+            body: EmptyBody()
+        )
+        return try await perform(request)
+    }
 
     func bankStatus() async throws -> BankStatus {
         try await get("/bank/status")
@@ -1707,6 +1723,7 @@ struct EmployeeRecord: Decodable, Identifiable, Hashable {
     let marginShareRate: Double
     let notes: String?
     let openShift: EmployeeShift?
+    let openWorkSession: EmployeeWorkSession?
 }
 
 struct EmployeeShift: Decodable, Identifiable, Hashable {
@@ -1785,6 +1802,27 @@ struct EmployeeOrderContribution: Decodable {
     let minutesSpent: Int?
 }
 
+struct EmployeeWorkSession: Decodable, Identifiable, Hashable {
+    let id: String
+    let employeeId: String
+    let role: String
+    let orderIds: [String]
+    let orderNumbers: [String]
+    let startedAt: Date?
+    let endedAt: Date?
+}
+
+struct EmployeeWorkSessionFinishResult: Decodable {
+    let id: String
+    let employeeId: String
+    let role: String
+    let orderIds: [String]
+    let orderNumbers: [String]
+    let startedAt: Date?
+    let endedAt: Date?
+    let totalMinutes: Int
+}
+
 struct EmployeeSaveRequest: Encodable {
     let name: String?
     let role: String?
@@ -1814,6 +1852,11 @@ struct EmployeeAssignOrderRequest: Encodable {
     let role: String
     let units: Int
     let minutesSpent: Int
+}
+
+struct EmployeeStartWorkSessionRequest: Encodable {
+    let orderIds: [String]
+    let role: String
 }
 
 struct GrowthControlSummary: Decodable {

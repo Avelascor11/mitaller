@@ -680,9 +680,27 @@ model Employee {
   updatedAt       DateTime                    @updatedAt
   shifts          EmployeeShift[]
   contributions   EmployeeOrderContribution[]
+  workSessions    EmployeeWorkSession[]
 
   @@index([active, name])
   @@map("employees")
+}
+
+model EmployeeWorkSession {
+  id           String    @id @default(cuid())
+  employeeId   String
+  role         String    @default("PREPARACION")
+  orderIds     String[]
+  orderNumbers String[]
+  startedAt    DateTime  @default(now())
+  endedAt      DateTime?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+  employee     Employee  @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+
+  @@index([employeeId, endedAt])
+  @@index([startedAt])
+  @@map("employee_work_sessions")
 }
 
 model EmployeeShift {

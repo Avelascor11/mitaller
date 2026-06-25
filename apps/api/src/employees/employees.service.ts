@@ -21,6 +21,12 @@ interface AssignOrderBody {
   minutesSpent?: number;
 }
 
+interface WorkSessionBody {
+  orderIds?: string[];
+  orderNumbers?: string[];
+  role?: string;
+}
+
 @Injectable()
 export class EmployeesService {
   constructor(
@@ -34,6 +40,11 @@ export class EmployeesService {
       orderBy: [{ active: 'desc' }, { name: 'asc' }],
       include: {
         shifts: {
+          where: { endedAt: null },
+          orderBy: { startedAt: 'desc' },
+          take: 1
+        },
+        workSessions: {
           where: { endedAt: null },
           orderBy: { startedAt: 'desc' },
           take: 1
@@ -120,6 +131,82 @@ export class EmployeesService {
       update: { units, minutesSpent }
     });
     return this.contributionDto(contribution, order);
+  }
+
+  async startWorkSession(employeeId: string, body: WorkSessionBody) {
+    await this.ensureEmployee(employeeId);
+    const role = (body.role?.trim() || 'PREPARACION').toUpperCase();
+    const orders = await this.findOrders(body.orderIds, body.orderNumbers);
+    if (orders.length === 0) throw new BadRequestException('Elige al menos un pedido para preparar');
+
+    const openSession = await this.prisma.employeeWorkSession.findFirst({
+      where: { employeeId, endedAt: null },
+      orderBy: { startedAt: 'desc' }
+    });
+    if (openSession) {
+      throw new BadRequestException('Este empleado ya tiene un lote de pedidos en marcha');
+    }
+
+    await this.clockIn(employeeId);
+    const session = await this.prisma.employeeWorkSession.create({
+      data: {
+        employeeId,
+        role,
+        orderIds: orders.map((order) => order.id),
+        orderNumbers: orders.map((order) => order.orderNumber)
+      }
+    });
+    return this.workSessionDto(session);
+  }
+
+  async finishWorkSession(employeeId: string, sessionId: string) {
+    await this.ensureEmployee(employeeId);
+    const session = await this.prisma.employeeWorkSession.findFirst({
+      where: { id: sessionId, employeeId, endedAt: null }
+    });
+    if (!session) throw new NotFoundException('Lote de trabajo no encontrado o ya finalizado');
+
+    const endedAt = new Date();
+    const totalMinutes = Math.max(1, Math.round((endedAt.getTime() - session.startedAt.getTime()) / 60000));
+    const orders = await this.prisma.order.findMany({
+      where: { id: { in: session.orderIds } },
+      include: { items: true }
+    });
+    const weights = new Map(orders.map((order) => [
+      order.id,
+      Math.max(1, order.items.reduce((sum, item) => sum + (item.quantity ?? 0), 0))
+    ]));
+    const totalWeight = Array.from(weights.values()).reduce((sum, weight) => sum + weight, 0) || orders.length || 1;
+    let assignedMinutes = 0;
+    const ordered = orders.sort((a, b) => session.orderIds.indexOf(a.id) - session.orderIds.indexOf(b.id));
+
+    for (const [index, order] of ordered.entries()) {
+      const weight = weights.get(order.id) ?? 1;
+      const minutesSpent = index === ordered.length - 1
+        ? Math.max(1, totalMinutes - assignedMinutes)
+        : Math.max(1, Math.round((totalMinutes * weight) / totalWeight));
+      assignedMinutes += minutesSpent;
+      const units = Math.max(1, order.items.reduce((sum, item) => sum + (item.quantity ?? 0), 0));
+      await this.prisma.employeeOrderContribution.upsert({
+        where: { employeeId_orderId_role: { employeeId, orderId: order.id, role: session.role } },
+        create: { employeeId, orderId: order.id, role: session.role, units, minutesSpent },
+        update: { units, minutesSpent }
+      });
+    }
+
+    const finished = await this.prisma.employeeWorkSession.update({
+      where: { id: session.id },
+      data: { endedAt }
+    });
+    return {
+      ...this.workSessionDto(finished),
+      totalMinutes,
+      orders: ordered.map((order) => ({
+        id: order.id,
+        orderNumber: order.orderNumber,
+        units: weights.get(order.id) ?? 1
+      }))
+    };
   }
 
   async summary(from?: string, to?: string) {
@@ -261,6 +348,22 @@ export class EmployeesService {
     return order;
   }
 
+  private async findOrders(orderIds?: string[], orderNumbers?: string[]) {
+    const ids = [...new Set((orderIds ?? []).map((value) => value?.trim()).filter(Boolean))] as string[];
+    const numbers = [...new Set((orderNumbers ?? []).map((value) => value?.trim().replace(/^#/, '')).filter(Boolean))] as string[];
+    if (ids.length === 0 && numbers.length === 0) return [];
+    return this.prisma.order.findMany({
+      where: {
+        OR: [
+          ids.length ? { id: { in: ids } } : undefined,
+          numbers.length ? { orderNumber: { in: numbers } } : undefined
+        ].filter(Boolean) as any[]
+      },
+      include: { items: true },
+      orderBy: { orderedAt: 'asc' }
+    });
+  }
+
   private parseRange(from?: string, to?: string) {
     const now = new Date();
     const start = from ? new Date(`${from}T00:00:00.000`) : new Date(now);
@@ -307,7 +410,8 @@ export class EmployeesService {
       notes: employee.notes,
       createdAt: employee.createdAt,
       updatedAt: employee.updatedAt,
-      openShift: employee.shifts?.find((shift: any) => !shift.endedAt) ? this.shiftDto(employee.shifts.find((shift: any) => !shift.endedAt)) : null
+      openShift: employee.shifts?.find((shift: any) => !shift.endedAt) ? this.shiftDto(employee.shifts.find((shift: any) => !shift.endedAt)) : null,
+      openWorkSession: employee.workSessions?.find((session: any) => !session.endedAt) ? this.workSessionDto(employee.workSessions.find((session: any) => !session.endedAt)) : null
     };
   }
 
@@ -332,6 +436,18 @@ export class EmployeesService {
       units: contribution.units,
       minutesSpent: contribution.minutesSpent ?? 0,
       createdAt: contribution.createdAt
+    };
+  }
+
+  private workSessionDto(session: any) {
+    return {
+      id: session.id,
+      employeeId: session.employeeId,
+      role: session.role,
+      orderIds: session.orderIds ?? [],
+      orderNumbers: session.orderNumbers ?? [],
+      startedAt: session.startedAt,
+      endedAt: session.endedAt
     };
   }
 

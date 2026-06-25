@@ -56,6 +56,20 @@ export class EmployeesController {
     return this.employees.assignOrder(id, body);
   }
 
+  @Post(':id/work-sessions')
+  startWorkSession(@Param('id') id: string, @Body() body: {
+    orderIds?: string[];
+    orderNumbers?: string[];
+    role?: string;
+  }) {
+    return this.employees.startWorkSession(id, body);
+  }
+
+  @Post(':id/work-sessions/:sessionId/finish')
+  finishWorkSession(@Param('id') id: string, @Param('sessionId') sessionId: string) {
+    return this.employees.finishWorkSession(id, sessionId);
+  }
+
   @Get('summary')
   summary(@Query('from') from?: string, @Query('to') to?: string) {
     return this.employees.summary(from, to);

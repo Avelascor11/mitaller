@@ -66,4 +66,57 @@ describe('EmployeesService', () => {
     expect(summary.employees[0].suggestedPay).toBe(31);
     expect(summary.employees[1].suggestedPay).toBe(16);
   });
+
+  it('finaliza un lote y reparte el tiempo segun unidades de cada pedido', async () => {
+    const upserts: any[] = [];
+    const startedAt = new Date(Date.now() - 30 * 60 * 1000);
+    const service = new EmployeesService(
+      {
+        employee: { findUnique: async () => ({ id: 'emp-1' }) },
+        employeeWorkSession: {
+          findFirst: async () => ({
+            id: 'session-1',
+            employeeId: 'emp-1',
+            role: 'PREPARACION',
+            orderIds: ['order-1', 'order-2'],
+            orderNumbers: ['9601', '9602'],
+            startedAt,
+            endedAt: null
+          }),
+          update: async ({ data }: any) => ({
+            id: 'session-1',
+            employeeId: 'emp-1',
+            role: 'PREPARACION',
+            orderIds: ['order-1', 'order-2'],
+            orderNumbers: ['9601', '9602'],
+            startedAt,
+            endedAt: data.endedAt
+          })
+        },
+        order: {
+          findMany: async () => [
+            { id: 'order-1', orderNumber: '9601', items: [{ quantity: 2 }] },
+            { id: 'order-2', orderNumber: '9602', items: [{ quantity: 1 }] }
+          ]
+        },
+        employeeOrderContribution: {
+          upsert: async (args: any) => {
+            upserts.push(args);
+            return args.create;
+          }
+        }
+      } as never,
+      { orderBreakdown: async () => ({ netMargin: 0 }) } as never,
+      { get: () => undefined } as never
+    );
+
+    const result = await service.finishWorkSession('emp-1', 'session-1');
+
+    expect(result.totalMinutes).toBeGreaterThanOrEqual(29);
+    expect(upserts).toHaveLength(2);
+    expect(upserts[0].create.orderId).toBe('order-1');
+    expect(upserts[0].create.minutesSpent).toBeGreaterThan(upserts[1].create.minutesSpent);
+    expect(upserts[0].create.units).toBe(2);
+    expect(upserts[1].create.units).toBe(1);
+  });
 });

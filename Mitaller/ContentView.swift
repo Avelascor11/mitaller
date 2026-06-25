@@ -11681,9 +11681,11 @@ struct EmployeesView: View {
     @State private var newRole = ""
     @State private var newHourlyRate = "8"
     @State private var selectedEmployeeId = ""
+    @State private var selectedBatchOrderIDs: Set<String> = []
     @State private var orderNumber = ""
     @State private var orderMinutes = "20"
     @State private var assigning = false
+    @State private var workSessionBusy = false
 
     var body: some View {
         NavigationStack {
@@ -11733,6 +11735,16 @@ struct EmployeesView: View {
                         }
                     }
 
+                    EmployeeWorkSessionCard(
+                        employees: employees,
+                        orders: store.pendingPreparationOrders,
+                        selectedEmployeeId: $selectedEmployeeId,
+                        selectedOrderIDs: $selectedBatchOrderIDs,
+                        busy: workSessionBusy,
+                        onStart: { Task { await startWorkSession() } },
+                        onFinish: { employee, session in Task { await finishWorkSession(employee: employee, session: session) } }
+                    )
+
                     EmployeeAssignOrderCard(
                         employees: employees,
                         selectedEmployeeId: $selectedEmployeeId,
@@ -11777,6 +11789,9 @@ struct EmployeesView: View {
             summary = try await employeeSummary
             if selectedEmployeeId.isEmpty {
                 selectedEmployeeId = employees.first?.id ?? ""
+            }
+            selectedBatchOrderIDs = selectedBatchOrderIDs.filter { id in
+                store.pendingPreparationOrders.contains { $0.remoteID == id }
             }
         } catch {
             self.error = error.localizedDescription
@@ -11836,6 +11851,36 @@ struct EmployeesView: View {
         do {
             _ = try await client.assignOrderToEmployee(employeeId: selectedEmployeeId, orderNumber: cleanedOrder, minutesSpent: minutes)
             orderNumber = ""
+            await reload()
+        } catch {
+            self.error = error.localizedDescription
+        }
+    }
+
+    private func startWorkSession() async {
+        guard let client = store.apiClient else { error = "API no configurada"; return }
+        let orderIds = Array(selectedBatchOrderIDs)
+        guard !selectedEmployeeId.isEmpty else { error = "Elige un empleado"; return }
+        guard !orderIds.isEmpty else { error = "Elige los pedidos que va a preparar"; return }
+        workSessionBusy = true
+        error = nil
+        defer { workSessionBusy = false }
+        do {
+            _ = try await client.startEmployeeWorkSession(employeeId: selectedEmployeeId, orderIds: orderIds)
+            selectedBatchOrderIDs.removeAll()
+            await reload()
+        } catch {
+            self.error = error.localizedDescription
+        }
+    }
+
+    private func finishWorkSession(employee: EmployeeRecord, session: EmployeeWorkSession) async {
+        guard let client = store.apiClient else { error = "API no configurada"; return }
+        workSessionBusy = true
+        error = nil
+        defer { workSessionBusy = false }
+        do {
+            _ = try await client.finishEmployeeWorkSession(employeeId: employee.id, sessionId: session.id)
             await reload()
         } catch {
             self.error = error.localizedDescription
@@ -11969,6 +12014,154 @@ private struct EmployeeRowCard: View {
             }
         }
         .glassPanel(padding: 14, accent: row.status == "OK" ? AppTheme.blue : AppTheme.amber)
+    }
+}
+
+private struct EmployeeWorkSessionCard: View {
+    let employees: [EmployeeRecord]
+    let orders: [WorkshopOrder]
+    @Binding var selectedEmployeeId: String
+    @Binding var selectedOrderIDs: Set<String>
+    let busy: Bool
+    let onStart: () -> Void
+    let onFinish: (EmployeeRecord, EmployeeWorkSession) -> Void
+
+    private var selectedEmployee: EmployeeRecord? {
+        employees.first { $0.id == selectedEmployeeId } ?? employees.first
+    }
+
+    private var selectableOrders: [WorkshopOrder] {
+        Array(orders.filter { $0.remoteID != nil }.prefix(40))
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            VStack(alignment: .leading, spacing: 4) {
+                Label("¿Qué pedidos vas a preparar?", systemImage: "checklist.checked")
+                    .font(.headline.weight(.heavy))
+                    .foregroundStyle(AppTheme.ink)
+                Text("Elige empleado, marca pedidos y empieza. Al finalizar se reparte el tiempo automaticamente.")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(AppTheme.muted)
+            }
+
+            Picker("Empleado", selection: $selectedEmployeeId) {
+                ForEach(employees) { employee in
+                    Text(employee.name).tag(employee.id)
+                }
+            }
+            .pickerStyle(.menu)
+            .disabled(employees.isEmpty || busy)
+
+            if let employee = selectedEmployee, let session = employee.openWorkSession {
+                VStack(alignment: .leading, spacing: 10) {
+                    HStack {
+                        Label("Lote en marcha", systemImage: "timer.circle.fill")
+                            .font(.subheadline.weight(.heavy))
+                            .foregroundStyle(AppTheme.green)
+                        Spacer()
+                        if let startedAt = session.startedAt {
+                            Text(startedAt.formatted(.dateTime.hour().minute()))
+                                .font(.caption.weight(.bold))
+                                .foregroundStyle(AppTheme.muted)
+                        }
+                    }
+                    Text(session.orderNumbers.map { "#\($0)" }.joined(separator: " · "))
+                        .font(.caption.weight(.bold))
+                        .foregroundStyle(AppTheme.ink)
+                        .lineLimit(3)
+                    Button {
+                        onFinish(employee, session)
+                    } label: {
+                        Label(busy ? "Finalizando..." : "Finalizar y guardar tiempos", systemImage: "checkmark.circle.fill")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(AppTheme.green)
+                    .disabled(busy)
+                }
+                .padding(12)
+                .background(AppTheme.greenSoft.opacity(0.55))
+                .clipShape(RoundedRectangle(cornerRadius: 14))
+            } else {
+                if selectableOrders.isEmpty {
+                    Text("No hay pedidos sin preparar disponibles.")
+                        .font(.caption.weight(.bold))
+                        .foregroundStyle(AppTheme.muted)
+                        .padding(12)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(AppTheme.surfaceSoft)
+                        .clipShape(RoundedRectangle(cornerRadius: 12))
+                } else {
+                    VStack(spacing: 8) {
+                        ForEach(selectableOrders) { order in
+                            EmployeeWorkOrderToggle(
+                                order: order,
+                                selected: order.remoteID.map { selectedOrderIDs.contains($0) } ?? false,
+                                onToggle: {
+                                    guard let id = order.remoteID else { return }
+                                    if selectedOrderIDs.contains(id) {
+                                        selectedOrderIDs.remove(id)
+                                    } else {
+                                        selectedOrderIDs.insert(id)
+                                    }
+                                }
+                            )
+                        }
+                    }
+                }
+
+                Button(action: onStart) {
+                    Label(busy ? "Empezando..." : "Empezar fichaje con \(selectedOrderIDs.count) pedidos", systemImage: "play.circle.fill")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(busy || employees.isEmpty || selectedOrderIDs.isEmpty)
+            }
+        }
+        .glassPanel(padding: 14, accent: AppTheme.green)
+    }
+}
+
+private struct EmployeeWorkOrderToggle: View {
+    let order: WorkshopOrder
+    let selected: Bool
+    let onToggle: () -> Void
+
+    var body: some View {
+        Button(action: onToggle) {
+            HStack(spacing: 10) {
+                Image(systemName: selected ? "checkmark.circle.fill" : "circle")
+                    .font(.title3.weight(.bold))
+                    .foregroundStyle(selected ? AppTheme.green : AppTheme.muted)
+                VStack(alignment: .leading, spacing: 3) {
+                    HStack {
+                        Text("#\(order.number)")
+                            .font(.subheadline.weight(.heavy))
+                            .foregroundStyle(AppTheme.ink)
+                        Text(order.priority.rawValue.uppercased())
+                            .font(.caption2.weight(.heavy))
+                            .padding(.horizontal, 7)
+                            .padding(.vertical, 3)
+                            .background(order.priority.softColor)
+                            .foregroundStyle(order.priority.color)
+                            .clipShape(Capsule())
+                    }
+                    Text("\(order.totalUnits) uds · \(order.customer)")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(AppTheme.muted)
+                        .lineLimit(1)
+                }
+                Spacer()
+                Image(systemName: order.hasMultipleItems ? "square.stack.3d.up.fill" : "tshirt.fill")
+                    .foregroundStyle(AppTheme.blue)
+            }
+            .padding(10)
+            .background(selected ? AppTheme.greenSoft.opacity(0.35) : AppTheme.surfaceSoft)
+            .clipShape(RoundedRectangle(cornerRadius: 12))
+            .overlay(RoundedRectangle(cornerRadius: 12).stroke(selected ? AppTheme.green.opacity(0.45) : AppTheme.lineSoft, lineWidth: 1))
+        }
+        .buttonStyle(.plain)
     }
 }
 
