@@ -1,11 +1,12 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { CollabStatus, CollabType, InfluencerStage, Prisma, UgcStatus } from '@prisma/client';
+import { CollabStatus, CollabType, InfluencerStage, Prisma, ShipmentStatus, UgcStatus } from '@prisma/client';
 import { randomUUID } from 'node:crypto';
 import { createReadStream } from 'node:fs';
 import { mkdir, stat, writeFile } from 'node:fs/promises';
 import { extname, join } from 'node:path';
 import { PrismaService } from '../prisma/prisma.service';
+import { SendcloudAdapter } from '../sendcloud/sendcloud.adapter';
 import {
   CreateCollaborationBody,
   CreateInfluencerBody,
@@ -18,7 +19,11 @@ import {
 
 @Injectable()
 export class InfluencersService {
-  constructor(private readonly prisma: PrismaService, private readonly config: ConfigService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly config: ConfigService,
+    private readonly sendcloud: SendcloudAdapter
+  ) {}
 
   async summary() {
     const [influencers, collaborations, submissions] = await Promise.all([
@@ -96,6 +101,50 @@ export class InfluencersService {
         fulfillment: fulfillment.get(collaboration.id) ?? this.emptyFulfillment(collaboration)
       }))
     }));
+  }
+
+  async syncFulfillment() {
+    const collaborations = await this.prisma.collaboration.findMany({
+      where: { status: { notIn: ['CLOSED', 'CANCELLED'] } },
+      include: {
+        influencer: { select: { igHandle: true, fullName: true, email: true } }
+      },
+      orderBy: { updatedAt: 'desc' }
+    });
+
+    const fulfillment = await this.fulfillmentByCollaboration(collaborations, { syncLiveTracking: true });
+    const delivered = [...fulfillment.entries()].filter(([, item]) => item.status === 'DELIVERED');
+    const updated: Array<{ collaborationId: string; influencer: string; orderNumber: string | null; trackingNumber: string | null }> = [];
+
+    for (const [collaborationId, item] of delivered) {
+      const collaboration = collaborations.find((row) => row.id === collaborationId);
+      if (!collaboration || collaboration.status !== 'PRODUCT_SENT') continue;
+      const marker = 'Producto recibido por tracking';
+      await this.prisma.collaboration.update({
+        where: { id: collaboration.id },
+        data: {
+          status: 'AWAITING_CONTENT',
+          notes: collaboration.notes?.includes(marker)
+            ? collaboration.notes
+            : this.appendNote(collaboration.notes, `${marker} el ${this.todayLabel()}${item.orderNumber ? ` (${item.orderNumber})` : ''}. Recordar contenido.`)
+        }
+      });
+      updated.push({
+        collaborationId,
+        influencer: collaboration.influencer?.igHandle ?? collaboration.influencerId,
+        orderNumber: item.orderNumber,
+        trackingNumber: item.trackingNumber
+      });
+    }
+
+    return {
+      checked: collaborations.length,
+      matched: [...fulfillment.values()].filter((item) => Boolean(item.orderId)).length,
+      delivered: delivered.length,
+      updatedCollaborations: updated.length,
+      updated,
+      unresolved: [...fulfillment.values()].filter((item) => ['NO_ORDER', 'ORDER_NOT_FOUND'].includes(item.status)).length
+    };
   }
 
   createInfluencer(input: CreateInfluencerBody) {
@@ -367,7 +416,7 @@ export class InfluencersService {
     return influencer;
   }
 
-  private async fulfillmentByCollaboration(collaborations: CollaborationLookup[]) {
+  private async fulfillmentByCollaboration(collaborations: CollaborationLookup[], options: { syncLiveTracking?: boolean } = {}) {
     const references = collaborations
       .flatMap((collaboration) => this.orderReferencesFor(collaboration))
       .filter((value): value is string => Boolean(value?.trim()));
@@ -396,6 +445,11 @@ export class InfluencersService {
       },
       include: { shipments: { orderBy: { updatedAt: 'desc' } } }
     });
+
+    if (options.syncLiveTracking) {
+      await this.syncTrackingForOrders(orders);
+    }
+
     const byReference = new Map<string, (typeof orders)[number]>();
     for (const order of orders) {
       byReference.set(order.id, order);
@@ -451,15 +505,55 @@ export class InfluencersService {
     };
   }
 
+  private async syncTrackingForOrders(orders: Array<Prisma.OrderGetPayload<{ include: { shipments: true } }>>) {
+    if (!this.sendcloud.hasCredentials()) return;
+    const shipments = orders
+      .flatMap((order) => order.shipments)
+      .filter((shipment) => Boolean(shipment.sendcloudParcelId));
+
+    for (const shipment of shipments) {
+      try {
+        const live = await this.sendcloud.getTracking(shipment.sendcloudParcelId!);
+        const status = typeof live.status === 'string' ? live.status : String(live.status ?? '');
+        const statusId = Number((live as { statusId?: number | string }).statusId);
+        const delivered = statusId === 11 || this.isDeliveredTrackingStatus(status);
+        const updated = await this.prisma.shipment.update({
+          where: { id: shipment.id },
+          data: {
+            trackingStatus: status || shipment.trackingStatus,
+            trackingUrl: live.trackingUrl ?? shipment.trackingUrl,
+            trackingNumber: (live as { trackingNumber?: string | null }).trackingNumber ?? shipment.trackingNumber,
+            trackingSyncedAt: new Date(),
+            status: delivered ? ShipmentStatus.DELIVERED : shipment.status
+          }
+        });
+        Object.assign(shipment, updated);
+      } catch {
+        // Keep cached tracking if Sendcloud is temporarily unavailable.
+      }
+    }
+  }
+
   private collaborationFulfillmentStatus(operationalStatus: string, shipmentStatus?: string | null, trackingStatus?: string | null) {
     const tracking = this.normalizeText(trackingStatus ?? '');
-    if (shipmentStatus === 'DELIVERED' || tracking.includes('delivered') || tracking.includes('entregado')) return 'DELIVERED';
+    if (shipmentStatus === 'DELIVERED' || this.isDeliveredTrackingStatus(tracking)) return 'DELIVERED';
     if (shipmentStatus === 'IN_TRANSIT' || operationalStatus === 'SHIPPED') return 'IN_TRANSIT';
     if (shipmentStatus === 'LABEL_CREATED' || shipmentStatus === 'PRINTED') return 'LABEL_CREATED';
     if (shipmentStatus === 'PARCEL_CREATED') return 'PARCEL_CREATED';
     if (['READY_FOR_LABEL', 'LABEL_CREATED'].includes(operationalStatus)) return 'READY_TO_SHIP';
     if (['NEW', 'WAITING_STOCK', 'WAITING_PRODUCTION', 'IN_PRODUCTION', 'PRODUCED', 'WAITING_PICKING', 'PICKED'].includes(operationalStatus)) return 'PREPARING';
     return 'UNKNOWN';
+  }
+
+  private isDeliveredTrackingStatus(value: string) {
+    const tracking = this.normalizeText(value);
+    return tracking === '11'
+      || tracking.includes('delivered')
+      || tracking.includes('entregado')
+      || tracking.includes('delivered to')
+      || tracking.includes('delivered at')
+      || tracking.includes('delivered in')
+      || tracking.includes('delivered successfully');
   }
 
   private collaborationFulfillmentLabel(status: string) {

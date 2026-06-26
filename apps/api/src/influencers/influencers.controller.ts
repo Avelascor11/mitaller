@@ -21,6 +21,11 @@ export class InfluencersController {
     return this.influencers.list({ stage, q });
   }
 
+  @Post('sync-fulfillment')
+  syncFulfillment() {
+    return this.influencers.syncFulfillment();
+  }
+
   @Post()
   create(@Body() body: CreateInfluencerBody) {
     return this.influencers.createInfluencer(body);

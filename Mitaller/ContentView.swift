@@ -971,6 +971,21 @@ final class WorkshopStore {
         }
     }
 
+    func syncInfluencerFulfillment() async throws -> InfluencerFulfillmentSyncResult {
+        guard let client = apiClient else { throw APIClientError.invalidURL }
+        isInfluencerActionRunning = true
+        syncError = nil
+        defer { isInfluencerActionRunning = false }
+        do {
+            let result = try await client.syncInfluencerFulfillment()
+            await loadInfluencers()
+            return result
+        } catch {
+            syncError = "No se pudieron actualizar entregas de influs: \(error.localizedDescription)"
+            throw error
+        }
+    }
+
     func createInfluencer(handle: String, name: String, notes: String, lastMessage: String = "") async throws -> InfluencerProfile {
         guard let client = apiClient else { throw APIClientError.invalidURL }
         isInfluencerActionRunning = true
@@ -6866,6 +6881,7 @@ enum InfluencerStageFilter: String, CaseIterable, Identifiable {
 enum InfluencerFollowupFilter: String, CaseIterable, Identifiable {
     case all = "ALL"
     case productSent = "PRODUCT_SENT"
+    case delivered = "DELIVERED"
     case awaitingContent = "AWAITING_CONTENT"
     case contentReceived = "CONTENT_RECEIVED"
 
@@ -6875,6 +6891,7 @@ enum InfluencerFollowupFilter: String, CaseIterable, Identifiable {
         switch self {
         case .all: "Todos"
         case .productSent: "En camino"
+        case .delivered: "Entregados"
         case .awaitingContent: "Recordar"
         case .contentReceived: "Contenido OK"
         }
@@ -6884,6 +6901,7 @@ enum InfluencerFollowupFilter: String, CaseIterable, Identifiable {
         switch self {
         case .all: "person.2.fill"
         case .productSent: "shippingbox.fill"
+        case .delivered: "checkmark.seal.fill"
         case .awaitingContent: "bell.badge.fill"
         case .contentReceived: "video.badge.checkmark.fill"
         }
@@ -6893,6 +6911,7 @@ enum InfluencerFollowupFilter: String, CaseIterable, Identifiable {
         switch self {
         case .all: AppTheme.purple
         case .productSent: AppTheme.blue
+        case .delivered: AppTheme.green
         case .awaitingContent: AppTheme.amber
         case .contentReceived: AppTheme.green
         }
@@ -6903,9 +6922,11 @@ enum InfluencerFollowupFilter: String, CaseIterable, Identifiable {
         case .all:
             return true
         case .productSent:
-            return influencer.collaborations.contains { $0.status == "PRODUCT_SENT" }
+            return influencer.collaborations.contains { $0.status == "PRODUCT_SENT" && $0.fulfillment?.status != "DELIVERED" }
+        case .delivered:
+            return influencer.collaborations.contains { $0.fulfillment?.status == "DELIVERED" }
         case .awaitingContent:
-            return influencer.collaborations.contains { $0.status == "AWAITING_CONTENT" }
+            return influencer.collaborations.contains { $0.status == "AWAITING_CONTENT" || ($0.status == "PRODUCT_SENT" && $0.fulfillment?.status == "DELIVERED") }
         case .contentReceived:
             return influencer.collaborations.contains { ["CONTENT_RECEIVED", "PUBLISHED", "CLOSED"].contains($0.status) }
         }
@@ -6964,6 +6985,28 @@ struct InfluencersView: View {
                     .buttonStyle(.plain)
                     .disabled(store.isInfluencerActionRunning)
                     .glassPanel(padding: 14, accent: AppTheme.purple)
+
+                    Button {
+                        Task { await syncFulfillment() }
+                    } label: {
+                        HStack(spacing: 12) {
+                            Image(systemName: store.isInfluencerActionRunning ? "hourglass" : "checkmark.seal.fill")
+                                .font(.title3.weight(.black))
+                                .foregroundStyle(AppTheme.green)
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text(store.isInfluencerActionRunning ? "Actualizando entregas..." : "Actualizar entregas")
+                                    .font(.headline.weight(.black))
+                                    .foregroundStyle(AppTheme.ink)
+                                Text("Consulta Sendcloud y marca automáticamente las influs que ya recibieron el pedido.")
+                                    .font(.caption.weight(.semibold))
+                                    .foregroundStyle(AppTheme.muted)
+                            }
+                            Spacer()
+                        }
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(store.isInfluencerActionRunning)
+                    .glassPanel(padding: 14, accent: AppTheme.green)
 
                     if let importMessage {
                         Text(importMessage)
@@ -7090,6 +7133,18 @@ struct InfluencersView: View {
                 : result.imported == 0
                 ? "Revisadas \(result.checked) conversaciones. Ignoradas \(result.ignored), fallidas \(result.failed ?? 0)."
                 : "Añadidas \(result.imported) influs tras revisar \(result.checked). Ignoradas \(result.ignored), fallidas \(result.failed ?? 0)."
+            await reload()
+        } catch {
+            importMessage = nil
+        }
+    }
+
+    private func syncFulfillment() async {
+        importMessage = nil
+        do {
+            let result = try await store.syncInfluencerFulfillment()
+            importMessage = "Entregas revisadas: \(result.checked). Asociadas a pedido: \(result.matched). Entregadas: \(result.delivered). Movidas a recordar: \(result.updatedCollaborations). Sin pedido: \(result.unresolved)."
+            followup = result.delivered > 0 ? .delivered : followup
             await reload()
         } catch {
             importMessage = nil

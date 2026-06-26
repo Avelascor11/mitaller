@@ -3,7 +3,11 @@ import { describe, expect, it, vi } from 'vitest';
 import { InfluencersService } from '../src/influencers/influencers.service';
 
 function serviceWith(prisma: Record<string, any>) {
-  return new InfluencersService(prisma as never, { get: vi.fn() } as never);
+  return new InfluencersService(prisma as never, { get: vi.fn() } as never, { hasCredentials: vi.fn().mockReturnValue(false), getTracking: vi.fn() } as never);
+}
+
+function serviceWithSendcloud(prisma: Record<string, any>, sendcloud: Record<string, any>) {
+  return new InfluencersService(prisma as never, { get: vi.fn() } as never, sendcloud as never);
 }
 
 describe('InfluencersService', () => {
@@ -230,5 +234,98 @@ describe('InfluencersService', () => {
       },
       include: { influencer: true, submissions: true }
     });
+  });
+
+  it('sincroniza Sendcloud y mueve a recordar las colaboraciones entregadas', async () => {
+    const prisma = {
+      collaboration: {
+        findMany: vi.fn().mockResolvedValue([
+          {
+            id: 'collab-1',
+            influencerId: 'influ-1',
+            title: 'Pack regalo #9720',
+            status: 'PRODUCT_SENT',
+            shopifyOrderId: null,
+            shopifyOrderName: '#9720',
+            productSent: 'Camiseta',
+            discountCode: null,
+            requestedCode: null,
+            notes: 'Enviado',
+            influencer: { igHandle: 'luciaugc', fullName: 'Lucia UGC', email: 'lucia@example.com' }
+          }
+        ]),
+        update: vi.fn().mockResolvedValue({ id: 'collab-1', status: 'AWAITING_CONTENT' })
+      },
+      order: {
+        findMany: vi.fn().mockResolvedValue([
+          {
+            id: 'order-1',
+            shopifyOrderId: 'gid://shopify/Order/9720',
+            orderNumber: '#9720',
+            customerName: 'Lucia UGC',
+            customerEmail: 'lucia@example.com',
+            operationalStatus: 'SHIPPED',
+            updatedAt: new Date('2026-06-20T10:00:00Z'),
+            shipments: [
+              {
+                id: 'shipment-1',
+                sendcloudParcelId: 'parcel-1',
+                status: 'IN_TRANSIT',
+                trackingStatus: 'En camino',
+                trackingNumber: 'TRACK9720',
+                trackingUrl: null,
+                carrier: 'Correos',
+                trackingSyncedAt: null,
+                updatedAt: new Date('2026-06-20T11:00:00Z')
+              }
+            ]
+          }
+        ])
+      },
+      shipment: {
+        update: vi.fn().mockResolvedValue({
+          id: 'shipment-1',
+          sendcloudParcelId: 'parcel-1',
+          status: 'DELIVERED',
+          trackingStatus: 'Entregado',
+          trackingNumber: 'TRACK9720',
+          trackingUrl: 'https://tracking.test/TRACK9720',
+          carrier: 'Correos',
+          trackingSyncedAt: new Date('2026-06-21T11:00:00Z'),
+          updatedAt: new Date('2026-06-21T11:00:00Z')
+        })
+      }
+    };
+    const sendcloud = {
+      hasCredentials: vi.fn().mockReturnValue(true),
+      getTracking: vi.fn().mockResolvedValue({
+        status: 'Entregado',
+        statusId: 11,
+        trackingNumber: 'TRACK9720',
+        trackingUrl: 'https://tracking.test/TRACK9720'
+      })
+    };
+
+    const result = await serviceWithSendcloud(prisma, sendcloud).syncFulfillment();
+
+    expect(result).toMatchObject({
+      checked: 1,
+      matched: 1,
+      delivered: 1,
+      updatedCollaborations: 1,
+      unresolved: 0
+    });
+    expect(sendcloud.getTracking).toHaveBeenCalledWith('parcel-1');
+    expect(prisma.shipment.update).toHaveBeenCalledWith(expect.objectContaining({
+      where: { id: 'shipment-1' },
+      data: expect.objectContaining({ status: 'DELIVERED', trackingStatus: 'Entregado' })
+    }));
+    expect(prisma.collaboration.update).toHaveBeenCalledWith(expect.objectContaining({
+      where: { id: 'collab-1' },
+      data: expect.objectContaining({
+        status: 'AWAITING_CONTENT',
+        notes: expect.stringContaining('Producto recibido por tracking')
+      })
+    }));
   });
 });

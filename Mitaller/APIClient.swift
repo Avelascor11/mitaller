@@ -611,6 +611,11 @@ struct APIClient {
         return try await perform(request)
     }
 
+    func syncInfluencerFulfillment() async throws -> InfluencerFulfillmentSyncResult {
+        let request = try jsonRequest(path: "/influencers/sync-fulfillment", method: "POST", body: EmptyBody())
+        return try await perform(request)
+    }
+
     func createInfluencer(_ body: InfluencerSaveRequest) async throws -> InfluencerProfile {
         let request = try jsonRequest(path: "/influencers", method: "POST", body: body)
         return try await perform(request)
@@ -1350,6 +1355,14 @@ struct InfluencerImportResult: Decodable {
     let ignored: Int
     let failed: Int?
     let message: String?
+}
+
+struct InfluencerFulfillmentSyncResult: Decodable {
+    let checked: Int
+    let matched: Int
+    let delivered: Int
+    let updatedCollaborations: Int
+    let unresolved: Int
 }
 
 struct InfluencerSaveRequest: Encodable {
