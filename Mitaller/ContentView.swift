@@ -7572,6 +7572,7 @@ struct CrewCollabCard: View {
     @State private var loadingPerf = false
     @State private var error: String?
     @State private var dmFeedback: String?
+    private let sharedInfluencerDriveUrl = "https://drive.google.com/drive/folders/1U0dJOf3a2tWM6obQOfb6kx_KXLezSiKB?usp=sharing"
 
     private var hasCode: Bool { (code ?? collab.discountCode) != nil }
 
@@ -7771,9 +7772,6 @@ struct CrewCollabCard: View {
     private var instagramReminderMessage: String {
         let name = (fullName?.split(separator: " ").first).map(String.init)
         let greeting = name.map { "¡Eyy \($0)! 🙌" } ?? "¡Eyy! 🙌"
-        let driveLine = collab.driveFolderUrl.flatMap { url in
-            url.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : "Te dejo aquí la carpeta para subirlo cuando lo tengas: \(url)"
-        } ?? "Si quieres, mándamelo por aquí y te paso la carpeta para subirlo."
 
         return """
         \(greeting)
@@ -7782,7 +7780,7 @@ struct CrewCollabCard: View {
 
         Cuando puedas, nos vendría genial que nos mandaras el reel/stories con el producto. Hazlo totalmente a tu rollo, natural y con tu estilo, que eso es justo lo que buscamos 🔥
 
-        \(driveLine)
+        Te dejo aquí la carpeta para subirlo cuando lo tengas: \(sharedInfluencerDriveUrl)
 
         Si necesitas cualquier cosa o tienes alguna duda, me dices por aquí y te ayudo en un segundo.
 
