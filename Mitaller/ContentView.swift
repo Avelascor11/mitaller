@@ -7441,7 +7441,11 @@ struct InfluencerDetailView: View {
 
                     SectionHeader(title: "Colaboraciones", subtitle: "\(currentInfluencer.collaborations.count) abiertas o históricas")
                     ForEach(currentInfluencer.collaborations) { collab in
-                        CrewCollabCard(collab: collab)
+                        CrewCollabCard(
+                            collab: collab,
+                            igHandle: currentInfluencer.igHandle,
+                            fullName: currentInfluencer.fullName
+                        )
                     }
                 }
 
@@ -7559,12 +7563,15 @@ struct CrewCollabCard: View {
     @Environment(WorkshopStore.self) private var store
     @Environment(\.openURL) private var openURL
     let collab: InfluencerCollaboration
+    let igHandle: String
+    let fullName: String?
     @State private var approving = false
     @State private var code: String?
     @State private var referralUrl: String?
     @State private var perf: CrewPerformance?
     @State private var loadingPerf = false
     @State private var error: String?
+    @State private var dmFeedback: String?
 
     private var hasCode: Bool { (code ?? collab.discountCode) != nil }
 
@@ -7607,6 +7614,15 @@ struct CrewCollabCard: View {
                         .disabled(store.isInfluencerActionRunning)
                     } else if collab.status == "AWAITING_CONTENT" {
                         Button {
+                            openInstagramReminder()
+                        } label: {
+                            Label("Abrir DM y recordar contenido", systemImage: "paperplane.fill")
+                                .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .tint(AppTheme.purple)
+
+                        Button {
                             Task { await store.markInfluencerContentReceived(collab) }
                         } label: {
                             Label("Ya mandó contenido", systemImage: "video.badge.checkmark.fill")
@@ -7615,6 +7631,11 @@ struct CrewCollabCard: View {
                         .buttonStyle(.borderedProminent)
                         .tint(AppTheme.green)
                         .disabled(store.isInfluencerActionRunning)
+                    }
+                    if let dmFeedback {
+                        Text(dmFeedback)
+                            .font(.caption2.weight(.bold))
+                            .foregroundStyle(AppTheme.green)
                     }
                 }
                 .padding(10)
@@ -7736,6 +7757,37 @@ struct CrewCollabCard: View {
         guard let client = store.apiClient else { return }
         loadingPerf = true; defer { loadingPerf = false }
         perf = try? await client.crewPerformance(collab.id)
+    }
+
+    private func openInstagramReminder() {
+        UIPasteboard.general.string = instagramReminderMessage
+        dmFeedback = "Mensaje copiado. Pégalo en el DM de Instagram."
+        let handle = igHandle.trimmingCharacters(in: .whitespacesAndNewlines).replacingOccurrences(of: "@", with: "")
+        if let url = URL(string: "https://ig.me/m/\(handle)") {
+            openURL(url)
+        }
+    }
+
+    private var instagramReminderMessage: String {
+        let name = (fullName?.split(separator: " ").first).map(String.init)
+        let greeting = name.map { "¡Eyy \($0)! 🙌" } ?? "¡Eyy! 🙌"
+        let driveLine = collab.driveFolderUrl.flatMap { url in
+            url.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : "Te dejo aquí la carpeta para subirlo cuando lo tengas: \(url)"
+        } ?? "Si quieres, mándamelo por aquí y te paso la carpeta para subirlo."
+
+        return """
+        \(greeting)
+
+        ¿Qué tal? Ya nos aparece que te ha llegado el pack de Speedwear, así que te escribo para recordarte lo del contenido 😊
+
+        Cuando puedas, nos vendría genial que nos mandaras el reel/stories con el producto. Hazlo totalmente a tu rollo, natural y con tu estilo, que eso es justo lo que buscamos 🔥
+
+        \(driveLine)
+
+        Si necesitas cualquier cosa o tienes alguna duda, me dices por aquí y te ayudo en un segundo.
+
+        ¡Mil gracias! 🏁
+        """
     }
 }
 

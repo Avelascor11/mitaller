@@ -1257,6 +1257,7 @@ struct InfluencerCollaboration: Decodable, Identifiable, Hashable {
     let affiliateId: String?
     let tier: String?
     let shopifyOrderName: String?
+    let driveFolderUrl: String?
     let metaCampaignId: String?
     let fulfillment: InfluencerFulfillment?
     let deadline: Date?
