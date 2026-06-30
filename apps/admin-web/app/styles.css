@@ -61,13 +61,22 @@ button {
 button:hover { background: var(--surface-2); border-color: #d6dbe3; }
 button:active { transform: translateY(1px); }
 
-button.primary {
+button.primary,
+a.primary {
   background: var(--accent);
   border-color: var(--accent);
   color: #fff;
   box-shadow: 0 6px 14px rgba(79, 70, 229, .25);
+  border-radius: var(--radius-sm);
+  padding: 9px 14px;
+  font-weight: 600;
+  font-size: 13px;
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid var(--accent);
 }
-button.primary:hover { background: var(--accent-strong); border-color: var(--accent-strong); }
+button.primary:hover,
+a.primary:hover { background: var(--accent-strong); border-color: var(--accent-strong); }
 
 button.ghost {
   background: transparent;
