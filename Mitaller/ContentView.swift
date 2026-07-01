@@ -11291,6 +11291,7 @@ struct EconomicsView: View {
     @State private var today: EconomicsSummary?
     @State private var month: EconomicsSummary?
     @State private var custom: EconomicsSummary?
+    @State private var overview: EconomicsOverview?
     @State private var growth: GrowthControlSummary?
     @State private var products: [ProductMarginRow] = []
     @State private var loading = false
@@ -11304,6 +11305,9 @@ struct EconomicsView: View {
         var id: String { rawValue }
         var label: String {
             switch self { case .today: "Hoy"; case .month: "Este mes"; case .custom: "Calendario" }
+        }
+        var overviewPeriod: String {
+            switch self { case .today: "day"; case .month: "month"; case .custom: "custom" }
         }
     }
 
@@ -11331,6 +11335,8 @@ struct EconomicsView: View {
                     .onChange(of: range) { _, newValue in
                         if newValue == .custom && custom == nil {
                             Task { await reloadCustomRange() }
+                        } else {
+                            Task { await reloadOverview() }
                         }
                     }
 
@@ -11341,6 +11347,10 @@ struct EconomicsView: View {
                             loading: loading,
                             onApply: { Task { await reloadCustomRange() } }
                         )
+                    }
+
+                    if let overview {
+                        EconomicsOverviewCard(overview: overview)
                     }
 
                     if let growth {
@@ -11393,11 +11403,13 @@ struct EconomicsView: View {
             async let t = client.economicsToday()
             async let m = client.economicsMonth()
             async let c = client.economicsRange(from: customFrom, to: customTo)
+            async let o = client.economicsOverview(period: range.overviewPeriod, from: range == .custom ? customFrom : nil, to: range == .custom ? customTo : nil)
             async let p = client.economicsProducts()
             async let g = client.economicsGrowthControl()
             today = try await t
             month = try await m
             custom = try await c
+            overview = try await o
             products = try await p
             growth = try await g
         } catch let err {
@@ -11412,6 +11424,16 @@ struct EconomicsView: View {
         defer { loading = false }
         do {
             custom = try await client.economicsRange(from: min(customFrom, customTo), to: max(customFrom, customTo))
+            overview = try await client.economicsOverview(period: "custom", from: min(customFrom, customTo), to: max(customFrom, customTo))
+        } catch let err {
+            error = err.localizedDescription
+        }
+    }
+
+    private func reloadOverview() async {
+        guard let client = store.apiClient else { error = "API no configurada"; return }
+        do {
+            overview = try await client.economicsOverview(period: range.overviewPeriod, from: range == .custom ? min(customFrom, customTo) : nil, to: range == .custom ? max(customFrom, customTo) : nil)
         } catch let err {
             error = err.localizedDescription
         }
@@ -14275,6 +14297,227 @@ struct GrowthControlCard: View {
             }
         }
         .glassPanel(padding: 16, accent: color)
+    }
+}
+
+struct EconomicsOverviewCard: View {
+    let overview: EconomicsOverview
+
+    private var color: Color {
+        switch overview.status {
+        case "GOOD": AppTheme.green
+        case "WATCH": AppTheme.amber
+        default: AppTheme.red
+        }
+    }
+
+    private var statusLabel: String {
+        switch overview.status {
+        case "GOOD": "Sano"
+        case "WATCH": "Vigilar"
+        default: "Alerta"
+        }
+    }
+
+    private var icon: String {
+        switch overview.status {
+        case "GOOD": "checkmark.seal.fill"
+        case "WATCH": "eye.fill"
+        default: "exclamationmark.triangle.fill"
+        }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(alignment: .top, spacing: 12) {
+                Image(systemName: icon)
+                    .font(.title2.weight(.black))
+                    .foregroundStyle(color)
+                    .frame(width: 42, height: 42)
+                    .background(color.opacity(0.14))
+                    .clipShape(RoundedRectangle(cornerRadius: 14))
+
+                VStack(alignment: .leading, spacing: 5) {
+                    HStack(spacing: 8) {
+                        Text("Informe inteligente")
+                            .font(.headline.weight(.heavy))
+                            .foregroundStyle(AppTheme.ink)
+                        Tag(text: statusLabel, systemImage: icon)
+                    }
+                    Text(overview.headline)
+                        .font(.title3.weight(.black))
+                        .foregroundStyle(AppTheme.ink)
+                    Text("Comparado con el periodo anterior equivalente.")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(AppTheme.muted)
+                }
+                Spacer()
+            }
+
+            LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 10) {
+                EconomyInsightTile(
+                    title: "Ventas",
+                    value: formatMoney(overview.current.grossRevenue, currency: overview.currency),
+                    detail: deltaText(overview.comparison.revenueDeltaPct),
+                    color: overview.comparison.revenueDelta >= 0 ? AppTheme.green : AppTheme.red
+                )
+                EconomyInsightTile(
+                    title: "Margen",
+                    value: formatMoney(overview.current.netMargin, currency: overview.currency),
+                    detail: moneyDelta(overview.comparison.marginDelta),
+                    color: overview.current.netMargin >= 0 ? AppTheme.green : AppTheme.red
+                )
+                EconomyInsightTile(
+                    title: "Gasto real",
+                    value: formatMoney(overview.bank.expense, currency: overview.currency),
+                    detail: moneyDelta(overview.comparison.expenseDelta),
+                    color: overview.bank.expense > overview.current.grossRevenue * 0.55 ? AppTheme.red : AppTheme.amber
+                )
+                EconomyInsightTile(
+                    title: "Pedidos",
+                    value: "\(overview.current.orderCount)",
+                    detail: signedInt(overview.comparison.ordersDelta),
+                    color: overview.comparison.ordersDelta >= 0 ? AppTheme.blue : AppTheme.amber
+                )
+            }
+
+            if !overview.bank.categories.isEmpty {
+                VStack(alignment: .leading, spacing: 9) {
+                    Text("Dónde se va el dinero")
+                        .font(.caption.weight(.black))
+                        .foregroundStyle(AppTheme.muted)
+                    ForEach(overview.bank.categories.prefix(4)) { category in
+                        VStack(alignment: .leading, spacing: 6) {
+                            HStack {
+                                Text(category.label)
+                                    .font(.subheadline.weight(.heavy))
+                                    .foregroundStyle(AppTheme.ink)
+                                Spacer()
+                                Text(formatMoney(category.expense, currency: overview.currency))
+                                    .font(.subheadline.weight(.black))
+                                    .foregroundStyle(category.expense > 0 ? AppTheme.amber : AppTheme.muted)
+                            }
+                            ProgressView(value: min(max(category.sharePct, 0), 100), total: 100)
+                                .tint(categoryTint(category.category))
+                            Text("\(category.sharePct, specifier: "%.0f")% del gasto · \(category.count) movimiento(s)")
+                                .font(.caption2.weight(.semibold))
+                                .foregroundStyle(AppTheme.muted)
+                        }
+                        .padding(10)
+                        .background(AppTheme.surfaceSoft)
+                        .clipShape(RoundedRectangle(cornerRadius: 14))
+                    }
+                }
+            }
+
+            if let fixed = overview.fixedExpenses, fixed.pending > 0 {
+                HStack(spacing: 10) {
+                    Image(systemName: "building.columns.fill")
+                        .foregroundStyle(AppTheme.amber)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Gastos fijos pendientes")
+                            .font(.subheadline.weight(.heavy))
+                            .foregroundStyle(AppTheme.ink)
+                        Text("Quedan \(formatMoney(fixed.pending, currency: overview.currency)) por separar este mes.")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(AppTheme.muted)
+                    }
+                    Spacer()
+                }
+                .padding(12)
+                .background(AppTheme.amber.opacity(0.12))
+                .clipShape(RoundedRectangle(cornerRadius: 14))
+            }
+
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Qué deberíamos hacer")
+                    .font(.caption.weight(.black))
+                    .foregroundStyle(AppTheme.muted)
+                ForEach(overview.recommendations.prefix(4)) { recommendation in
+                    HStack(alignment: .top, spacing: 9) {
+                        Image(systemName: recommendation.icon)
+                            .foregroundStyle(priorityColor(recommendation.priority))
+                            .frame(width: 22)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(recommendation.title)
+                                .font(.subheadline.weight(.heavy))
+                                .foregroundStyle(AppTheme.ink)
+                            Text(recommendation.detail)
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(AppTheme.muted)
+                        }
+                        Spacer()
+                    }
+                    .padding(10)
+                    .background(AppTheme.surface)
+                    .clipShape(RoundedRectangle(cornerRadius: 14))
+                }
+            }
+        }
+        .glassPanel(padding: 16, accent: color)
+    }
+
+    private func deltaText(_ pct: Double?) -> String {
+        guard let pct else { return "sin histórico" }
+        return "\(pct >= 0 ? "+" : "")\(String(format: "%.0f", pct))%"
+    }
+
+    private func moneyDelta(_ value: Double) -> String {
+        "\(value >= 0 ? "+" : "")\(formatMoney(value, currency: overview.currency))"
+    }
+
+    private func signedInt(_ value: Int) -> String {
+        "\(value >= 0 ? "+" : "")\(value) vs anterior"
+    }
+
+    private func categoryTint(_ category: String) -> Color {
+        switch category {
+        case "ADS": AppTheme.purple
+        case "GARMENT_SUPPLIER": AppTheme.blue
+        case "DTF_SUPPLIER": AppTheme.teal
+        case "SENDCLOUD": AppTheme.green
+        case "TAX": AppTheme.red
+        case "SOFTWARE": AppTheme.amber
+        default: AppTheme.muted
+        }
+    }
+
+    private func priorityColor(_ priority: String) -> Color {
+        switch priority {
+        case "HIGH": AppTheme.red
+        case "MEDIUM": AppTheme.amber
+        default: AppTheme.blue
+        }
+    }
+}
+
+struct EconomyInsightTile: View {
+    let title: String
+    let value: String
+    let detail: String
+    let color: Color
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            Text(title.uppercased())
+                .font(.caption2.weight(.black))
+                .foregroundStyle(AppTheme.muted)
+            Text(value)
+                .font(.headline.weight(.black))
+                .foregroundStyle(color)
+                .lineLimit(1)
+                .minimumScaleFactor(0.65)
+            Text(detail)
+                .font(.caption2.weight(.bold))
+                .foregroundStyle(AppTheme.muted)
+                .lineLimit(1)
+                .minimumScaleFactor(0.75)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(12)
+        .background(AppTheme.surfaceSoft)
+        .overlay(RoundedRectangle(cornerRadius: 14).stroke(AppTheme.line))
+        .clipShape(RoundedRectangle(cornerRadius: 14))
     }
 }
 

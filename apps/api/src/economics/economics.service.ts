@@ -63,6 +63,8 @@ interface GrowthAction {
   icon: string;
 }
 
+type EconomicsOverviewPeriod = 'day' | 'week' | 'month' | 'custom';
+
 @Injectable()
 export class EconomicsService {
   constructor(
@@ -98,6 +100,62 @@ export class EconomicsService {
       throw new Error('Rango de fechas invalido');
     }
     return this.summary(start, end);
+  }
+
+  async overview(period = 'month', from?: string, to?: string) {
+    const range = this.overviewRange(period, from, to);
+    const previousRange = this.previousRange(range.start, range.end);
+
+    const [current, previous, bankTransactions, fixedExpenses] = await Promise.all([
+      this.summary(range.start, range.end),
+      this.summary(previousRange.start, previousRange.end),
+      this.prisma.bankTransaction.findMany({
+        where: { bookingDate: { gte: range.start, lte: range.end } },
+        orderBy: { amount: 'asc' },
+        take: 500
+      }),
+      this.fixedExpenses(this.fixedExpensePeriodForDate(range.end)).catch(() => null)
+    ]);
+
+    const currency = current.currency ?? bankTransactions[0]?.currency ?? 'EUR';
+    const bank = this.bankOverview(bankTransactions, currency);
+    const comparison = {
+      revenueDelta: this.round(current.grossRevenue - previous.grossRevenue),
+      revenueDeltaPct: this.percentChange(current.grossRevenue, previous.grossRevenue),
+      ordersDelta: current.orderCount - previous.orderCount,
+      marginDelta: this.round(current.netMargin - previous.netMargin),
+      marginDeltaPct: this.percentChange(current.netMargin, previous.netMargin),
+      expenseDelta: this.round(bank.expense - await this.bankExpenseTotal(previousRange.start, previousRange.end)),
+    };
+    const status = this.overviewStatus(current, bank.expense, comparison.revenueDeltaPct);
+    const recommendations = this.overviewRecommendations({
+      current,
+      previous,
+      bank,
+      fixedPending: Number((fixedExpenses as any)?.pending ?? 0),
+      comparison,
+      currency
+    });
+
+    return {
+      period: range.period,
+      from: range.start.toISOString(),
+      to: range.end.toISOString(),
+      label: range.label,
+      currency,
+      status,
+      headline: this.overviewHeadline(status, range.label, current, comparison, currency),
+      current: this.summarySnapshot(current),
+      previous: this.summarySnapshot(previous),
+      comparison,
+      bank,
+      fixedExpenses: fixedExpenses ? {
+        totalMonthly: Number((fixedExpenses as any).totalMonthly ?? 0),
+        paid: Number((fixedExpenses as any).paid ?? 0),
+        pending: Number((fixedExpenses as any).pending ?? 0)
+      } : null,
+      recommendations
+    };
   }
 
   /** Plain-language verdict: are the ads working vs today's sales/margin? */
@@ -432,6 +490,269 @@ export class EconomicsService {
 
   private formatMoney(value: number, currency: string) {
     return new Intl.NumberFormat('es-ES', { style: 'currency', currency }).format(value);
+  }
+
+  private overviewRange(period: string, from?: string, to?: string): { period: EconomicsOverviewPeriod; start: Date; end: Date; label: string } {
+    const normalized = (period ?? 'month').toLowerCase();
+    const now = new Date();
+
+    if (normalized === 'custom') {
+      const start = from ? new Date(`${from}T00:00:00.000`) : new Date(now);
+      const end = to ? new Date(`${to}T23:59:59.999`) : new Date(start);
+      if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) throw new BadRequestException('Rango de fechas invalido');
+      return { period: 'custom', start, end, label: `${start.toISOString().slice(0, 10)} - ${end.toISOString().slice(0, 10)}` };
+    }
+
+    if (normalized === 'day' || normalized === 'today') {
+      const start = new Date(now); start.setHours(0, 0, 0, 0);
+      const end = new Date(now); end.setHours(23, 59, 59, 999);
+      return { period: 'day', start, end, label: 'hoy' };
+    }
+
+    if (normalized === 'week') {
+      const start = new Date(now);
+      const day = (start.getDay() + 6) % 7;
+      start.setDate(start.getDate() - day);
+      start.setHours(0, 0, 0, 0);
+      const end = new Date(start);
+      end.setDate(start.getDate() + 6);
+      end.setHours(23, 59, 59, 999);
+      return { period: 'week', start, end, label: 'esta semana' };
+    }
+
+    const start = new Date(now.getFullYear(), now.getMonth(), 1, 0, 0, 0, 0);
+    const end = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999);
+    return { period: 'month', start, end, label: 'este mes' };
+  }
+
+  private previousRange(start: Date, end: Date) {
+    const duration = end.getTime() - start.getTime() + 1;
+    const previousEnd = new Date(start.getTime() - 1);
+    const previousStart = new Date(previousEnd.getTime() - duration + 1);
+    return { start: previousStart, end: previousEnd };
+  }
+
+  private summarySnapshot(summary: any) {
+    return {
+      grossRevenue: this.round(summary.grossRevenue),
+      netMargin: this.round(summary.netMargin),
+      cashFree: this.round(summary.cashFree),
+      cashFreePct: summary.cashFreePct == null ? null : this.round(summary.cashFreePct),
+      adSpend: this.round(summary.adSpend ?? 0),
+      orderCount: summary.orderCount,
+      averageOrderValue: summary.orderCount > 0 ? this.round(summary.grossRevenue / summary.orderCount) : 0,
+      productCost: this.round(summary.productCost),
+      shippingCost: this.round(summary.shippingCost),
+      taxReserve: this.round(summary.taxReserve)
+    };
+  }
+
+  private bankOverview(transactions: any[], currency: string) {
+    const totals = transactions.reduce(
+      (acc, tx) => {
+        const amount = Number(tx.amount ?? 0);
+        if (amount >= 0) acc.income += amount;
+        else acc.expense += Math.abs(amount);
+        acc.net += amount;
+        return acc;
+      },
+      { income: 0, expense: 0, net: 0 }
+    );
+
+    const byCategory = new Map<string, { category: string; label: string; amount: number; income: number; expense: number; count: number }>();
+    for (const tx of transactions) {
+      const amount = Number(tx.amount ?? 0);
+      const category = String(tx.category ?? 'OTHER_EXPENSE');
+      const current = byCategory.get(category) ?? {
+        category,
+        label: this.bankCategoryLabel(category),
+        amount: 0,
+        income: 0,
+        expense: 0,
+        count: 0
+      };
+      current.amount += amount;
+      if (amount >= 0) current.income += amount;
+      else current.expense += Math.abs(amount);
+      current.count += 1;
+      byCategory.set(category, current);
+    }
+
+    const categories = [...byCategory.values()]
+      .map((row) => ({
+        ...row,
+        amount: this.round(row.amount),
+        income: this.round(row.income),
+        expense: this.round(row.expense),
+        sharePct: totals.expense > 0 ? this.round((row.expense / totals.expense) * 100) : 0
+      }))
+      .sort((a, b) => b.expense - a.expense);
+
+    const biggestExpense = categories.find((category) => category.expense > 0) ?? null;
+
+    return {
+      currency,
+      income: this.round(totals.income),
+      expense: this.round(totals.expense),
+      net: this.round(totals.net),
+      transactions: transactions.length,
+      biggestExpense,
+      categories: categories.slice(0, 8),
+      recentExpenses: transactions
+        .filter((tx) => Number(tx.amount ?? 0) < 0)
+        .slice(0, 8)
+        .map((tx) => ({
+          id: tx.id,
+          date: tx.bookingDate?.toISOString?.() ?? tx.bookingDate,
+          amount: this.round(Math.abs(Number(tx.amount ?? 0))),
+          description: tx.description,
+          category: String(tx.category ?? 'OTHER_EXPENSE'),
+          label: this.bankCategoryLabel(String(tx.category ?? 'OTHER_EXPENSE'))
+        }))
+    };
+  }
+
+  private async bankExpenseTotal(start: Date, end: Date) {
+    const result = await this.prisma.bankTransaction.aggregate({
+      where: { bookingDate: { gte: start, lte: end }, amount: { lt: 0 } },
+      _sum: { amount: true }
+    });
+    return Math.abs(Number(result._sum.amount ?? 0));
+  }
+
+  private overviewStatus(current: any, bankExpense: number, revenueDeltaPct: number | null): 'GOOD' | 'WATCH' | 'BAD' {
+    if (current.grossRevenue <= 0 && bankExpense > 0) return 'BAD';
+    if (current.netMargin < 0 || current.cashFree < 0) return 'BAD';
+    if ((revenueDeltaPct ?? 0) < -20 || (current.cashFreePct ?? 0) < 15) return 'WATCH';
+    return 'GOOD';
+  }
+
+  private overviewHeadline(status: 'GOOD' | 'WATCH' | 'BAD', label: string, current: any, comparison: any, currency: string) {
+    if (status === 'BAD') return `Cuidado: ${label} no está dejando caja libre suficiente.`;
+    if (status === 'WATCH') return `${label} va justo: margen ${this.formatMoney(current.netMargin, currency)} y ventas ${this.deltaPctText(comparison.revenueDeltaPct)}.`;
+    return `${label} va sano: margen estimado ${this.formatMoney(current.netMargin, currency)} y ${current.orderCount} pedidos.`;
+  }
+
+  private overviewRecommendations(input: {
+    current: any;
+    previous: any;
+    bank: any;
+    fixedPending: number;
+    comparison: any;
+    currency: string;
+  }) {
+    const recommendations: Array<{ title: string; detail: string; priority: 'HIGH' | 'MEDIUM' | 'LOW'; kind: string; icon: string }> = [];
+    const { current, previous, bank, fixedPending, comparison, currency } = input;
+    const biggest = bank.biggestExpense;
+
+    if (current.netMargin < 0) {
+      recommendations.push({
+        title: 'Frena gasto variable',
+        detail: `El margen despues de ads está en ${this.formatMoney(current.netMargin, currency)}. Revisa ads, compras no urgentes y descuentos antes de meter más gasto.`,
+        priority: 'HIGH',
+        kind: 'PROTECT_MARGIN',
+        icon: 'shield.fill'
+      });
+    }
+
+    if ((comparison.revenueDeltaPct ?? 0) < -20) {
+      recommendations.push({
+        title: 'Ventas por debajo del periodo anterior',
+        detail: `La facturación baja ${Math.abs(comparison.revenueDeltaPct).toFixed(0)}%. Mira campañas activas, stock bloqueado y productos con mejor margen.`,
+        priority: 'HIGH',
+        kind: 'RECOVER_SALES',
+        icon: 'chart.line.downtrend.xyaxis'
+      });
+    }
+
+    if (biggest && biggest.expense > 0) {
+      const priority = biggest.sharePct >= 45 ? 'HIGH' : 'MEDIUM';
+      recommendations.push({
+        title: `Mayor gasto: ${biggest.label}`,
+        detail: `${biggest.label} se lleva ${this.formatMoney(biggest.expense, currency)} (${biggest.sharePct.toFixed(0)}% del gasto bancario del periodo).`,
+        priority,
+        kind: 'TOP_EXPENSE',
+        icon: 'chart.pie.fill'
+      });
+    }
+
+    if ((current.adSpend ?? 0) > 0 && current.grossRevenue > 0) {
+      const adsShare = (current.adSpend / current.grossRevenue) * 100;
+      if (adsShare > 30) {
+        recommendations.push({
+          title: 'Ads demasiado pesados',
+          detail: `Meta pesa un ${adsShare.toFixed(0)}% de las ventas del periodo. Sube solo campañas con ROAS claro y pausa las que no venden.`,
+          priority: 'HIGH',
+          kind: 'ADS_CONTROL',
+          icon: 'megaphone.fill'
+        });
+      }
+    }
+
+    if (fixedPending > 0) {
+      recommendations.push({
+        title: 'Reserva gastos fijos',
+        detail: `Quedan ${this.formatMoney(fixedPending, currency)} pendientes de gastos fijos. Sepáralos antes de hablar de beneficio real.`,
+        priority: 'HIGH',
+        kind: 'FIXED_EXPENSES',
+        icon: 'building.columns.fill'
+      });
+    }
+
+    if (current.orderCount > previous.orderCount && current.netMargin > previous.netMargin) {
+      recommendations.push({
+        title: 'Buen momento para repetir lo que funciona',
+        detail: 'Suben pedidos y margen contra el periodo anterior. Revisa los productos/campañas ganadores y escala con límite diario.',
+        priority: 'LOW',
+        kind: 'SCALE_WINNERS',
+        icon: 'bolt.fill'
+      });
+    }
+
+    if (recommendations.length === 0) {
+      recommendations.push({
+        title: 'Mantener y observar',
+        detail: 'No veo una alarma clara. Mantén compras obligatorias, controla ads a diario y revisa caja antes de gastos nuevos.',
+        priority: 'LOW',
+        kind: 'HOLD',
+        icon: 'checkmark.seal.fill'
+      });
+    }
+
+    return recommendations.slice(0, 5);
+  }
+
+  private bankCategoryLabel(category: string) {
+    const labels: Record<string, string> = {
+      SHOPIFY_PAYOUT: 'Cobros Shopify',
+      SENDCLOUD: 'Envíos',
+      GARMENT_SUPPLIER: 'Ropa/proveedor',
+      DTF_SUPPLIER: 'DTF',
+      TAX: 'Impuestos',
+      ADS: 'Ads',
+      SOFTWARE: 'Software',
+      OTHER_INCOME: 'Otros ingresos',
+      OTHER_EXPENSE: 'Otros gastos'
+    };
+    return labels[category] ?? category.replaceAll('_', ' ').toLowerCase();
+  }
+
+  private fixedExpensePeriodForDate(date: Date) {
+    return date.toISOString().slice(0, 7);
+  }
+
+  private percentChange(current: number, previous: number) {
+    if (!Number.isFinite(previous) || Math.abs(previous) < 0.01) return current > 0 ? 100 : null;
+    return this.round(((current - previous) / Math.abs(previous)) * 100);
+  }
+
+  private deltaPctText(value: number | null) {
+    if (value == null) return 'sin comparativa';
+    return `${value >= 0 ? '+' : ''}${value.toFixed(0)}%`;
+  }
+
+  private round(value: number) {
+    return Math.round((Number(value) || 0) * 100) / 100;
   }
 
   async orderBreakdown(orderId: string): Promise<OrderBreakdown | null> {

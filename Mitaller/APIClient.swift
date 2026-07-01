@@ -313,6 +313,14 @@ struct APIClient {
         let formatter = DateFormatter.apiDay
         return try await get("/economics/range?from=\(formatter.string(from: from))&to=\(formatter.string(from: to))")
     }
+    func economicsOverview(period: String, from: Date? = nil, to: Date? = nil) async throws -> EconomicsOverview {
+        let formatter = DateFormatter.apiDay
+        var path = "/economics/overview?period=\(Self.queryValue(period))"
+        if let from, let to {
+            path += "&from=\(formatter.string(from: from))&to=\(formatter.string(from: to))"
+        }
+        return try await get(path)
+    }
     func economicsProducts() async throws -> [ProductMarginRow] { try await get("/economics/products") }
     func economicsGrowthControl() async throws -> GrowthControlSummary { try await get("/economics/growth-control") }
     func economicsPayouts() async throws -> ShopifyPayoutsSummary { try await get("/economics/payouts") }
@@ -1647,6 +1655,90 @@ struct EconomicsSummary: Decodable {
     let adsReserve: Double?
     let orderCount: Int
     let orders: [OrderBreakdown]
+}
+
+struct EconomicsOverview: Decodable {
+    let period: String
+    let from: String
+    let to: String
+    let label: String
+    let currency: String
+    let status: String
+    let headline: String
+    let current: EconomicsOverviewSnapshot
+    let previous: EconomicsOverviewSnapshot
+    let comparison: EconomicsOverviewComparison
+    let bank: EconomicsBankOverview
+    let fixedExpenses: EconomicsOverviewFixedExpenses?
+    let recommendations: [EconomicsOverviewRecommendation]
+}
+
+struct EconomicsOverviewSnapshot: Decodable {
+    let grossRevenue: Double
+    let netMargin: Double
+    let cashFree: Double
+    let cashFreePct: Double?
+    let adSpend: Double
+    let orderCount: Int
+    let averageOrderValue: Double
+    let productCost: Double
+    let shippingCost: Double
+    let taxReserve: Double
+}
+
+struct EconomicsOverviewComparison: Decodable {
+    let revenueDelta: Double
+    let revenueDeltaPct: Double?
+    let ordersDelta: Int
+    let marginDelta: Double
+    let marginDeltaPct: Double?
+    let expenseDelta: Double
+}
+
+struct EconomicsBankOverview: Decodable {
+    let currency: String
+    let income: Double
+    let expense: Double
+    let net: Double
+    let transactions: Int
+    let biggestExpense: EconomicsExpenseCategory?
+    let categories: [EconomicsExpenseCategory]
+    let recentExpenses: [EconomicsRecentExpense]
+}
+
+struct EconomicsExpenseCategory: Decodable, Identifiable {
+    var id: String { category }
+    let category: String
+    let label: String
+    let amount: Double
+    let income: Double
+    let expense: Double
+    let count: Int
+    let sharePct: Double
+}
+
+struct EconomicsRecentExpense: Decodable, Identifiable {
+    let id: String
+    let date: String?
+    let amount: Double
+    let description: String
+    let category: String
+    let label: String
+}
+
+struct EconomicsOverviewFixedExpenses: Decodable {
+    let totalMonthly: Double
+    let paid: Double
+    let pending: Double
+}
+
+struct EconomicsOverviewRecommendation: Decodable, Identifiable {
+    var id: String { kind + title }
+    let title: String
+    let detail: String
+    let priority: String
+    let kind: String
+    let icon: String
 }
 
 struct GrowthControlSummary: Decodable {

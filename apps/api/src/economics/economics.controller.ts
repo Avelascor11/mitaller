@@ -22,6 +22,11 @@ export class EconomicsController {
     return this.economics.range(from, to);
   }
 
+  @Get('overview')
+  overview(@Query('period') period?: string, @Query('from') from?: string, @Query('to') to?: string) {
+    return this.economics.overview(period, from, to);
+  }
+
   @Get('products')
   products() {
     return this.economics.productMargins();
