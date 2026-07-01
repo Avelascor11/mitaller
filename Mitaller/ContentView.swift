@@ -13201,8 +13201,27 @@ struct FixedExpensesSummaryCard: View {
     let summary: FixedExpenseSummary
 
     private var progress: Double {
+        if let coverage = summary.coverage {
+            return min(1, max(0, coverage.coveragePct / 100))
+        }
         guard summary.totalMonthly > 0 else { return 0 }
         return min(1, max(0, summary.paid / summary.totalMonthly))
+    }
+
+    private var statusColor: Color {
+        guard let coverage = summary.coverage else {
+            return summary.pending > 0 ? AppTheme.amber : AppTheme.green
+        }
+        switch coverage.paceStatus.uppercased() {
+        case "COVERED": return AppTheme.green
+        case "AHEAD": return AppTheme.blue
+        case "BEHIND": return AppTheme.red
+        default: return AppTheme.amber
+        }
+    }
+
+    private var headline: String {
+        summary.coverage?.headline ?? (summary.pending > 0 ? "Pendientes de separar este mes." : "Todo marcado como pagado este mes.")
     }
 
     var body: some View {
@@ -13210,32 +13229,60 @@ struct FixedExpensesSummaryCard: View {
             HStack(alignment: .top, spacing: 12) {
                 Image(systemName: "calendar.badge.exclamationmark")
                     .font(.title2.weight(.black))
-                    .foregroundStyle(summary.pending > 0 ? AppTheme.amber : AppTheme.green)
+                    .foregroundStyle(statusColor)
                     .frame(width: 40, height: 40)
-                    .background((summary.pending > 0 ? AppTheme.amber : AppTheme.green).opacity(0.14))
+                    .background(statusColor.opacity(0.14))
                     .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
 
                 VStack(alignment: .leading, spacing: 4) {
                     Text("Gastos fijos")
                         .font(.headline.weight(.black))
                         .foregroundStyle(AppTheme.ink)
-                    Text(summary.pending > 0 ? "Pendientes de separar este mes." : "Todo marcado como pagado este mes.")
+                    Text(headline)
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(AppTheme.muted)
                 }
                 Spacer()
                 Text(formatMoney(summary.pending, currency: summary.currency))
                     .font(.title3.weight(.black))
-                    .foregroundStyle(summary.pending > 0 ? AppTheme.amber : AppTheme.green)
+                    .foregroundStyle(statusColor)
             }
 
             ProgressView(value: progress)
-                .tint(summary.pending > 0 ? AppTheme.amber : AppTheme.green)
+                .tint(statusColor)
 
             HStack(spacing: 10) {
                 FixedExpenseMiniMetric(title: "Mes", value: formatMoney(summary.totalMonthly, currency: summary.currency), color: AppTheme.blue)
-                FixedExpenseMiniMetric(title: "Pagado", value: formatMoney(summary.paid, currency: summary.currency), color: AppTheme.green)
+                FixedExpenseMiniMetric(title: "Cubierto", value: formatMoney(summary.coverage?.covered ?? summary.paid, currency: summary.currency), color: AppTheme.green)
                 FixedExpenseMiniMetric(title: "Pendiente", value: formatMoney(summary.pending, currency: summary.currency), color: AppTheme.amber)
+            }
+
+            if let coverage = summary.coverage {
+                VStack(alignment: .leading, spacing: 12) {
+                    HStack(spacing: 10) {
+                        FixedExpenseMiniMetric(title: "Días", value: "\(coverage.daysRemaining)", color: statusColor)
+                        FixedExpenseMiniMetric(title: "Separar/día", value: formatMoney(coverage.dailyRequired, currency: summary.currency), color: statusColor)
+                    }
+
+                    VStack(alignment: .leading, spacing: 6) {
+                        HStack(spacing: 8) {
+                            Image(systemName: coverage.paceStatus.uppercased() == "BEHIND" ? "exclamationmark.triangle.fill" : "checkmark.seal.fill")
+                                .foregroundStyle(statusColor)
+                            Text("Cubierto hasta el día \(coverage.coveredUntilDay) de \(coverage.daysInMonth)")
+                                .font(.caption.weight(.black))
+                                .foregroundStyle(AppTheme.ink)
+                        }
+                        Text(coverage.recommendation)
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(AppTheme.muted)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    .padding(12)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(statusColor.opacity(0.10))
+                    .overlay(RoundedRectangle(cornerRadius: 14).stroke(statusColor.opacity(0.28)))
+                    .clipShape(RoundedRectangle(cornerRadius: 14))
+                }
             }
 
             if summary.upcoming.isEmpty {
@@ -13264,7 +13311,7 @@ struct FixedExpensesSummaryCard: View {
                 }
             }
         }
-        .glassPanel(padding: 16, accent: summary.pending > 0 ? AppTheme.amber : AppTheme.green)
+        .glassPanel(padding: 16, accent: statusColor)
     }
 
     private func icon(for category: String) -> String {
@@ -13505,6 +13552,7 @@ struct FixedExpensesView: View {
         case "SUMINISTROS": return "bolt.fill"
         case "TELECOM": return "wifi"
         case "NOMINAS": return "person.2.fill"
+        case "AUTONOMOS": return "person.crop.circle.badge.checkmark"
         case "GESTORIA": return "folder.fill"
         case "SOFTWARE": return "desktopcomputer"
         case "SEGUROS": return "shield.fill"

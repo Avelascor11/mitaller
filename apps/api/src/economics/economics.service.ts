@@ -632,6 +632,8 @@ export class EconomicsService {
     const totalMonthly = +active.reduce((sum, item) => sum + item.amount, 0).toFixed(2);
     const paid = +active.filter((item) => item.paid).reduce((sum, item) => sum + (item.paidAmount ?? item.amount), 0).toFixed(2);
     const pending = +Math.max(0, totalMonthly - paid).toFixed(2);
+    const currency = active[0]?.currency ?? items[0]?.currency ?? 'EUR';
+    const coverage = this.fixedExpenseCoverage(currentPeriod, totalMonthly, paid, pending, currency);
     const upcoming = active
       .filter((item) => !item.paid)
       .sort((a, b) => (a.dueDay ?? 99) - (b.dueDay ?? 99))
@@ -639,10 +641,11 @@ export class EconomicsService {
 
     return {
       period: currentPeriod,
-      currency: active[0]?.currency ?? items[0]?.currency ?? 'EUR',
+      currency,
       totalMonthly,
       paid,
       pending,
+      coverage,
       activeCount: active.length,
       paidCount: active.filter((item) => item.paid).length,
       items,
@@ -890,10 +893,70 @@ export class EconomicsService {
       { name: 'Agua', category: 'SUMINISTROS', icon: 'drop.fill' },
       { name: 'Internet', category: 'TELECOM', icon: 'wifi' },
       { name: 'Trabajadores', category: 'NOMINAS', icon: 'person.2.fill' },
+      { name: 'Autónomos', category: 'AUTONOMOS', icon: 'person.crop.circle.badge.checkmark' },
       { name: 'Gestoría', category: 'GESTORIA', icon: 'folder.fill' },
       { name: 'Software', category: 'SOFTWARE', icon: 'desktopcomputer' },
       { name: 'Seguro', category: 'SEGUROS', icon: 'shield.fill' }
     ];
+  }
+
+  private fixedExpenseCoverage(period: string, totalMonthly: number, paid: number, pending: number, currency: string) {
+    const [year, month] = period.split('-').map((part) => Number(part));
+    const now = new Date();
+    const validPeriod = Number.isFinite(year) && Number.isFinite(month) && month >= 1 && month <= 12;
+    const daysInMonth = validPeriod ? new Date(year, month, 0).getDate() : 30;
+    const isCurrentPeriod = validPeriod && now.getFullYear() === year && now.getMonth() + 1 === month;
+    const elapsedDays = isCurrentPeriod ? Math.min(daysInMonth, Math.max(1, now.getDate())) : daysInMonth;
+    const daysRemaining = isCurrentPeriod ? Math.max(1, daysInMonth - elapsedDays + 1) : 0;
+    const monthlyDailyTarget = totalMonthly > 0 ? this.roundMoney(totalMonthly / daysInMonth) : 0;
+    const expectedCoveredByToday = this.roundMoney(monthlyDailyTarget * elapsedDays);
+    const paceDelta = this.roundMoney(paid - expectedCoveredByToday);
+    const coveragePct = totalMonthly > 0 ? this.roundMoney((paid / totalMonthly) * 100) : 100;
+    const coveredUntilDay = totalMonthly > 0
+      ? Math.min(daysInMonth, Math.max(0, Math.floor((paid / totalMonthly) * daysInMonth)))
+      : daysInMonth;
+    const dailyRequired = pending > 0 && daysRemaining > 0 ? this.roundMoney(pending / daysRemaining) : 0;
+
+    let paceStatus: 'COVERED' | 'AHEAD' | 'ON_TRACK' | 'BEHIND' = 'COVERED';
+    if (pending > 0) {
+      if (paceDelta >= monthlyDailyTarget) paceStatus = 'AHEAD';
+      else if (paceDelta >= -monthlyDailyTarget * 2) paceStatus = 'ON_TRACK';
+      else paceStatus = 'BEHIND';
+    }
+
+    let headline: string;
+    let recommendation: string;
+    if (totalMonthly <= 0) {
+      headline = 'Añade tus gastos fijos para saber qué caja no puedes tocar.';
+      recommendation = 'Mete alquiler, luz, autónomos, internet y trabajadores para que Caja separe operaciones antes de hablar de beneficio.';
+    } else if (pending <= 0) {
+      headline = 'Gastos fijos cubiertos este mes.';
+      recommendation = 'Ya puedes mirar la caja libre con más tranquilidad. Mantén los pagos marcados cuando entren nuevos gastos.';
+    } else if (paceStatus === 'BEHIND') {
+      headline = `Vas por detrás: faltan ${this.formatCurrency(pending, currency)} y quedan ${daysRemaining} días.`;
+      recommendation = `Separa ${this.formatCurrency(dailyRequired, currency)} al día para cubrir alquiler, suministros, autónomos y nóminas antes de fin de mes.`;
+    } else {
+      headline = `Faltan ${this.formatCurrency(pending, currency)} y quedan ${daysRemaining} días.`;
+      recommendation = `Objetivo diario: separar ${this.formatCurrency(dailyRequired, currency)} para llegar a fin de mes con gastos fijos cubiertos.`;
+    }
+
+    return {
+      totalMonthly: this.roundMoney(totalMonthly),
+      covered: this.roundMoney(paid),
+      pending: this.roundMoney(pending),
+      coveragePct,
+      daysInMonth,
+      elapsedDays,
+      daysRemaining,
+      coveredUntilDay,
+      dailyRequired,
+      monthlyDailyTarget,
+      expectedCoveredByToday,
+      paceDelta,
+      paceStatus,
+      headline,
+      recommendation
+    };
   }
 
   async payouts() {
@@ -1194,6 +1257,14 @@ export class EconomicsService {
     if (value == null) return 0;
     const parsed = Number(value);
     return Number.isFinite(parsed) ? parsed : 0;
+  }
+
+  private roundMoney(value: number): number {
+    return Math.round((Number(value) || 0) * 100) / 100;
+  }
+
+  private formatCurrency(value: number, currency: string): string {
+    return new Intl.NumberFormat('es-ES', { style: 'currency', currency }).format(value);
   }
 
   private normalize(value: string) {
