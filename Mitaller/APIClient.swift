@@ -2179,6 +2179,30 @@ struct FixedExpenseCoverage: Decodable {
     let paceStatus: String
     let headline: String
     let recommendation: String
+
+    private enum CodingKeys: String, CodingKey {
+        case totalMonthly, covered, pending, coveragePct, daysInMonth, elapsedDays, daysRemaining, coveredUntilDay
+        case dailyRequired, monthlyDailyTarget, expectedCoveredByToday, paceDelta, paceStatus, headline, recommendation
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        totalMonthly = try container.decodeIfPresent(Double.self, forKey: .totalMonthly) ?? 0
+        covered = try container.decodeIfPresent(Double.self, forKey: .covered) ?? 0
+        pending = try container.decodeIfPresent(Double.self, forKey: .pending) ?? 0
+        coveragePct = try container.decodeIfPresent(Double.self, forKey: .coveragePct) ?? 0
+        daysInMonth = try container.decodeIfPresent(Int.self, forKey: .daysInMonth) ?? 30
+        elapsedDays = try container.decodeIfPresent(Int.self, forKey: .elapsedDays) ?? 0
+        daysRemaining = try container.decodeIfPresent(Int.self, forKey: .daysRemaining) ?? 0
+        coveredUntilDay = try container.decodeIfPresent(Int.self, forKey: .coveredUntilDay) ?? 0
+        dailyRequired = try container.decodeIfPresent(Double.self, forKey: .dailyRequired) ?? 0
+        monthlyDailyTarget = try container.decodeIfPresent(Double.self, forKey: .monthlyDailyTarget) ?? 0
+        expectedCoveredByToday = try container.decodeIfPresent(Double.self, forKey: .expectedCoveredByToday) ?? 0
+        paceDelta = try container.decodeIfPresent(Double.self, forKey: .paceDelta) ?? 0
+        paceStatus = try container.decodeIfPresent(String.self, forKey: .paceStatus) ?? "ON_TRACK"
+        headline = try container.decodeIfPresent(String.self, forKey: .headline) ?? "Gastos fijos"
+        recommendation = try container.decodeIfPresent(String.self, forKey: .recommendation) ?? "Revisa tus gastos fijos del mes."
+    }
 }
 
 struct CashflowPayout: Decodable, Identifiable {

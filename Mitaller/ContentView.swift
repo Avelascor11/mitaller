@@ -13202,10 +13202,12 @@ struct FixedExpensesSummaryCard: View {
 
     private var progress: Double {
         if let coverage = summary.coverage {
-            return min(1, max(0, coverage.coveragePct / 100))
+            let value = coverage.coveragePct / 100
+            return value.isFinite ? min(1, max(0, value)) : 0
         }
         guard summary.totalMonthly > 0 else { return 0 }
-        return min(1, max(0, summary.paid / summary.totalMonthly))
+        let value = summary.paid / summary.totalMonthly
+        return value.isFinite ? min(1, max(0, value)) : 0
     }
 
     private var statusColor: Color {
