@@ -133,6 +133,7 @@ export class EconomicsService {
       previous,
       bank,
       fixedPending: Number((fixedExpenses as any)?.pending ?? 0),
+      fixedCoverage: (fixedExpenses as any)?.coverage ?? null,
       comparison,
       currency
     });
@@ -152,7 +153,8 @@ export class EconomicsService {
       fixedExpenses: fixedExpenses ? {
         totalMonthly: Number((fixedExpenses as any).totalMonthly ?? 0),
         paid: Number((fixedExpenses as any).paid ?? 0),
-        pending: Number((fixedExpenses as any).pending ?? 0)
+        pending: Number((fixedExpenses as any).pending ?? 0),
+        coverage: (fixedExpenses as any).coverage ?? null
       } : null,
       recommendations
     };
@@ -638,11 +640,12 @@ export class EconomicsService {
     previous: any;
     bank: any;
     fixedPending: number;
+    fixedCoverage?: any;
     comparison: any;
     currency: string;
   }) {
     const recommendations: Array<{ title: string; detail: string; priority: 'HIGH' | 'MEDIUM' | 'LOW'; kind: string; icon: string }> = [];
-    const { current, previous, bank, fixedPending, comparison, currency } = input;
+    const { current, previous, bank, fixedPending, fixedCoverage, comparison, currency } = input;
     const biggest = bank.biggestExpense;
 
     if (current.netMargin < 0) {
@@ -690,10 +693,15 @@ export class EconomicsService {
     }
 
     if (fixedPending > 0) {
+      const dailyRequired = Number(fixedCoverage?.dailyRequired ?? 0);
+      const daysRemaining = Number(fixedCoverage?.daysRemaining ?? 0);
+      const paceStatus = String(fixedCoverage?.paceStatus ?? '');
       recommendations.push({
         title: 'Reserva gastos fijos',
-        detail: `Quedan ${this.formatMoney(fixedPending, currency)} pendientes de gastos fijos. Sepáralos antes de hablar de beneficio real.`,
-        priority: 'HIGH',
+        detail: dailyRequired > 0
+          ? `Quedan ${this.formatMoney(fixedPending, currency)} pendientes. Separa ${this.formatMoney(dailyRequired, currency)} al día durante ${daysRemaining} días para llegar limpio a fin de mes.`
+          : `Quedan ${this.formatMoney(fixedPending, currency)} pendientes de gastos fijos. Sepáralos antes de hablar de beneficio real.`,
+        priority: paceStatus === 'BEHIND' ? 'HIGH' : 'MEDIUM',
         kind: 'FIXED_EXPENSES',
         icon: 'building.columns.fill'
       });
@@ -953,6 +961,8 @@ export class EconomicsService {
     const totalMonthly = +active.reduce((sum, item) => sum + item.amount, 0).toFixed(2);
     const paid = +active.filter((item) => item.paid).reduce((sum, item) => sum + (item.paidAmount ?? item.amount), 0).toFixed(2);
     const pending = +Math.max(0, totalMonthly - paid).toFixed(2);
+    const currency = active[0]?.currency ?? items[0]?.currency ?? 'EUR';
+    const coverage = this.fixedExpenseCoverage(currentPeriod, totalMonthly, paid, pending, currency);
     const upcoming = active
       .filter((item) => !item.paid)
       .sort((a, b) => (a.dueDay ?? 99) - (b.dueDay ?? 99))
@@ -960,10 +970,11 @@ export class EconomicsService {
 
     return {
       period: currentPeriod,
-      currency: active[0]?.currency ?? items[0]?.currency ?? 'EUR',
+      currency,
       totalMonthly,
       paid,
       pending,
+      coverage,
       activeCount: active.length,
       paidCount: active.filter((item) => item.paid).length,
       items,
@@ -1211,10 +1222,70 @@ export class EconomicsService {
       { name: 'Agua', category: 'SUMINISTROS', icon: 'drop.fill' },
       { name: 'Internet', category: 'TELECOM', icon: 'wifi' },
       { name: 'Trabajadores', category: 'NOMINAS', icon: 'person.2.fill' },
+      { name: 'Autónomos', category: 'AUTONOMOS', icon: 'person.crop.circle.badge.checkmark' },
       { name: 'Gestoría', category: 'GESTORIA', icon: 'folder.fill' },
       { name: 'Software', category: 'SOFTWARE', icon: 'desktopcomputer' },
       { name: 'Seguro', category: 'SEGUROS', icon: 'shield.fill' }
     ];
+  }
+
+  private fixedExpenseCoverage(period: string, totalMonthly: number, paid: number, pending: number, currency: string) {
+    const [year, month] = period.split('-').map((part) => Number(part));
+    const now = new Date();
+    const validPeriod = Number.isFinite(year) && Number.isFinite(month) && month >= 1 && month <= 12;
+    const daysInMonth = validPeriod ? new Date(year, month, 0).getDate() : 30;
+    const isCurrentPeriod = validPeriod && now.getFullYear() === year && now.getMonth() + 1 === month;
+    const elapsedDays = isCurrentPeriod ? Math.min(daysInMonth, Math.max(1, now.getDate())) : daysInMonth;
+    const daysRemaining = isCurrentPeriod ? Math.max(1, daysInMonth - elapsedDays + 1) : 0;
+    const monthlyDailyTarget = totalMonthly > 0 ? this.round(totalMonthly / daysInMonth) : 0;
+    const expectedCoveredByToday = this.round(monthlyDailyTarget * elapsedDays);
+    const paceDelta = this.round(paid - expectedCoveredByToday);
+    const coveragePct = totalMonthly > 0 ? this.round((paid / totalMonthly) * 100) : 100;
+    const coveredUntilDay = totalMonthly > 0
+      ? Math.min(daysInMonth, Math.max(0, Math.floor((paid / totalMonthly) * daysInMonth)))
+      : daysInMonth;
+    const dailyRequired = pending > 0 && daysRemaining > 0 ? this.round(pending / daysRemaining) : 0;
+
+    let paceStatus: 'COVERED' | 'AHEAD' | 'ON_TRACK' | 'BEHIND' = 'COVERED';
+    if (pending > 0) {
+      if (paceDelta >= monthlyDailyTarget) paceStatus = 'AHEAD';
+      else if (paceDelta >= -monthlyDailyTarget * 2) paceStatus = 'ON_TRACK';
+      else paceStatus = 'BEHIND';
+    }
+
+    let headline: string;
+    let recommendation: string;
+    if (totalMonthly <= 0) {
+      headline = 'Añade tus gastos fijos para saber qué caja no puedes tocar.';
+      recommendation = 'Mete alquiler, luz, autónomos, internet y trabajadores para que Caja separe operaciones antes de hablar de beneficio.';
+    } else if (pending <= 0) {
+      headline = 'Gastos fijos cubiertos este mes.';
+      recommendation = 'Ya puedes mirar la caja libre con más tranquilidad. Mantén los pagos marcados cuando entren nuevos gastos.';
+    } else if (paceStatus === 'BEHIND') {
+      headline = `Vas por detrás: faltan ${this.formatMoney(pending, currency)} y quedan ${daysRemaining} días.`;
+      recommendation = `Separa ${this.formatMoney(dailyRequired, currency)} al día para cubrir alquiler, suministros, autónomos y nóminas antes de fin de mes.`;
+    } else {
+      headline = `Faltan ${this.formatMoney(pending, currency)} y quedan ${daysRemaining} días.`;
+      recommendation = `Objetivo diario: separar ${this.formatMoney(dailyRequired, currency)} para llegar a fin de mes con gastos fijos cubiertos.`;
+    }
+
+    return {
+      totalMonthly: this.round(totalMonthly),
+      covered: this.round(paid),
+      pending: this.round(pending),
+      coveragePct,
+      daysInMonth,
+      elapsedDays,
+      daysRemaining,
+      coveredUntilDay,
+      dailyRequired,
+      monthlyDailyTarget,
+      expectedCoveredByToday,
+      paceDelta,
+      paceStatus,
+      headline,
+      recommendation
+    };
   }
 
   async payouts() {

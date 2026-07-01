@@ -1730,6 +1730,7 @@ struct EconomicsOverviewFixedExpenses: Decodable {
     let totalMonthly: Double
     let paid: Double
     let pending: Double
+    let coverage: FixedExpenseCoverage?
 }
 
 struct EconomicsOverviewRecommendation: Decodable, Identifiable {
@@ -2008,11 +2009,30 @@ struct FixedExpenseSummary: Decodable {
     let totalMonthly: Double
     let paid: Double
     let pending: Double
+    let coverage: FixedExpenseCoverage?
     let activeCount: Int
     let paidCount: Int
     let items: [FixedExpenseItem]
     let upcoming: [FixedExpenseItem]
     let templates: [FixedExpenseTemplate]
+}
+
+struct FixedExpenseCoverage: Decodable {
+    let totalMonthly: Double
+    let covered: Double
+    let pending: Double
+    let coveragePct: Double
+    let daysInMonth: Int
+    let elapsedDays: Int
+    let daysRemaining: Int
+    let coveredUntilDay: Int
+    let dailyRequired: Double
+    let monthlyDailyTarget: Double
+    let expectedCoveredByToday: Double
+    let paceDelta: Double
+    let paceStatus: String
+    let headline: String
+    let recommendation: String
 }
 
 struct CashflowPayout: Decodable, Identifiable {
