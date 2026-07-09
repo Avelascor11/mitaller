@@ -76,8 +76,34 @@ export class ReturnsService {
         const fetched = fetchedById ?? await this.shopify.fetchOrderByName(withoutHash);
         const fetchedEmail = (fetched?.customerEmail ?? '').toLowerCase().trim();
         if (fetched && fetchedEmail === emailNorm) {
-          await this.ordersService.upsertImportedOrder(fetched);
+          try {
+            await this.ordersService.upsertImportedOrder(fetched);
+          } catch (error) {
+            console.error('[ReturnsService] Shopify order upsert failed during return lookup:', error);
+          }
           order = await loadOrder();
+          if (order && order.items.length === 0 && fetched.items.length > 0) {
+            await this.prisma.orderItem.createMany({
+              data: fetched.items.map((item) => ({
+                orderId: order!.id,
+                shopifyLineItemId: item.shopifyLineItemId,
+                shopifyProductId: item.shopifyProductId,
+                shopifyVariantId: item.shopifyVariantId,
+                sku: item.sku,
+                title: item.title,
+                variantTitle: item.variantTitle,
+                quantity: item.quantity,
+                imageUrl: item.imageUrl,
+                imageUrlsJson: item.imageUrlsJson ?? [],
+                color: item.color,
+                size: item.size,
+                productType: item.productType,
+                unitPrice: item.unitPrice,
+                lineDiscount: item.lineDiscount
+              }))
+            });
+            order = await loadOrder();
+          }
         }
       } catch (error) {
         console.error('[ReturnsService] On-demand Shopify order fetch failed:', error);
