@@ -68,8 +68,7 @@ export class ReturnsService {
 
     let order = await loadOrder();
 
-    // Not in local DB (e.g. old order outside the import window): fetch live from Shopify and persist.
-    if (!order) {
+    const refreshFromShopify = async () => {
       try {
         const fetched = await this.shopify.fetchOrderByName(withoutHash);
         const fetchedEmail = (fetched?.customerEmail ?? '').toLowerCase().trim();
@@ -80,6 +79,14 @@ export class ReturnsService {
       } catch (error) {
         console.error('[ReturnsService] On-demand Shopify order fetch failed:', error);
       }
+    };
+
+    // Not in local DB (e.g. old order outside the import window): fetch live from Shopify and persist.
+    if (!order) {
+      await refreshFromShopify();
+    } else if (order.items.length === 0) {
+      // Some orders can exist from a partial import/webhook before their line items were stored.
+      await refreshFromShopify();
     }
 
     if (!order) {
@@ -91,6 +98,9 @@ export class ReturnsService {
     const shipment = order.shipments[0];
     if (shipment?.trackingNumber) {
       deliveredAt = await this.sendcloud.getDeliveryDate(order.orderNumber);
+    }
+    if (deliveredAt && deliveredAt.getTime() > Date.now()) {
+      deliveredAt = null;
     }
     // fallback: use preparedAt or orderedAt
     const referenceDate = deliveredAt ?? order.preparedAt ?? order.orderedAt;
