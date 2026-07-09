@@ -76,7 +76,10 @@ export class KlaviyoService {
       OrderNumber: params.orderNumber,
       TrackingNumber: params.trackingNumber ?? '',
       Carrier: params.carrier ?? '',
-      LabelUrl: params.labelUrl ?? ''
+      LabelUrl: params.labelUrl ?? '',
+      LabelDownloadUrl: params.labelUrl ?? '',
+      LabelPdfUrl: params.labelUrl ?? '',
+      LabelFileName: `etiqueta-devolucion-${params.orderNumber.replace(/^#/, '')}.pdf`
     });
   }
 
