@@ -70,7 +70,10 @@ export class ReturnsService {
 
     const refreshFromShopify = async () => {
       try {
-        const fetched = await this.shopify.fetchOrderByName(withoutHash);
+        const fetchedById = order?.shopifyOrderId?.startsWith('gid://shopify/Order/')
+          ? await this.shopify.getOrderById(order.shopifyOrderId)
+          : null;
+        const fetched = fetchedById ?? await this.shopify.fetchOrderByName(withoutHash);
         const fetchedEmail = (fetched?.customerEmail ?? '').toLowerCase().trim();
         if (fetched && fetchedEmail === emailNorm) {
           await this.ordersService.upsertImportedOrder(fetched);
