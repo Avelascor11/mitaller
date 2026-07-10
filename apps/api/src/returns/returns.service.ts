@@ -83,8 +83,9 @@ export class ReturnsService {
           }
           order = await loadOrder();
           if (order && order.items.length === 0 && fetched.items.length > 0) {
-            await this.prisma.orderItem.createMany({
-              data: fetched.items.map((item) => ({
+            for (const item of fetched.items) {
+              await this.prisma.orderItem.create({
+                data: {
                 orderId: order!.id,
                 shopifyLineItemId: item.shopifyLineItemId,
                 shopifyProductId: item.shopifyProductId,
@@ -100,8 +101,9 @@ export class ReturnsService {
                 productType: item.productType,
                 unitPrice: item.unitPrice,
                 lineDiscount: item.lineDiscount
-              }))
-            });
+                }
+              });
+            }
             order = await loadOrder();
           }
         }
