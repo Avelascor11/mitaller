@@ -161,6 +161,9 @@ export class ReturnsService {
     // Build returnable items
     const returnedQtyMap: Record<string, number> = {};
     for (const ret of order.returns) {
+      if (ret.status === 'REQUESTED' && ret.paymentStatus === 'PENDING') {
+        continue;
+      }
       for (const ri of ret.items) {
         returnedQtyMap[ri.orderItemId] = (returnedQtyMap[ri.orderItemId] ?? 0) + ri.quantity;
       }
