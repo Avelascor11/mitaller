@@ -283,7 +283,7 @@ export class ReturnsService {
 
     if (totalToPay > 0) {
       try {
-        const lineItems: Array<{ variantId?: string; title?: string; price?: number; quantity: number }> = [];
+        const lineItems: Array<{ variantId?: string; title?: string; price?: number; quantity: number; requiresShipping?: boolean }> = [];
 
         if (type === 'EXCHANGE') {
           for (const repl of replacementsInfo) {
@@ -295,7 +295,8 @@ export class ReturnsService {
           lineItems.push({
             title: type === 'EXCHANGE' ? 'Etiqueta cambio Correos' : 'Etiqueta devolución Correos',
             price: labelFee,
-            quantity: 1
+            quantity: 1,
+            requiresShipping: false
           });
         }
 
@@ -311,6 +312,10 @@ export class ReturnsService {
           tags: ['return-portal', type.toLowerCase()],
           shippingAddress: this.shippingAddressFromOrder(order.shippingAddressJson, order.customerName),
           lineItems,
+          ...(type === 'EXCHANGE' ? { shippingLine: {
+            title: 'Envío cambio incluido',
+            priceWithCurrency: { amount: '0.00', currencyCode: 'EUR' }
+          } } : {}),
           ...(exchangeCredit > 0 ? { appliedDiscount: {
             valueType: 'FIXED_AMOUNT' as const,
             value: Number(exchangeCredit.toFixed(2)),

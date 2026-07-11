@@ -503,6 +503,7 @@ export class ShopifyAdapter {
         lineItems,
         useCustomerDefaultAddress: false,
         ...(input.noteAttributes ? { customAttributes: input.noteAttributes } : {}),
+        ...(input.shippingLine ? { shippingLine: input.shippingLine } : {}),
         ...(input.appliedDiscount ? { appliedDiscount: {
           valueType: input.appliedDiscount.valueType,
           value: input.appliedDiscount.value,
@@ -983,6 +984,7 @@ export interface ShopifyDraftOrderInput {
     requiresShipping?: boolean;
   }>;
   noteAttributes?: Array<{ key: string; value: string }>;
+  shippingLine?: { title: string; priceWithCurrency: { amount: string; currencyCode: string } };
   /** Order-level discount. Use { valueType:'PERCENTAGE', value:100 } for a zero-cost (free) order. */
   appliedDiscount?: { valueType: 'PERCENTAGE' | 'FIXED_AMOUNT'; value: number; title?: string; description?: string };
 }
