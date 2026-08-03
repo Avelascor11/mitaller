@@ -329,6 +329,7 @@ struct APIClient {
     }
     func economicsProducts() async throws -> [ProductMarginRow] { try await get("/economics/products") }
     func economicsGrowthControl() async throws -> GrowthControlSummary { try await get("/economics/growth-control") }
+    func salesCashflow() async throws -> SalesCashflowSummary { try await get("/economics/sales-cashflow") }
     func economicsPayouts() async throws -> ShopifyPayoutsSummary { try await get("/economics/payouts") }
     func economicsForOrder(_ id: String) async throws -> OrderBreakdown {
         try await get("/economics/order/\(Self.pathSegment(id))")
@@ -2244,6 +2245,45 @@ struct CashflowAllocation: Decodable {
     let retroPreorder: Double?
     let operationsReserve: Double?
     let cashFree: Double
+}
+
+struct SalesCashflowSummary: Decodable {
+    let title: String
+    let currency: String
+    let assumptions: [String]
+    let totals: SalesCashflowTotals
+    let recommendation: String
+    let scenarios: [SalesCashflowScenario]
+}
+
+struct SalesCashflowTotals: Decodable {
+    let grossRevenue: Double
+    let productCost: Double
+    let shippingCost: Double
+    let shopifyFee: Double
+    let taxReserve: Double
+    let cashFree: Double
+    let netMargin: Double
+    let fixedExpensesPending: Double
+    let protectedCashFree: Double
+    let cashFreePct: Double?
+}
+
+struct SalesCashflowScenario: Decodable, Identifiable {
+    let id: String
+    let title: String
+    let description: String
+    let units: Int
+    let grossRevenue: Double
+    let productCost: Double
+    let wasteCost: Double
+    let shippingCost: Double
+    let shopifyFee: Double
+    let taxReserve: Double
+    let netMargin: Double
+    let cashFree: Double
+    let marginPct: Double?
+    let cashStatus: String
 }
 
 struct CashflowPending: Decodable {

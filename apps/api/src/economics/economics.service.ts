@@ -603,6 +603,102 @@ export class EconomicsService {
     };
   }
 
+  async salesCashflow() {
+    const currency = 'EUR';
+    const scenarios = [
+      this.saleScenario({
+        id: 'clearance-50',
+        title: 'Camisetas al 50%',
+        description: 'Prenda lenta a mitad de precio. Útil para liberar stock, no para escalar anuncios.',
+        units: 15,
+        grossRevenue: 15 * 14.98,
+        productCost: 15 * (2.73 + 0.50),
+        shippingCost: 5 * this.moneyConfig('ECONOMICS_SHIPPING_COST_STANDARD_ES', 3.81)
+      }),
+      this.saleScenario({
+        id: 'summer-pack',
+        title: 'Pack verano 50€',
+        description: '2 camisetas + bañador. Mejor AOV, margen correcto si no metemos envío gratis agresivo.',
+        units: 3,
+        grossRevenue: 3 * 50,
+        productCost: 3 * ((2.73 + 0.50) * 2 + (4.725 + 2.70)),
+        shippingCost: 3 * this.moneyConfig('ECONOMICS_SHIPPING_COST_STANDARD_ES_1_2KG', 3.98)
+      }),
+      this.saleScenario({
+        id: 'third-tee-5',
+        title: '2 camisetas + tercera a 5€',
+        description: 'Sube unidades por pedido. Solo merece la pena para mover tallas/parados.',
+        units: 3,
+        grossRevenue: 3 * (29.95 + 29.95 + 5),
+        productCost: 3 * ((2.73 + 0.50) * 3),
+        shippingCost: 3 * this.moneyConfig('ECONOMICS_SHIPPING_COST_STANDARD_ES', 3.81)
+      })
+    ];
+    const totals = scenarios.reduce((acc, scenario) => ({
+      grossRevenue: acc.grossRevenue + scenario.grossRevenue,
+      productCost: acc.productCost + scenario.productCost,
+      shippingCost: acc.shippingCost + scenario.shippingCost,
+      shopifyFee: acc.shopifyFee + scenario.shopifyFee,
+      taxReserve: acc.taxReserve + scenario.taxReserve,
+      cashFree: acc.cashFree + scenario.cashFree,
+      netMargin: acc.netMargin + scenario.netMargin
+    }), { grossRevenue: 0, productCost: 0, shippingCost: 0, shopifyFee: 0, taxReserve: 0, cashFree: 0, netMargin: 0 });
+
+    const fixedExpenses = await this.fixedExpenses().catch(() => null);
+    const pendingFixed = Number((fixedExpenses as any)?.pending ?? 0);
+    const protectedCashFree = +Math.max(0, totals.cashFree - pendingFixed).toFixed(2);
+
+    return {
+      title: 'Rebajas agosto',
+      currency,
+      assumptions: [
+        'Cálculo preventivo: se actualiza con pedidos reales cuando entren desde Shopify.',
+        'La caja real ya descuenta rebajas usando totalPrice/totalDiscount de Shopify.',
+        'No incluye ads: si activas Meta, réstalo de caja libre.'
+      ],
+      totals: {
+        grossRevenue: this.roundMoney(totals.grossRevenue),
+        productCost: this.roundMoney(totals.productCost),
+        shippingCost: this.roundMoney(totals.shippingCost),
+        shopifyFee: this.roundMoney(totals.shopifyFee),
+        taxReserve: this.roundMoney(totals.taxReserve),
+        cashFree: this.roundMoney(totals.cashFree),
+        netMargin: this.roundMoney(totals.netMargin),
+        fixedExpensesPending: this.roundMoney(pendingFixed),
+        protectedCashFree,
+        cashFreePct: totals.grossRevenue > 0 ? this.roundMoney((totals.cashFree / totals.grossRevenue) * 100) : null
+      },
+      recommendation: protectedCashFree < 100
+        ? 'Rebajas defensivas: limita el 50%, prioriza packs y no metas ads hasta ver caja.'
+        : 'Puedes lanzar rebajas, pero empuja packs antes que descuentos sueltos al 50%.',
+      scenarios
+    };
+  }
+
+  private saleScenario(input: { id: string; title: string; description: string; units: number; grossRevenue: number; productCost: number; shippingCost: number }) {
+    const wasteCost = input.productCost * this.wasteRate();
+    const shopifyFee = input.grossRevenue * SHOPIFY_FEE_RATE;
+    const taxReserve = input.grossRevenue * this.taxReserveRate();
+    const netMargin = input.grossRevenue - input.productCost - wasteCost - input.shippingCost - shopifyFee;
+    const cashFree = netMargin - taxReserve;
+    return {
+      id: input.id,
+      title: input.title,
+      description: input.description,
+      units: input.units,
+      grossRevenue: this.roundMoney(input.grossRevenue),
+      productCost: this.roundMoney(input.productCost),
+      wasteCost: this.roundMoney(wasteCost),
+      shippingCost: this.roundMoney(input.shippingCost),
+      shopifyFee: this.roundMoney(shopifyFee),
+      taxReserve: this.roundMoney(taxReserve),
+      netMargin: this.roundMoney(netMargin),
+      cashFree: this.roundMoney(cashFree),
+      marginPct: input.grossRevenue > 0 ? this.roundMoney((netMargin / input.grossRevenue) * 100) : null,
+      cashStatus: this.cashStatus(cashFree, input.grossRevenue)
+    };
+  }
+
   async fixedExpenses(period?: string) {
     const currentPeriod = this.fixedExpensePeriod(period);
     const expenses = await this.prisma.fixedExpense.findMany({

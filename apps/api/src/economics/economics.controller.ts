@@ -42,6 +42,11 @@ export class EconomicsController {
     return this.economics.cashflow();
   }
 
+  @Get('sales-cashflow')
+  salesCashflow() {
+    return this.economics.salesCashflow();
+  }
+
   @Get('preorders/retro-aston')
   retroAstonPlan() {
     return this.economics.retroAstonPlan();

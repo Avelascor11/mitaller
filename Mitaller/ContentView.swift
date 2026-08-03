@@ -13130,6 +13130,7 @@ struct CashflowView: View {
     @Environment(WorkshopStore.self) private var store
     @State private var summary: CashflowSummary?
     @State private var growth: GrowthControlSummary?
+    @State private var salesCashflow: SalesCashflowSummary?
     @State private var loading = false
     @State private var error: String?
 
@@ -13148,6 +13149,10 @@ struct CashflowView: View {
 
                     if let growth {
                         GrowthControlCard(summary: growth)
+                    }
+
+                    if let salesCashflow {
+                        SalesCashflowCard(summary: salesCashflow)
                     }
 
                     if loading {
@@ -13179,12 +13184,22 @@ struct CashflowView: View {
         loading = true
         defer { loading = false }
         do {
-            async let s = client.cashflow()
-            async let g = client.economicsGrowthControl()
-            summary = try await s
-            growth = try await g
+            async let cash = client.cashflow()
+            async let sales = client.salesCashflow()
+            summary = try await cash
+            salesCashflow = try await sales
+            error = nil
+        } catch {
+            summary = nil
+            salesCashflow = nil
+            self.error = error.localizedDescription
         }
-        catch { self.error = error.localizedDescription }
+
+        do {
+            growth = try await client.economicsGrowthControl()
+        } catch {
+            growth = nil
+        }
     }
 
     private func toggleMark(_ payout: CashflowPayout) async {
@@ -13194,6 +13209,107 @@ struct CashflowView: View {
             else { try await client.markPayout(payout.id) }
             summary = try await client.cashflow()
         } catch { self.error = error.localizedDescription }
+    }
+}
+
+struct SalesCashflowCard: View {
+    let summary: SalesCashflowSummary
+
+    private var color: Color {
+        summary.totals.protectedCashFree >= 100 ? AppTheme.green : AppTheme.amber
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(alignment: .top, spacing: 12) {
+                Image(systemName: "tag.fill")
+                    .font(.title2.weight(.black))
+                    .foregroundStyle(color)
+                    .frame(width: 42, height: 42)
+                    .background(color.opacity(0.14))
+                    .clipShape(RoundedRectangle(cornerRadius: 13))
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(summary.title)
+                        .font(.headline.weight(.black))
+                        .foregroundStyle(AppTheme.ink)
+                    Text(summary.recommendation)
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(AppTheme.muted)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+
+            LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 10) {
+                GrowthMetricTile(title: "Ventas sim.", value: formatMoney(summary.totals.grossRevenue, currency: summary.currency), color: AppTheme.blue)
+                GrowthMetricTile(title: "Margen", value: formatMoney(summary.totals.netMargin, currency: summary.currency), color: summary.totals.netMargin >= 0 ? AppTheme.green : AppTheme.red)
+                GrowthMetricTile(title: "Caja libre", value: formatMoney(summary.totals.cashFree, currency: summary.currency), color: summary.totals.cashFree >= 0 ? AppTheme.green : AppTheme.red)
+                GrowthMetricTile(title: "Tras gastos", value: formatMoney(summary.totals.protectedCashFree, currency: summary.currency), color: color)
+            }
+
+            VStack(alignment: .leading, spacing: 10) {
+                ForEach(summary.scenarios) { scenario in
+                    SalesCashflowScenarioRow(scenario: scenario, currency: summary.currency)
+                }
+            }
+
+            VStack(alignment: .leading, spacing: 5) {
+                ForEach(summary.assumptions.prefix(3), id: \.self) { item in
+                    HStack(alignment: .top, spacing: 7) {
+                        Image(systemName: "info.circle.fill")
+                            .font(.caption)
+                            .foregroundStyle(AppTheme.blue)
+                        Text(item)
+                            .font(.caption2.weight(.semibold))
+                            .foregroundStyle(AppTheme.muted)
+                    }
+                }
+            }
+        }
+        .glassPanel(padding: 16, accent: color)
+    }
+}
+
+struct SalesCashflowScenarioRow: View {
+    let scenario: SalesCashflowScenario
+    let currency: String
+
+    private var color: Color {
+        switch scenario.cashStatus {
+        case "HEALTHY": AppTheme.green
+        case "WATCH": AppTheme.amber
+        default: AppTheme.red
+        }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .firstTextBaseline) {
+                Text(scenario.title)
+                    .font(.subheadline.weight(.black))
+                    .foregroundStyle(AppTheme.ink)
+                Spacer()
+                Text(formatMoney(scenario.cashFree, currency: currency))
+                    .font(.subheadline.weight(.black))
+                    .foregroundStyle(color)
+            }
+            Text(scenario.description)
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(AppTheme.muted)
+                .fixedSize(horizontal: false, vertical: true)
+            HStack(spacing: 8) {
+                Text("\(scenario.units) uds")
+                Text(formatMoney(scenario.grossRevenue, currency: currency))
+                if let pct = scenario.marginPct {
+                    Text("\(Int(pct.rounded()))% margen")
+                }
+            }
+            .font(.caption2.weight(.black))
+            .foregroundStyle(color)
+        }
+        .padding(12)
+        .background(AppTheme.surfaceSoft)
+        .overlay(RoundedRectangle(cornerRadius: 14).stroke(color.opacity(0.24)))
+        .clipShape(RoundedRectangle(cornerRadius: 14))
     }
 }
 
