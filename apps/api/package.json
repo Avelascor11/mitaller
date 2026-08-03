@@ -10,7 +10,8 @@
     "typecheck": "tsc --noEmit",
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev",
-    "seed": "tsx prisma/seed.ts"
+    "seed": "tsx prisma/seed.ts",
+    "seed:boxy": "tsx prisma/add-boxy-blank.ts"
   },
   "dependencies": {
     "@mitaller/shared": "0.1.0",
@@ -47,6 +48,7 @@
     "vitest": "^3.1.2"
   },
   "prisma": {
-    "seed": "tsx prisma/seed.ts"
+    "seed": "tsx prisma/seed.ts",
+    "seed:boxy": "tsx prisma/add-boxy-blank.ts"
   }
 }

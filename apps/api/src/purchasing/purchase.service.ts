@@ -359,7 +359,7 @@ export class PurchaseService {
         key: groupKey,
         garmentType: kind,
         color,
-        title: `${kind === 'SUDADERA' ? 'SUDADERAS' : kind === 'BAÑADOR' ? 'BAÑADORES' : 'CAMISETAS'} ${this.colorLabel(color)}`,
+        title: `${this.groupKindLabel(kind)} ${this.colorLabel(color)}`,
         theme: this.colorTheme(color),
         sizes: []
       };
@@ -726,7 +726,7 @@ export class PurchaseService {
     if (this.normalizeText(title ?? '').includes('quattro')) return true;
     const whiteColors = new Set(['BLANCA', 'BLANCO', 'WHITE']);
     if (mapped.kind === 'BAÑADOR') return true;
-    if (mapped.kind !== 'CAMISETA' && mapped.kind !== 'SUDADERA') return false;
+    if (mapped.kind !== 'CAMISETA' && mapped.kind !== 'CAMISETA_BOXY' && mapped.kind !== 'SUDADERA') return false;
     return !whiteColors.has(mapped.color);
   }
 
@@ -956,9 +956,19 @@ export class PurchaseService {
 
   private kindLabel(kind: string) {
     switch (kind) {
+      case 'CAMISETA_BOXY': return 'Camiseta BOXY';
       case 'SUDADERA': return 'Sudadera';
       case 'BAÑADOR': return 'Bañador';
       default: return 'Camiseta';
+    }
+  }
+
+  private groupKindLabel(kind: string) {
+    switch (kind) {
+      case 'CAMISETA_BOXY': return 'CAMISETAS BOXY';
+      case 'SUDADERA': return 'SUDADERAS';
+      case 'BAÑADOR': return 'BAÑADORES';
+      default: return 'CAMISETAS';
     }
   }
 
@@ -967,10 +977,12 @@ export class PurchaseService {
     // Word keywords
     if (/\b(banador|swimsuit|swim|bikini)\b/.test(normalized)) return 'BAÑADOR';
     if (/\b(sudadera|hoodie|sweatshirt|hooded)\b/.test(normalized)) return 'SUDADERA';
+    if (/\bboxy\b/.test(normalized) && /\b(camiseta|tshirt|t-shirt|tee|shirt|ts)\b/.test(normalized)) return 'CAMISETA_BOXY';
     if (/\b(camiseta|tshirt|t-shirt|tee|shirt)\b/.test(normalized)) return 'CAMISETA';
     // SKU prefixes: WG* = sudadera, TG* = camiseta, HD* = sudadera, TS* = camiseta
     if (/(?:^|\s|[-/])wg\d/i.test(value)) return 'SUDADERA';
     if (/(?:^|\s|[-/])hd\d/i.test(value)) return 'SUDADERA';
+    if (/(?:^|\s|[-/])box(?:[-/]|$)/i.test(value)) return 'CAMISETA_BOXY';
     if (/(?:^|\s|[-/])tg\d/i.test(value)) return 'CAMISETA';
     if (/(?:^|\s|[-/])ts\d/i.test(value)) return 'CAMISETA';
     return null;

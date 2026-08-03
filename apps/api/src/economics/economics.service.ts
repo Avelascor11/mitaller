@@ -388,6 +388,7 @@ export class EconomicsService {
   private estimatedBlankCost(garmentType?: string, color?: string, name?: string) {
     const text = this.normalize(`${garmentType ?? ''} ${color ?? ''} ${name ?? ''}`);
     if (/sudadera/.test(text)) return this.moneyConfig('GROWTH_SWEATSHIRT_UNIT_COST', 8.05);
+    if (/boxy/.test(text)) return this.moneyConfig('GROWTH_BOXY_TSHIRT_UNIT_COST', 4.9);
     if (/camiseta|shirt/.test(text)) return this.moneyConfig(/marron|rosa|azalea|chocolate/.test(text) ? 'GROWTH_GILDAN_TSHIRT_UNIT_COST' : 'GROWTH_TSHIRT_UNIT_COST', /marron|rosa|azalea|chocolate/.test(text) ? 2.84 : 3.19);
     return this.moneyConfig('GROWTH_OTHER_PURCHASE_UNIT_COST', 0);
   }
@@ -821,16 +822,27 @@ export class EconomicsService {
   }
 
   private retroAstonInstallmentAmount() {
-    return 721;
+    return 1200;
   }
 
   private retroAstonMilestones() {
-    return [1, 2, 3].map((milestone) => ({
-      milestone,
-      label: `Pago ${milestone}/3`,
-      amount: this.retroAstonInstallmentAmount(),
-      dueAt: null as Date | null
-    }));
+    const initialPayment = this.retroAstonInstallmentAmount();
+    const finalPayment = +Math.max(0, this.retroAstonTotalCommitment() - initialPayment).toFixed(2);
+
+    return [
+      {
+        milestone: 1,
+        label: 'Entrada producción',
+        amount: initialPayment,
+        dueAt: null as Date | null
+      },
+      {
+        milestone: 2,
+        label: 'Resto al finalizar',
+        amount: finalPayment,
+        dueAt: null as Date | null
+      }
+    ];
   }
 
   private retroAstonSellingPrice() {
@@ -1276,9 +1288,11 @@ export class EconomicsService {
 
   private itemCost(item: any): ItemCost {
     const type = (item.productType ?? item.title ?? '').toString().toLowerCase();
+    const text = `${item.productType ?? ''} ${item.title ?? ''} ${item.sku ?? ''}`.toString().toLowerCase();
     const color = (item.color ?? item.variantTitle ?? '').toString().toLowerCase();
     const isBanador = /bañad|banad|swim|bikini|bath/.test(type);
     const isSudadera = /sudader/.test(type);
+    const isBoxy = /\bboxy\b/.test(text);
     const isCamiseta = !isBanador && (/camiset/.test(type) || !isSudadera);
     const isBlack = /negro|black/.test(color);
     const isWhite = /blanco|white/.test(color);
@@ -1300,14 +1314,20 @@ export class EconomicsService {
         description = 'Sudadera blanca (DTG)';
       }
     } else if (isCamiseta) {
-      blank = 2.73;
-      if (isBlack) {
+      if (isBoxy) {
+        blank = 4.90;
+        print = 0.50;
+        description = 'Camiseta blanca BOXY (DTG)';
+      } else if (isBlack) {
+        blank = 2.73;
         print = 2.25 + 0.45;
         description = 'Camiseta negra (DTF espalda+frontal)';
       } else if (isWhite) {
+        blank = 2.73;
         print = 0.50;
         description = 'Camiseta blanca (DTG)';
       } else {
+        blank = 2.73;
         print = 0.50;
         description = 'Camiseta (DTG estimado)';
       }

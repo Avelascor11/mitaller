@@ -99,6 +99,15 @@ async function main() {
   const garmentStockItems = sheetData.subproducts
     .map(stockItemFromSubproduct)
     .filter((item): item is NonNullable<ReturnType<typeof stockItemFromSubproduct>> => Boolean(item));
+  const boxyBlankItems = ['S', 'M', 'L', 'XL', 'XXL'].map((size) => ({
+    sku: `BLANK-BOX-TS-WHT-${size}`,
+    name: `Camiseta Blanca BOXY - ${size}`,
+    color: 'Blanca',
+    size,
+    supplierSku: `BOXY-WHT-${size}`,
+    minStock: 0,
+    quantity: 0
+  }));
   const fixedStockItems = [
     ['TR-FERNANDO', 'Transfer Fernando', 'TRANSFER', null, null, 'TR-FERNANDO', 10, 20],
     ['TR-NANO', 'Transfer Nano', 'TRANSFER', null, null, 'TR-NANO', 10, 15],
@@ -136,6 +145,57 @@ async function main() {
       where: { supplier_supplierSku: { supplier: 'FALK_ROSS', supplierSku: item.supplierSku } },
       update: {},
       create: { supplier: 'FALK_ROSS', supplierSku: item.supplierSku, availableQuantity: 0 }
+    });
+  }
+
+  for (const item of boxyBlankItems) {
+    const created = await prisma.stockItem.upsert({
+      where: { sku: item.sku },
+      update: { name: item.name, color: item.color, size: item.size, supplierSku: item.supplierSku, minStock: item.minStock },
+      create: { sku: item.sku, name: item.name, type: 'BLANK_GARMENT', color: item.color, size: item.size, supplierSku: item.supplierSku, minStock: item.minStock }
+    });
+    await prisma.stockLevel.upsert({
+      where: { stockItemId_locationId: { stockItemId: created.id, locationId: shelf.id } },
+      update: { quantity: item.quantity },
+      create: { stockItemId: created.id, locationId: shelf.id, quantity: item.quantity }
+    });
+    await prisma.supplierArticle.upsert({
+      where: { supplier_supplierSku: { supplier: 'BOXY_SUPPLIER', supplierSku: item.supplierSku } },
+      update: {
+        productName: item.name,
+        color: item.color,
+        size: item.size,
+        purchasePrice: '4.90',
+        rawDataJson: {
+          source: 'seed',
+          vatRate: 0.21,
+          grossPurchaseCost: 5.93,
+          salePrice: 29.95,
+          note: 'Proveedor diferente. Coste 4,90 EUR + IVA 21%.'
+        }
+      },
+      create: {
+        supplier: 'BOXY_SUPPLIER',
+        supplierSku: item.supplierSku,
+        styleCode: 'BOXY-TS',
+        brand: 'BOXY',
+        productName: item.name,
+        color: item.color,
+        size: item.size,
+        purchasePrice: '4.90',
+        rawDataJson: {
+          source: 'seed',
+          vatRate: 0.21,
+          grossPurchaseCost: 5.93,
+          salePrice: 29.95,
+          note: 'Proveedor diferente. Coste 4,90 EUR + IVA 21%.'
+        }
+      }
+    });
+    await prisma.supplierStock.upsert({
+      where: { supplier_supplierSku: { supplier: 'BOXY_SUPPLIER', supplierSku: item.supplierSku } },
+      update: {},
+      create: { supplier: 'BOXY_SUPPLIER', supplierSku: item.supplierSku, availableQuantity: 0 }
     });
   }
 

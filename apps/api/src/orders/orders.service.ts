@@ -504,6 +504,7 @@ export class OrdersService {
   private inferGarmentKind(value: string) {
     const normalized = this.normalizeText(value);
     if (/\b(sudadera|hoodie|hd)\b/.test(normalized)) return 'SUDADERA';
+    if (/\bboxy\b/.test(normalized) && /\b(camiseta|shirt|tshirt|ts)\b/.test(normalized)) return 'CAMISETA_BOXY';
     if (/\b(camiseta|shirt|tshirt|ts)\b/.test(normalized)) return 'CAMISETA';
     return null;
   }
