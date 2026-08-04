@@ -13183,16 +13183,19 @@ struct CashflowView: View {
         guard let client = store.apiClient else { error = "API no configurada"; return }
         loading = true
         defer { loading = false }
+
         do {
-            async let cash = client.cashflow()
-            async let sales = client.salesCashflow()
-            summary = try await cash
-            salesCashflow = try await sales
+            summary = try await client.cashflow()
             error = nil
         } catch {
             summary = nil
-            salesCashflow = nil
             self.error = error.localizedDescription
+        }
+
+        do {
+            salesCashflow = try await client.salesCashflow()
+        } catch {
+            salesCashflow = nil
         }
 
         do {
