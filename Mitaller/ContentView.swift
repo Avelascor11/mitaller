@@ -5019,16 +5019,37 @@ struct SupplierPurchaseStatusBadge: View {
 struct SupplierPurchaseLineRow: View {
     let line: SupplierPurchaseOrderLine
 
+    private var isBoxyBlank: Bool {
+        let haystack = [line.name, line.supplierSku].joined(separator: " ").uppercased()
+        return haystack.contains("BOXY") || haystack.contains("BLANK-BOX")
+    }
+
+    private var displayName: String {
+        isBoxyBlank ? "Camiseta BOXY blanca" : line.name
+    }
+
     var body: some View {
         HStack(spacing: 10) {
             VStack(alignment: .leading, spacing: 2) {
-                Text(line.name)
+                Text(displayName)
                     .font(.subheadline.weight(.heavy))
                     .foregroundStyle(AppTheme.ink)
                     .lineLimit(1)
-                Text(line.supplierSku)
-                    .font(.caption2.weight(.bold))
-                    .foregroundStyle(AppTheme.muted)
+                HStack(spacing: 6) {
+                    if isBoxyBlank {
+                        Text("TALLA \(line.size ?? "-")")
+                            .font(.caption.weight(.black))
+                            .foregroundStyle(AppTheme.ink)
+                            .padding(.horizontal, 9)
+                            .padding(.vertical, 4)
+                            .background(AppTheme.amber.opacity(0.22))
+                            .clipShape(Capsule())
+                    }
+                    Text(line.supplierSku)
+                        .font(.caption2.weight(.bold))
+                        .foregroundStyle(AppTheme.muted)
+                        .lineLimit(1)
+                }
             }
             Spacer()
             VStack(alignment: .trailing, spacing: 4) {
@@ -5157,6 +5178,15 @@ struct PurchaseBuyRow: View {
     let accent: Color
     @State private var showOrders = false
 
+    private var isBoxyBlank: Bool {
+        let haystack = [entry.subproductName, entry.sku ?? "", entry.supplierSku ?? ""].joined(separator: " ").uppercased()
+        return haystack.contains("BOXY") || haystack.contains("BLANK-BOX")
+    }
+
+    private var displayName: String {
+        isBoxyBlank ? "Camiseta BOXY blanca" : entry.subproductName
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(alignment: .center, spacing: 12) {
@@ -5164,10 +5194,25 @@ struct PurchaseBuyRow: View {
                     DTFThumbnail(entry: entry, size: 58)
                 }
                 VStack(alignment: .leading, spacing: 6) {
-                    Text(entry.subproductName)
+                    if isBoxyBlank {
+                        Text("TALLA \(entry.size)")
+                            .font(.title2.weight(.black))
+                            .foregroundStyle(AppTheme.ink)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 6)
+                            .background(AppTheme.amber.opacity(0.22))
+                            .clipShape(RoundedRectangle(cornerRadius: 10))
+                    }
+                    Text(displayName)
                         .font(.headline.weight(.black))
                         .foregroundStyle(AppTheme.ink)
-                        .lineLimit(2)
+                        .lineLimit(1)
+                    if isBoxyBlank, let supplierSku = entry.supplierSku {
+                        Text(supplierSku)
+                            .font(.caption2.weight(.bold))
+                            .foregroundStyle(AppTheme.muted)
+                            .lineLimit(1)
+                    }
                     HStack(spacing: 8) {
                         MiniMetric(label: "ped", value: entry.pendingOrderNeed, color: AppTheme.blue)
                         MiniMetric(label: "stk", value: entry.currentInternalStock, color: AppTheme.green)
