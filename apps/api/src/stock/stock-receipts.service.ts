@@ -244,6 +244,7 @@ export class StockReceiptsService {
 
   private matchStockItem(line: string, stockItems: StockItem[]) {
     const normalizedLine = this.normalize(line);
+    if (this.isManualOnlyStockItemText(normalizedLine)) return undefined;
     const direct = stockItems.find((item) =>
       normalizedLine.includes(this.normalize(item.name)) ||
       normalizedLine.includes(this.normalize(item.sku)) ||
@@ -290,8 +291,13 @@ export class StockReceiptsService {
 
   private isReceiptableStockItem(stockItem: Pick<StockItem, 'name' | 'sku' | 'supplierSku'>) {
     const text = this.normalize(`${stockItem.name} ${stockItem.sku} ${stockItem.supplierSku ?? ''}`);
+    if (this.isManualOnlyStockItemText(text)) return false;
     if (text.includes('banador') || text.includes('swim') || text.includes('bikini')) return false;
     return text.includes('camiseta') || text.includes('sudadera') || /\btg002\b/.test(text) || /\bwg005\b/.test(text);
+  }
+
+  private isManualOnlyStockItemText(text: string) {
+    return text.includes('boxy') || text.includes('blank box') || /\bboxy wht\b/.test(text);
   }
 
   private detectColor(value: string) {

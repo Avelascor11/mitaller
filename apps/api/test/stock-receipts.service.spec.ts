@@ -19,6 +19,7 @@ describe('StockReceiptsService', () => {
     { id: 'shirt-sand-m', sku: 'BLANK-TS-SND-M', supplierSku: 'FR-TS-SND-M', name: 'Camiseta Sand - M', type: 'BLANK_GARMENT' },
     { id: 'shirt-sand-l', sku: 'BLANK-TS-SND-L', supplierSku: 'FR-TS-SND-L', name: 'Camiseta Sand - L', type: 'BLANK_GARMENT' },
     { id: 'shirt-sand-xl', sku: 'BLANK-TS-SND-XL', supplierSku: 'FR-TS-SND-XL', name: 'Camiseta Sand - XL', type: 'BLANK_GARMENT' },
+    { id: 'shirt-boxy-white-m', sku: 'BLANK-BOX-TS-WHT-M', supplierSku: 'BOXY-WHT-M', name: 'Camiseta BOXY Blanca - M', type: 'BLANK_GARMENT' },
     { id: 'hoodie-white-m', sku: 'BLANK-HD-WHT-M', supplierSku: 'FR-HD-WHT-M', name: 'Sudadera Blanca - M', type: 'BLANK_GARMENT' },
     { id: 'hoodie-black-m', sku: 'BLANK-HD-BLK-M', supplierSku: 'FR-HD-BLK-M', name: 'Sudadera Negra - M', type: 'BLANK_GARMENT' },
     { id: 'hoodie-tangerine-m', sku: 'BLANK-HD-TNG-M', supplierSku: 'FR-HD-TNG-M', name: 'Sudadera Tangerine - M', type: 'BLANK_GARMENT' },
@@ -186,6 +187,25 @@ describe('StockReceiptsService', () => {
     ]);
     expect(createdLines).not.toEqual(expect.arrayContaining([
       expect.objectContaining({ stockItemId: 'swim-blue-m' })
+    ]));
+  });
+
+  it('ignora BOXY en albaranes y mantiene camiseta normal por talla', async () => {
+    const createdLines: Array<{ stockItemId?: string; quantity: number; matchedName?: string }> = [];
+    const service = makeService(createdLines);
+
+    await service.scanReceipt({
+      rawText: [
+        '03242 TG002 White M 2',
+        'BOXY-WHT-M Camiseta BOXY Blanca M 5'
+      ].join('\n')
+    });
+
+    expect(createdLines).toEqual([
+      expect.objectContaining({ stockItemId: 'shirt-white-m', quantity: 2 })
+    ]);
+    expect(createdLines).not.toEqual(expect.arrayContaining([
+      expect.objectContaining({ stockItemId: 'shirt-boxy-white-m' })
     ]));
   });
 });
