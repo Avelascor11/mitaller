@@ -33,7 +33,6 @@ export class ShopifyAdapter {
               id
               name
               createdAt
-              email
               displayFinancialStatus
               displayFulfillmentStatus
               cancelledAt
@@ -43,20 +42,6 @@ export class ShopifyAdapter {
               currentTotalTaxSet { shopMoney { amount currencyCode } }
               totalShippingPriceSet { shopMoney { amount currencyCode } }
               currencyCode
-              customer {
-                displayName
-                email
-              }
-              shippingAddress {
-                name
-                address1
-                address2
-                city
-                province
-                zip
-                countryCodeV2
-                phone
-              }
               shippingLine {
                 title
                 code
@@ -275,7 +260,6 @@ export class ShopifyAdapter {
           id
           name
           createdAt
-          email
           displayFinancialStatus
           displayFulfillmentStatus
           cancelledAt
@@ -285,8 +269,6 @@ export class ShopifyAdapter {
           currentTotalTaxSet { shopMoney { amount currencyCode } }
           totalShippingPriceSet { shopMoney { amount currencyCode } }
           currencyCode
-          customer { displayName email }
-          shippingAddress { name address1 address2 city province zip countryCodeV2 phone }
           shippingLine { title code }
           lineItems(first: 100) {
             nodes {
@@ -316,7 +298,6 @@ export class ShopifyAdapter {
             id
             name
             createdAt
-            email
             displayFinancialStatus
             displayFulfillmentStatus
             cancelledAt
@@ -326,8 +307,6 @@ export class ShopifyAdapter {
             currentTotalTaxSet { shopMoney { amount currencyCode } }
             totalShippingPriceSet { shopMoney { amount currencyCode } }
             currencyCode
-            customer { displayName email }
-            shippingAddress { name address1 address2 city province zip countryCodeV2 phone }
             shippingLine { title code }
             lineItems(first: 100) {
               nodes {
