@@ -761,6 +761,10 @@ export class OrdersService {
     const order = await this.prisma.order.upsert({
       where: { shopifyOrderId: input.shopifyOrderId },
       update: {
+        ...(input.customerName && input.customerName !== 'Cliente Shopify' ? { customerName: input.customerName } : {}),
+        ...(input.customerEmail ? { customerEmail: input.customerEmail } : {}),
+        ...(input.shippingCountry ? { shippingCountry: input.shippingCountry } : {}),
+        ...(input.shippingAddressJson ? { shippingAddressJson: input.shippingAddressJson as Prisma.InputJsonValue } : {}),
         shippingMethod: input.shippingMethod,
         financialStatus: input.financialStatus,
         fulfillmentStatus: input.fulfillmentStatus,

@@ -13,16 +13,61 @@ export class ShopifyAdapter {
     return Boolean(this.shopDomain && this.accessToken);
   }
 
+  private customerOrderFields(includeCustomerData: boolean) {
+    return includeCustomerData ? `
+              email
+              customer {
+                displayName
+                email
+              }
+              shippingAddress {
+                name
+                address1
+                address2
+                city
+                province
+                zip
+                countryCodeV2
+                phone
+              }
+    ` : '';
+  }
+
   async importRecentOrders(): Promise<ImportedOrder[]> {
     this.assertConfigured();
 
     const importLimit = Math.min(Number(this.config.get('SHOPIFY_IMPORT_ORDER_LIMIT') ?? 100), 250);
     const minimumOrderNumber = Number(this.config.get('SHOPIFY_MIN_ORDER_NUMBER') ?? 0);
     const orders: ShopifyOrderNode[] = [];
+    let includeCustomerData = true;
     let after: string | null = null;
 
     while (orders.length < importLimit) {
-      const data: ShopifyOrdersResponse = await this.graphql<ShopifyOrdersResponse>(`
+      let data: ShopifyOrdersResponse;
+      try {
+        data = await this.fetchRecentOrdersPage(includeCustomerData, Math.min(50, importLimit - orders.length), after);
+      } catch (error) {
+        if (!includeCustomerData || !this.isCustomerAccessDenied(error)) throw error;
+        includeCustomerData = false;
+        data = await this.fetchRecentOrdersPage(false, Math.min(50, importLimit - orders.length), after);
+      }
+
+      orders.push(...data.orders.nodes);
+      const reachedMinimum = minimumOrderNumber > 0
+        && data.orders.nodes.some((order) => this.orderNumberValue(order.name) < minimumOrderNumber);
+      if (reachedMinimum) break;
+      if (!data.orders.pageInfo.hasNextPage || !data.orders.pageInfo.endCursor) break;
+      after = data.orders.pageInfo.endCursor;
+    }
+
+    return orders
+      .filter((order) => order.cancelledAt || (order.displayFulfillmentStatus ?? '').toUpperCase() !== 'FULFILLED')
+      .filter((order) => !minimumOrderNumber || this.orderNumberValue(order.name) >= minimumOrderNumber)
+      .map((order) => this.mapGraphqlOrder(order));
+  }
+
+  private fetchRecentOrdersPage(includeCustomerData: boolean, first: number, after: string | null) {
+    return this.graphql<ShopifyOrdersResponse>(`
         query RecentOrders($first: Int!, $after: String, $query: String!) {
           orders(first: $first, after: $after, reverse: true, sortKey: CREATED_AT, query: $query) {
             pageInfo {
@@ -33,6 +78,7 @@ export class ShopifyAdapter {
               id
               name
               createdAt
+              ${this.customerOrderFields(includeCustomerData)}
               displayFinancialStatus
               displayFulfillmentStatus
               cancelledAt
@@ -91,23 +137,10 @@ export class ShopifyAdapter {
           }
         }
       `, {
-        first: Math.min(50, importLimit - orders.length),
+        first,
         after,
         query: 'status:any'
       });
-
-      orders.push(...data.orders.nodes);
-      const reachedMinimum = minimumOrderNumber > 0
-        && data.orders.nodes.some((order) => this.orderNumberValue(order.name) < minimumOrderNumber);
-      if (reachedMinimum) break;
-      if (!data.orders.pageInfo.hasNextPage || !data.orders.pageInfo.endCursor) break;
-      after = data.orders.pageInfo.endCursor;
-    }
-
-    return orders
-      .filter((order) => order.cancelledAt || (order.displayFulfillmentStatus ?? '').toUpperCase() !== 'FULFILLED')
-      .filter((order) => !minimumOrderNumber || this.orderNumberValue(order.name) >= minimumOrderNumber)
-      .map((order) => this.mapGraphqlOrder(order));
   }
 
   async crewCatalog() {
@@ -254,12 +287,24 @@ export class ShopifyAdapter {
 
   async getOrderById(id: string) {
     this.assertConfigured();
-    const data = await this.graphql<{ order: ShopifyOrderNode | null }>(`
+    let data: { order: ShopifyOrderNode | null };
+    try {
+      data = await this.fetchOrderById(id, true);
+    } catch (error) {
+      if (!this.isCustomerAccessDenied(error)) throw error;
+      data = await this.fetchOrderById(id, false);
+    }
+    return data.order ? this.mapGraphqlOrder(data.order) : null;
+  }
+
+  private fetchOrderById(id: string, includeCustomerData: boolean) {
+    return this.graphql<{ order: ShopifyOrderNode | null }>(`
       query OrderById($id: ID!) {
         order(id: $id) {
           id
           name
           createdAt
+          ${this.customerOrderFields(includeCustomerData)}
           displayFinancialStatus
           displayFulfillmentStatus
           cancelledAt
@@ -283,7 +328,6 @@ export class ShopifyAdapter {
         }
       }
     `, { id });
-    return data.order ? this.mapGraphqlOrder(data.order) : null;
   }
 
   /** Fetch a single order from Shopify by its name (e.g. "#6056"), regardless of import window. */
@@ -291,13 +335,28 @@ export class ShopifyAdapter {
     this.assertConfigured();
     const clean = name.replace(/^#/, '').trim();
     if (!clean) return null;
-    const data = await this.graphql<ShopifyOrdersResponse>(`
+    let data: ShopifyOrdersResponse;
+    try {
+      data = await this.fetchOrderByNamePage(clean, true);
+    } catch (error) {
+      if (!this.isCustomerAccessDenied(error)) throw error;
+      data = await this.fetchOrderByNamePage(clean, false);
+    }
+
+    const node = data.orders.nodes.find((o) => this.orderNumberValue(o.name) === Number(clean))
+      ?? data.orders.nodes[0];
+    return node ? this.mapGraphqlOrder(node) : null;
+  }
+
+  private fetchOrderByNamePage(clean: string, includeCustomerData: boolean) {
+    return this.graphql<ShopifyOrdersResponse>(`
       query OrderByName($query: String!) {
         orders(first: 5, query: $query) {
           nodes {
             id
             name
             createdAt
+            ${this.customerOrderFields(includeCustomerData)}
             displayFinancialStatus
             displayFulfillmentStatus
             cancelledAt
@@ -322,10 +381,6 @@ export class ShopifyAdapter {
         }
       }
     `, { query: `name:#${clean}` });
-
-    const node = data.orders.nodes.find((o) => this.orderNumberValue(o.name) === Number(clean))
-      ?? data.orders.nodes[0];
-    return node ? this.mapGraphqlOrder(node) : null;
   }
 
   assertValidWebhook(rawBody?: Buffer, hmacHeader?: string) {
@@ -565,6 +620,11 @@ export class ShopifyAdapter {
       throw new BadGatewayException(`Shopify API error: ${JSON.stringify(json.errors ?? json)}`);
     }
     return json.data;
+  }
+
+  private isCustomerAccessDenied(error: unknown) {
+    const message = error instanceof Error ? error.message : String(error);
+    return message.includes('Customer object') || message.includes('ACCESS_DENIED');
   }
 
   private async rest<T>(path: string, init: RequestInit): Promise<T> {
