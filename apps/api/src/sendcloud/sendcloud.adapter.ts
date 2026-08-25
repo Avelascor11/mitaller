@@ -286,6 +286,37 @@ export class SendcloudAdapter {
     }
   }
 
+  async findIncomingOrderCustomerData(orderNumber: string): Promise<SendcloudIncomingOrderCustomerData | null> {
+    if (!this.hasCredentials()) return null;
+    const response = await this.requestV3<SendcloudOrdersResponse>(
+      `/orders?order_number=${encodeURIComponent(orderNumber)}`,
+      { method: 'GET' }
+    );
+    const order = (response.data ?? []).find((item) => item.order_number === orderNumber) ?? response.data?.[0];
+    if (!order) return null;
+    const shipping = order.shipping_address ?? order.billing_address;
+    const customer = order.customer_details;
+    if (!shipping && !customer) return null;
+    return {
+      customerName: customer?.name ?? shipping?.name,
+      customerEmail: customer?.email ?? shipping?.email,
+      shippingCountry: shipping?.country_code,
+      shippingAddressJson: shipping ? {
+        source: 'sendcloud_orders_api',
+        name: shipping.name ?? customer?.name,
+        address1: shipping.address_line_1,
+        address2: shipping.address_line_2,
+        houseNumber: shipping.house_number,
+        zip: shipping.postal_code,
+        city: shipping.city,
+        province: shipping.state_province_code,
+        countryCodeV2: shipping.country_code,
+        phone: shipping.phone_number ?? customer?.phone_number,
+        email: shipping.email ?? customer?.email
+      } : undefined
+    };
+  }
+
   /** Download return label PDF (proxy bytes with auth) */
   async downloadReturnLabel(parcelId: string): Promise<Buffer> {
     if (!this.hasCredentials()) throw new BadRequestException('Sendcloud no esta configurado.');
@@ -858,6 +889,43 @@ interface SendcloudParcelResponse {
 interface SendcloudShippingMethodsResponse {
   next?: string | null;
   shipping_methods?: unknown[];
+}
+
+interface SendcloudOrdersResponse {
+  data?: SendcloudIncomingOrder[];
+}
+
+interface SendcloudIncomingOrder {
+  id?: string;
+  order_id?: string;
+  order_number?: string;
+  customer_details?: {
+    name?: string;
+    email?: string;
+    phone_number?: string;
+  };
+  billing_address?: SendcloudIncomingAddress;
+  shipping_address?: SendcloudIncomingAddress;
+}
+
+interface SendcloudIncomingAddress {
+  name?: string;
+  address_line_1?: string;
+  house_number?: string | null;
+  address_line_2?: string | null;
+  postal_code?: string;
+  city?: string;
+  state_province_code?: string;
+  country_code?: string;
+  email?: string;
+  phone_number?: string;
+}
+
+export interface SendcloudIncomingOrderCustomerData {
+  customerName?: string;
+  customerEmail?: string;
+  shippingCountry?: string;
+  shippingAddressJson?: unknown;
 }
 
 interface SendcloudShipmentV3Response {

@@ -5,6 +5,7 @@ import { Cron } from '@nestjs/schedule';
 import { ActivityService } from '../activity/activity.service';
 import { PriorityService } from '../priority/priority.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { SendcloudAdapter, SendcloudIncomingOrderCustomerData } from '../sendcloud/sendcloud.adapter';
 import { ShopifyAdapter } from '../shopify/shopify.adapter';
 import { OrderTaskFactoryService } from './order-task-factory.service';
 
@@ -17,6 +18,7 @@ export class OrdersService {
     private readonly prisma: PrismaService,
     private readonly priority: PriorityService,
     private readonly shopify: ShopifyAdapter,
+    private readonly sendcloud: SendcloudAdapter,
     private readonly taskFactory: OrderTaskFactoryService,
     private readonly activity: ActivityService,
     private readonly config: ConfigService
@@ -578,9 +580,62 @@ export class OrdersService {
     const imported = await this.shopify.importRecentOrders();
     const results = [];
     for (const order of imported) {
-      results.push(await this.upsertImportedOrder(order));
+      const saved = await this.upsertImportedOrder(order);
+      results.push(await this.enrichOrderFromSendcloud(saved));
     }
     return { imported: results.length, orders: results };
+  }
+
+  private async enrichOrderFromSendcloud<T extends {
+    id: string;
+    orderNumber: string;
+    customerName: string;
+    customerEmail?: string | null;
+    shippingCountry?: string | null;
+    shippingAddressJson?: unknown;
+  }>(order: T): Promise<T> {
+    const needsCustomerData = order.customerName === 'Cliente Shopify' ||
+      !order.customerEmail ||
+      !this.hasCompleteShippingAddress(order.shippingAddressJson);
+    if (!needsCustomerData || !this.sendcloud.hasCredentials()) return order;
+    try {
+      const data = await this.sendcloud.findIncomingOrderCustomerData(order.orderNumber);
+      if (!data) return order;
+      return await this.applySendcloudCustomerData(order, data);
+    } catch (error) {
+      this.logger.warn(`No se pudo completar ${order.orderNumber} desde Sendcloud: ${error instanceof Error ? error.message : String(error)}`);
+      return order;
+    }
+  }
+
+  private async applySendcloudCustomerData<T extends {
+    id: string;
+    customerName: string;
+    customerEmail?: string | null;
+    shippingCountry?: string | null;
+    shippingAddressJson?: unknown;
+  }>(order: T, data: SendcloudIncomingOrderCustomerData): Promise<T> {
+    const update = {
+      ...(data.customerName ? { customerName: data.customerName } : {}),
+      ...(data.customerEmail ? { customerEmail: data.customerEmail } : {}),
+      ...(data.shippingCountry ? { shippingCountry: data.shippingCountry } : {}),
+      ...(data.shippingAddressJson ? { shippingAddressJson: data.shippingAddressJson as Prisma.InputJsonValue } : {})
+    };
+    if (!Object.keys(update).length) return order;
+
+    const updated = await this.prisma.order.update({ where: { id: order.id }, data: update });
+    await this.activity.log({
+      entityType: 'Order',
+      entityId: order.id,
+      action: 'SENDCLOUD_CUSTOMER_DATA_IMPORTED',
+      message: `Pedido ${updated.orderNumber} completado con datos de Sendcloud`,
+      metadataJson: {
+        hasName: Boolean(data.customerName),
+        hasEmail: Boolean(data.customerEmail),
+        hasAddress: this.hasCompleteShippingAddress(data.shippingAddressJson)
+      }
+    });
+    return { ...order, ...updated };
   }
 
   async importSheetPendingOrders(rows: SheetPendingOrderRow[]) {
@@ -929,6 +984,16 @@ export class OrdersService {
 
   private orderNumberValue(orderNumber: string) {
     return Number(orderNumber.replace(/\D/g, '')) || 0;
+  }
+
+  private hasCompleteShippingAddress(raw: unknown) {
+    if (!raw || typeof raw !== 'object') return false;
+    const address = raw as Record<string, unknown>;
+    const address1 = String(address.address1 ?? address.address_line_1 ?? address.address ?? '').trim();
+    const city = String(address.city ?? '').trim();
+    const zip = String(address.zip ?? address.postal_code ?? address.postalCode ?? '').trim();
+    const country = String(address.countryCodeV2 ?? address.country_code ?? address.country ?? '').trim();
+    return Boolean(address1 && city && zip && country);
   }
 
   private normalizeOrderNumber(value?: string) {

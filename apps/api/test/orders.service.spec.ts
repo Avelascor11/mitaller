@@ -12,6 +12,7 @@ function serviceWith(prisma: Record<string, any>) {
       }))
     } as never,
     { importRecentOrders: vi.fn(), hasCredentials: vi.fn(() => true) } as never,
+    { hasCredentials: vi.fn(() => false), findIncomingOrderCustomerData: vi.fn() } as never,
     { buildTasks: vi.fn(() => []) } as never,
     { log: vi.fn() } as never,
     { get: vi.fn(() => undefined) } as never
@@ -61,6 +62,7 @@ describe('OrdersService', () => {
       prisma as never,
       { calculate: vi.fn() } as never,
       { importRecentOrders: vi.fn(), hasCredentials: vi.fn(() => true) } as never,
+      { hasCredentials: vi.fn(() => false), findIncomingOrderCustomerData: vi.fn() } as never,
       { buildTasks: vi.fn(() => []) } as never,
       activity as never,
       { get: vi.fn(() => undefined) } as never
@@ -298,6 +300,7 @@ describe('OrdersService', () => {
       prisma as never,
       { calculate: vi.fn() } as never,
       { importRecentOrders: vi.fn(), hasCredentials: vi.fn(() => true) } as never,
+      { hasCredentials: vi.fn(() => false), findIncomingOrderCustomerData: vi.fn() } as never,
       { buildTasks: vi.fn(() => []) } as never,
       activity as never,
       { get: vi.fn(() => undefined) } as never
