@@ -15,6 +15,7 @@ interface ReturnStatus {
   carrier: string | null;
   totalAmount: number | null;
   paidAt: string | null;
+  receivedAt: string | null;
 }
 
 const STATUS_ORDER = ['REQUESTED', 'LABEL_CREATED', 'RECEIVED', 'APPROVED'];
@@ -22,7 +23,7 @@ const STATUS_ORDER = ['REQUESTED', 'LABEL_CREATED', 'RECEIVED', 'APPROVED'];
 const LABELS: Record<string, { es: string; en: string; icon: string }> = {
   REQUESTED:     { es: 'Solicitud recibida',          en: 'Request received',         icon: '📋' },
   LABEL_CREATED: { es: 'Etiqueta generada',            en: 'Label generated',           icon: '🏷️' },
-  RECEIVED:      { es: 'Paquete recibido',             en: 'Package received',          icon: '📦' },
+  RECEIVED:      { es: 'Recibido en el taller',        en: 'Received at workshop',      icon: '📦' },
   APPROVED:      { es: 'Verificado · reembolso en proceso', en: 'Verified · refund in progress', icon: '✅' },
   REFUNDED:      { es: 'Reembolso completado',         en: 'Refund completed',          icon: '💰' },
   REJECTED:      { es: 'Solicitud rechazada',          en: 'Request rejected',          icon: '❌' },
@@ -90,6 +91,14 @@ export default function EstadoPage({ params }: { params: Promise<{ id: string }>
 
   const isTerminal = ['REJECTED', 'CANCELLED', 'REFUNDED'].includes(data?.status ?? '');
   const isRejected = ['REJECTED', 'CANCELLED'].includes(data?.status ?? '');
+
+  function stepLabel(step: string) {
+    if (step === 'RECEIVED' && data) {
+      if (lang === 'en') return data.type === 'EXCHANGE' ? 'Exchange received at workshop' : 'Return received at workshop';
+      return data.type === 'EXCHANGE' ? 'Cambio recibido en el taller' : 'Devolución recibida en el taller';
+    }
+    return LABELS[step]?.[lang] ?? step;
+  }
 
   function copyTracking() {
     if (!data?.trackingNumber) return;
@@ -315,7 +324,7 @@ export default function EstadoPage({ params }: { params: Promise<{ id: string }>
                   <div className="timeline-dot rejected">❌</div>
                   <div className="timeline-label">
                     <div className="timeline-title rejected">
-                      {LABELS[data.status]?.[lang] ?? data.status}
+                      {stepLabel(data.status)}
                     </div>
                   </div>
                 </div>
@@ -338,8 +347,13 @@ export default function EstadoPage({ params }: { params: Promise<{ id: string }>
                         </div>
                         <div className="timeline-label">
                           <div className={titleClass}>
-                            {LABELS[step]?.[lang] ?? step}
+                            {stepLabel(step)}
                           </div>
+                          {step === 'RECEIVED' && data.receivedAt && (
+                            <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.45)', marginTop: 2 }}>
+                              {new Date(data.receivedAt).toLocaleDateString(lang === 'es' ? 'es-ES' : 'en-GB', { day: 'numeric', month: 'long', year: 'numeric' })}
+                            </div>
+                          )}
                           {isActive && !isTerminal && (
                             <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.4)', marginTop: 2 }}>
                               {lang === 'es' ? 'En proceso…' : 'In progress…'}

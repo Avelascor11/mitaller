@@ -14,7 +14,7 @@ const GRAIN = "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg
 const SM: Record<string,{label:string;fg:string;bg:string;dot:string}> = {
   REQUESTED:     {label:'En espera',        fg:'#f0b429',bg:'rgba(240,180,41,0.13)', dot:'#f0b429'},
   LABEL_CREATED: {label:'Etiqueta enviada', fg:'#5b9bd5',bg:'rgba(91,155,213,0.13)', dot:'#5b9bd5'},
-  RECEIVED:      {label:'Por revisar',      fg:'#9b8cdb',bg:'rgba(155,140,219,0.13)',dot:'#9b8cdb'},
+  RECEIVED:      {label:'Recibida en taller', fg:'#9b8cdb',bg:'rgba(155,140,219,0.13)',dot:'#9b8cdb'},
   APPROVED:      {label:'Aprobada',         fg:'#3fb98a',bg:'rgba(63,185,138,0.13)', dot:'#3fb98a'},
   REJECTED:      {label:'Rechazada',        fg:'#e06a6a',bg:'rgba(224,106,106,0.13)',dot:'#e06a6a'},
   CANCELLED:     {label:'Cancelada',        fg:'#8A8A96',bg:'rgba(138,138,150,0.13)',dot:'#8A8A96'},
@@ -175,7 +175,8 @@ export default function Page({params}:{params:Promise<{id:string}>}) {
         const d=await r.json(); if(!r.ok) throw new Error(d.message??'Error'); ok('Etiqueta generada ✓');
       } else if(status==='RECEIVED'){
         const r=await fetch(`${API}/returns/${data.id}/received`,{method:'PATCH',headers:{'Content-Type':'application/json',...H(tok)}});
-        if(!r.ok) throw new Error((await r.json()).message??'Error'); ok('Marcada como recibida ✓');
+        if(!r.ok) throw new Error((await r.json()).message??'Error');
+        ok(`${data.type==='EXCHANGE'?'Cambio':'Devolución'} recibida en el taller ✓`);
       } else {
         const r=await fetch(`${API}/returns/${data.id}/status`,{method:'PATCH',headers:{'Content-Type':'application/json',...H(tok)},body:JSON.stringify({status})});
         if(!r.ok) throw new Error((await r.json()).message??'Error'); ok(`Estado → ${SM[status]?.label??status} ✓`);
@@ -433,7 +434,7 @@ export default function Page({params}:{params:Promise<{id:string}>}) {
                     </motion.div>
                   ):data.status==='RECEIVED'?(
                     <motion.div key="form" initial={{opacity:0,y:8}} animate={{opacity:1,y:0}} exit={{opacity:0,y:-8}} transition={{duration:.22}}>
-                      <p style={{margin:'0 0 12px',fontSize:13,color:T.t2}}>Paquete recibido. ¿El contenido es correcto?</p>
+                      <p style={{margin:'0 0 12px',fontSize:13,color:T.t2}}>{data.type==='EXCHANGE'?'Cambio':'Devolución'} recibido en el taller. ¿El contenido es correcto?</p>
                       <input type="text" placeholder="Notas de verificación (opcional)" value={vnotes} onChange={e=>setVnotes(e.target.value)} style={{...inp,marginBottom:10}}/>
                       <div style={{display:'flex',gap:8}}>
                         <motion.button whileHover={{y:-2}} whileTap={{scale:.97}} onClick={()=>verify('OK')} disabled={act}
@@ -450,7 +451,7 @@ export default function Page({params}:{params:Promise<{id:string}>}) {
                     <motion.div key="wait" initial={{opacity:0}} animate={{opacity:1}} exit={{opacity:0}}
                       style={{fontSize:13,color:T.faint,display:'flex',alignItems:'center',gap:8}}>
                       <span style={{fontSize:18}}>⏳</span>
-                      {data.receivedAt?`Recibido el ${new Date(data.receivedAt).toLocaleDateString('es-ES',{day:'2-digit',month:'long',year:'numeric'})}`:'Pendiente de recibir el paquete'}
+                      {data.receivedAt?`${data.type==='EXCHANGE'?'Cambio':'Devolución'} recibido en el taller el ${new Date(data.receivedAt).toLocaleDateString('es-ES',{day:'2-digit',month:'long',year:'numeric'})}`:'Pendiente de recibir en el taller'}
                     </motion.div>
                   )}
                 </AnimatePresence>
@@ -500,7 +501,7 @@ export default function Page({params}:{params:Promise<{id:string}>}) {
               <div style={{padding:'18px 20px'}}>
                 {([
                   {date:data.createdAt,  label:'Solicitud creada',          icon:'📋',active:true},
-                  {date:data.receivedAt, label:'Paquete recibido',           icon:'📦',active:!!data.receivedAt},
+                  {date:data.receivedAt, label:data.type==='EXCHANGE'?'Cambio recibido en el taller':'Devolución recibida en el taller', icon:'📦',active:!!data.receivedAt},
                   {date:data.verifiedAt, label:data.verificationStatus==='ISSUE'?'Verificación: incidencia':'Verificación correcta', icon:data.verificationStatus==='ISSUE'?'⚠️':'✅',active:!!data.verifiedAt},
                   {date:data.refundedAt, label:`Reembolso procesado${ref?` · ${ref.toFixed(2)}€`:''}`, icon:'💰',active:!!data.refundedAt},
                 ] as {date:string|null|undefined;label:string;icon:string;active:boolean}[]).map((ev,i)=>(

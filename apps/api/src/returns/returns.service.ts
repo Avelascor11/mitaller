@@ -656,6 +656,7 @@ export class ReturnsService {
       carrier: record.carrier,
       totalAmount: record.totalAmount,
       paidAt: record.paidAt,
+      receivedAt: record.receivedAt,
       items: record.items.map((ri) => ({
         title: ri.orderItem.title,
         variantTitle: ri.orderItem.variantTitle,

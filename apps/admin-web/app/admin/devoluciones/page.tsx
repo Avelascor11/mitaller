@@ -11,7 +11,7 @@ const FONT = "Inter, -apple-system, BlinkMacSystemFont, 'SF Pro Display', sans-s
 const STATUS_META: Record<string, { label: string; fg: string; bg: string; dot: string }> = {
   REQUESTED:     { label: 'En espera',        fg: '#f0b429', bg: 'rgba(240,180,41,0.12)',  dot: '#f0b429' },
   LABEL_CREATED: { label: 'Etiqueta enviada', fg: '#5b9bd5', bg: 'rgba(91,155,213,0.12)',  dot: '#5b9bd5' },
-  RECEIVED:      { label: 'Por revisar',      fg: '#9b8cdb', bg: 'rgba(155,140,219,0.12)', dot: '#9b8cdb' },
+  RECEIVED:      { label: 'Recibida en taller', fg: '#9b8cdb', bg: 'rgba(155,140,219,0.12)', dot: '#9b8cdb' },
   APPROVED:      { label: 'Aprobada',         fg: '#3fb98a', bg: 'rgba(63,185,138,0.12)',  dot: '#3fb98a' },
   REJECTED:      { label: 'Rechazada',        fg: '#e06a6a', bg: 'rgba(224,106,106,0.12)', dot: '#e06a6a' },
   CANCELLED:     { label: 'Cancelada',        fg: '#8A8A96', bg: 'rgba(138,138,150,0.12)', dot: '#8A8A96' },
@@ -323,7 +323,7 @@ export default function AdminDevolucionesPage() {
 
   const stats = [
     { label: 'En espera',   value: String(kpis.espera),  accent: '#f0b429', spark: daily.slice(-7) },
-    { label: 'Por revisar', value: String(kpis.revisar), accent: '#9b8cdb', spark: daily.slice(-7) },
+    { label: 'En taller', value: String(kpis.revisar), accent: '#9b8cdb', spark: daily.slice(-7) },
     { label: 'Reembolsado', value: `${kpis.refund.toFixed(0)}€`, accent: '#3fb98a', spark: daily.slice(-7) },
     { label: 'Últimos 30d', value: String(kpis.trans30), accent: '#5b9bd5', spark: daily.slice(-7) },
   ];
