@@ -30,7 +30,12 @@ export class ShopifyAdapter {
                 countryCodeV2
                 phone
               }
-    ` : '';
+    ` : `
+              shippingAddress {
+                province
+                countryCodeV2
+              }
+    `;
   }
 
   async importRecentOrders(): Promise<ImportedOrder[]> {
