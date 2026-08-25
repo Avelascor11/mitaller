@@ -184,6 +184,7 @@ export class SendcloudAdapter {
       status: response.parcel.status?.message ?? response.parcel.status?.id ?? 'UNKNOWN',
       statusId: response.parcel.status?.id,
       statusMessage: response.parcel.status?.message,
+      carrier: response.parcel.carrier?.name,
       trackingNumber: response.parcel.tracking_number,
       trackingUrl: response.parcel.tracking_url
     };

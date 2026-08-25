@@ -640,11 +640,12 @@ export class ReturnsService {
   }
 
   async getReturnStatus(id: string) {
-    const record = await this.prisma.return.findUnique({
+    let record = await this.prisma.return.findUnique({
       where: { id },
       include: { items: { include: { orderItem: true } } }
     });
     if (!record) throw new NotFoundException('Devolución no encontrada');
+    record = await this.refreshMissingReturnTracking(record);
     return {
       returnId: record.id,
       type: record.type,
@@ -687,12 +688,41 @@ export class ReturnsService {
   }
 
   async findOne(id: string) {
-    const record = await this.prisma.return.findUnique({
+    let record = await this.prisma.return.findUnique({
       where: { id },
       include: { order: true, items: { include: { orderItem: true } } }
     });
     if (!record) throw new NotFoundException(`Devolución ${id} no encontrada`);
+    record = await this.refreshMissingReturnTracking(record);
     return this.returnDetailDto(record);
+  }
+
+  private async refreshMissingReturnTracking<T extends { id: string; sendcloudReturnId: string | null; trackingNumber: string | null; carrier: string | null }>(record: T): Promise<T> {
+    if (!record.sendcloudReturnId || record.trackingNumber) return record;
+    try {
+      const live = await this.sendcloud.getTracking(record.sendcloudReturnId);
+      if (!live.trackingNumber && !live.carrier) return record;
+      const updated = await this.prisma.return.update({
+        where: { id: record.id },
+        data: {
+          trackingNumber: live.trackingNumber ?? record.trackingNumber,
+          carrier: live.carrier ?? record.carrier
+        },
+        include: this.returnIncludeFor(record)
+      });
+      return updated as unknown as T;
+    } catch (error) {
+      console.warn(`[ReturnsService] Could not refresh return tracking for ${record.id}:`, error instanceof Error ? error.message : error);
+      return record;
+    }
+  }
+
+  private returnIncludeFor(record: unknown) {
+    const value = record as { order?: unknown; items?: unknown[] };
+    return {
+      ...(value.order !== undefined ? { order: true } : {}),
+      ...(value.items !== undefined ? { items: { include: { orderItem: true } } } : {})
+    };
   }
 
   private returnDetailDto(record: Prisma.ReturnGetPayload<{ include: { order: true; items: { include: { orderItem: true } } } }>) {
