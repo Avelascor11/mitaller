@@ -42,7 +42,12 @@ const UI: Record<string, { es: string; en: string }> = {
   pendingPayment:{ es: 'Pendiente de pago',           en: 'Pending payment'            },
   payNow:        { es: 'Pagar ahora',                 en: 'Pay now'                    },
   copyTracking:  { es: 'Copiado',                     en: 'Copied'                     },
+  openCorreos:   { es: 'Abrir en Correos',            en: 'Open in Correos'            },
 };
+
+function correosTrackingUrl(tracking: string) {
+  return `https://www.correos.es/es/es/herramientas/localizador/envios/detalle?tracking-number=${encodeURIComponent(tracking)}`;
+}
 
 export default function EstadoPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
@@ -381,19 +386,34 @@ export default function EstadoPage({ params }: { params: Promise<{ id: string }>
 
               {/* Tracking number */}
               {data.trackingNumber && (
-                <div className="chip" onClick={copyTracking}>
-                  <span style={{ fontSize: 18 }}>📍</span>
-                  <div style={{ flex: 1 }}>
-                    <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.45)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 2 }}>
-                      {t('tracking')}{data.carrier ? ` · ${data.carrier}` : ''}
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                  <a
+                    className="chip"
+                    href={correosTrackingUrl(data.trackingNumber)}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    style={{ textDecoration: 'none' }}
+                  >
+                    <span style={{ fontSize: 18 }}>📍</span>
+                    <div style={{ flex: 1 }}>
+                      <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.45)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 2 }}>
+                        {t('tracking')}{data.carrier ? ` · ${data.carrier}` : ''}
+                      </div>
+                      <div style={{ fontSize: 15, fontWeight: 600, letterSpacing: 0.5 }}>
+                        {data.trackingNumber}
+                      </div>
                     </div>
-                    <div style={{ fontSize: 15, fontWeight: 600, letterSpacing: 0.5 }}>
-                      {data.trackingNumber}
-                    </div>
-                  </div>
-                  <span style={{ fontSize: 12, color: 'rgba(255,255,255,0.4)' }}>
-                    {copied ? '✓ ' + t('copyTracking') : '⎘'}
-                  </span>
+                    <span style={{ fontSize: 12, color: 'rgba(255,255,255,0.5)', fontWeight: 700 }}>
+                      {t('openCorreos')} ↗
+                    </span>
+                  </a>
+                  <button
+                    type="button"
+                    onClick={copyTracking}
+                    style={{ width: '100%', border: '1px solid rgba(255,255,255,0.12)', background: 'rgba(255,255,255,0.06)', color: 'rgba(255,255,255,0.72)', borderRadius: 12, padding: '10px 14px', fontSize: 13, fontWeight: 600, fontFamily: 'inherit', cursor: 'pointer' }}
+                  >
+                    {copied ? '✓ ' + t('copyTracking') : lang === 'es' ? 'Copiar seguimiento' : 'Copy tracking'}
+                  </button>
                 </div>
               )}
 

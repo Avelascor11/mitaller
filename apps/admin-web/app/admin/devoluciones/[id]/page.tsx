@@ -91,6 +91,10 @@ function addr(v:unknown):string {
     .filter((p):p is string=>typeof p==='string'&&!!p).join(', ')||'—';
 }
 
+function correosTrackingUrl(tracking:string){
+  return `https://www.correos.es/es/es/herramientas/localizador/envios/detalle?tracking-number=${encodeURIComponent(tracking)}`;
+}
+
 /* ─── SVG Icon ───────────────────────────────────────────── */
 const IC = {
   back:    'M19 12H5|M12 5l-7 7 7 7',
@@ -260,6 +264,7 @@ export default function Page({params}:{params:Promise<{id:string}>}) {
   const ref = data.shopifyRefundAmount??data.refundAmount??data.totalAmount;
   const inboundTracking = data.inboundTrackingNumber ?? data.trackingNumber;
   const inboundCarrier = data.inboundCarrier ?? data.carrier;
+  const inboundTrackingUrl = inboundTracking ? correosTrackingUrl(inboundTracking) : null;
 
   /* ══════════════════════════════════════════════════════ */
   return(
@@ -646,9 +651,17 @@ export default function Page({params}:{params:Promise<{id:string}>}) {
                         <span style={{fontSize:13,color:T.tx,fontWeight:500}}>{row.v}</span>
                       </div>
                     ))}
+                    {inboundTrackingUrl&&(
+                      <motion.a whileHover={{y:-2,boxShadow:`0 10px 22px -8px rgba(255,204,0,.55)`}}
+                        href={inboundTrackingUrl}
+                        target="_blank" rel="noopener noreferrer"
+                        style={{display:'flex',alignItems:'center',justifyContent:'center',gap:8,marginTop:12,padding:'10px',background:'#ffcd00',color:'#17120a',borderRadius:9,fontSize:13,fontWeight:750,textDecoration:'none',boxShadow:'0 5px 14px -7px rgba(255,204,0,.75)'}}>
+                        Ver seguimiento en Correos
+                      </motion.a>
+                    )}
                     <motion.button whileHover={{y:-1,borderColor:G+'66'}} whileTap={{scale:.97}}
                       onClick={copyTracking}
-                      style={{display:'flex',alignItems:'center',justifyContent:'center',gap:7,marginTop:12,width:'100%',padding:'9px',background:T.head,border:`1px solid ${T.border}`,color:T.tx,borderRadius:9,fontSize:12.5,fontWeight:600,cursor:'pointer',fontFamily:FONT}}>
+                      style={{display:'flex',alignItems:'center',justifyContent:'center',gap:7,marginTop:8,width:'100%',padding:'9px',background:T.head,border:`1px solid ${T.border}`,color:T.tx,borderRadius:9,fontSize:12.5,fontWeight:600,cursor:'pointer',fontFamily:FONT}}>
                       Copiar seguimiento
                     </motion.button>
                     {data.labelUrl&&(
