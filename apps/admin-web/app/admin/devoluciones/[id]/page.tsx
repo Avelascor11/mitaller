@@ -52,6 +52,7 @@ interface Ret {
   checkoutUrl?:string|null; labelUrl?:string|null; shopifyDraftOrderId?:string|null;
   exchangeOrderName?:string|null; exchangeOrderUrl?:string|null;
   trackingNumber?:string|null; carrier?:string|null; notes?:string|null;
+  inboundTrackingNumber?:string|null; inboundCarrier?:string|null;
   totalAmount?:number|null; refundAmount?:number|null;
   createdAt:string; updatedAt?:string; receivedAt?:string|null;
   verifiedAt?:string|null; verificationStatus?:string|null; verificationNotes?:string|null;
@@ -216,6 +217,17 @@ export default function Page({params}:{params:Promise<{id:string}>}) {
     reader.readAsDataURL(f);
   }
 
+  async function copyTracking(){
+    const tracking = data?.inboundTrackingNumber ?? data?.trackingNumber;
+    if(!tracking) return;
+    try{
+      await navigator.clipboard.writeText(tracking);
+      ok('Seguimiento copiado ✓');
+    }catch{
+      err('No se pudo copiar');
+    }
+  }
+
   /* ── shared styles ── */
   const inp:React.CSSProperties={padding:'9px 13px',borderRadius:9,border:`1px solid ${T.border}`,fontSize:13,color:T.tx,background:T.inp,outline:'none',width:'100%',fontFamily:FONT};
 
@@ -245,6 +257,8 @@ export default function Page({params}:{params:Promise<{id:string}>}) {
 
   const sm  = SM[data.status]??{label:data.status,fg:T.dim,bg:T.head,dot:T.faint};
   const ref = data.shopifyRefundAmount??data.refundAmount??data.totalAmount;
+  const inboundTracking = data.inboundTrackingNumber ?? data.trackingNumber;
+  const inboundCarrier = data.inboundCarrier ?? data.carrier;
 
   /* ══════════════════════════════════════════════════════ */
   return(
@@ -620,22 +634,27 @@ export default function Page({params}:{params:Promise<{id:string}>}) {
                 <span style={{fontSize:11.5,fontWeight:700,color:T.faint,letterSpacing:'.07em',textTransform:'uppercase'}}>Envío y seguimiento</span>
               </div>
               <div style={{padding:'12px 18px'}}>
-                {data.trackingNumber?(
+                {inboundTracking?(
                   <>
                     {[
-                      {l:'Tracking',v:<span style={{fontFamily:'monospace',fontSize:12,fontWeight:700}}>{data.trackingNumber}</span>},
-                      ...(data.carrier?[{l:'Transportista',v:data.carrier}]:[]),
+                      {l:'Seguimiento al taller',v:<span style={{fontFamily:'monospace',fontSize:12,fontWeight:700}}>{inboundTracking}</span>},
+                      ...(inboundCarrier?[{l:'Transportista',v:inboundCarrier}]:[]),
                     ].map((row,i)=>(
                       <div key={i} style={{display:'flex',justifyContent:'space-between',padding:'7px 0',borderBottom:`1px solid ${T.bs}`}}>
                         <span style={{fontSize:12,color:T.faint,fontWeight:500}}>{row.l}</span>
                         <span style={{fontSize:13,color:T.tx,fontWeight:500}}>{row.v}</span>
                       </div>
                     ))}
+                    <motion.button whileHover={{y:-1,borderColor:G+'66'}} whileTap={{scale:.97}}
+                      onClick={copyTracking}
+                      style={{display:'flex',alignItems:'center',justifyContent:'center',gap:7,marginTop:12,width:'100%',padding:'9px',background:T.head,border:`1px solid ${T.border}`,color:T.tx,borderRadius:9,fontSize:12.5,fontWeight:600,cursor:'pointer',fontFamily:FONT}}>
+                      Copiar seguimiento
+                    </motion.button>
                     {data.labelUrl&&(
                       <motion.a whileHover={{y:-2,boxShadow:`0 10px 22px -8px ${G}88`}}
                         href={data.labelUrl.startsWith('http')?data.labelUrl:`${API}${data.labelUrl}`}
                         target="_blank" rel="noopener noreferrer"
-                        style={{display:'flex',alignItems:'center',justifyContent:'center',gap:8,marginTop:12,padding:'10px',background:`linear-gradient(140deg,${G},${G2})`,color:'#fff',borderRadius:9,fontSize:13,fontWeight:600,textDecoration:'none',boxShadow:`0 5px 14px -5px ${G}88`}}>
+                        style={{display:'flex',alignItems:'center',justifyContent:'center',gap:8,marginTop:8,padding:'10px',background:`linear-gradient(140deg,${G},${G2})`,color:'#fff',borderRadius:9,fontSize:13,fontWeight:600,textDecoration:'none',boxShadow:`0 5px 14px -5px ${G}88`}}>
                         <Ic d={IC.down} s={14} c="#fff"/> Descargar etiqueta
                       </motion.a>
                     )}

@@ -1,4 +1,5 @@
 import { BadRequestException, ForbiddenException, Injectable, NotFoundException, ServiceUnavailableException } from '@nestjs/common';
+import type { Prisma } from '@prisma/client';
 import { ActivityService } from '../activity/activity.service';
 import { KlaviyoService } from '../klaviyo/klaviyo.service';
 import { OrdersService } from '../orders/orders.service';
@@ -690,7 +691,17 @@ export class ReturnsService {
       include: { order: true, items: { include: { orderItem: true } } }
     });
     if (!record) throw new NotFoundException(`Devolución ${id} no encontrada`);
-    return record;
+    return this.returnDetailDto(record);
+  }
+
+  private returnDetailDto(record: Prisma.ReturnGetPayload<{ include: { order: true; items: { include: { orderItem: true } } } }>) {
+    const fallbackLabelUrl = record.sendcloudReturnId ? `/returns/${record.id}/label` : null;
+    return {
+      ...record,
+      labelUrl: record.labelUrl ?? fallbackLabelUrl,
+      inboundTrackingNumber: record.trackingNumber,
+      inboundCarrier: record.carrier
+    };
   }
 
   async findByTracking(tracking: string) {

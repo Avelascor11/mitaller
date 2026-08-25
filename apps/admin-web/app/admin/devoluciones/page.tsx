@@ -331,7 +331,7 @@ export default function AdminDevolucionesPage() {
   const filtered = returns.filter(r => {
     const ms = filterStatus === 'ALL' || r.status === filterStatus;
     const q = search.toLowerCase();
-    const mq = !q || r.shopifyOrderNumber?.toLowerCase().includes(q) || r.customerName?.toLowerCase().includes(q) || r.customerEmail?.toLowerCase().includes(q);
+    const mq = !q || r.shopifyOrderNumber?.toLowerCase().includes(q) || r.customerName?.toLowerCase().includes(q) || r.customerEmail?.toLowerCase().includes(q) || r.trackingNumber?.toLowerCase().includes(q);
     return ms && mq;
   }).sort((a, b) => sortBy === 'status' ? a.status.localeCompare(b.status) : new Date(b.updatedAt ?? b.createdAt).getTime() - new Date(a.updatedAt ?? a.createdAt).getTime());
 
@@ -692,6 +692,11 @@ export default function AdminDevolucionesPage() {
                             <div>
                               <div style={{ fontSize: 13.5, fontWeight: 500, color: t.text }}>{ret.customerName}</div>
                               <div style={{ fontSize: 12, color: t.dim }}>{ret.customerEmail}</div>
+                              {ret.trackingNumber && (
+                                <div style={{ fontSize: 11, color: ACCENT, marginTop: 2, fontFamily: 'monospace', fontWeight: 650 }}>
+                                  {ret.trackingNumber}
+                                </div>
+                              )}
                             </div>
                           </div>
                           <div style={{ fontSize: 12.5, color: t.dim }}>{timeAgo(ret.updatedAt ?? ret.createdAt)}</div>
