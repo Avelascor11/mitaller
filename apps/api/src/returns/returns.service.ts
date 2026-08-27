@@ -66,6 +66,19 @@ export class ReturnsService {
         }
       }
     });
+    const loadOrderByNumber = () => this.prisma.order.findFirst({
+      where: {
+        orderNumber: { in: [raw, withoutHash, withHash] }
+      },
+      include: {
+        items: true,
+        shipments: { orderBy: { createdAt: 'desc' }, take: 1 },
+        returns: {
+          where: { status: { notIn: ['REJECTED', 'CANCELLED'] } },
+          include: { items: true }
+        }
+      }
+    });
 
     let order = await loadOrder();
 
@@ -76,9 +89,19 @@ export class ReturnsService {
           : null;
         const fetched = fetchedById ?? await this.shopify.fetchOrderByName(withoutHash);
         const fetchedEmail = (fetched?.customerEmail ?? '').toLowerCase().trim();
-        if (fetched && fetchedEmail === emailNorm) {
+        if (fetched && (fetchedEmail === emailNorm || !fetchedEmail)) {
+          const existingByNumber = await loadOrderByNumber();
+          if (!fetchedEmail && existingByNumber?.customerEmail && existingByNumber.customerEmail.toLowerCase().trim() !== emailNorm) {
+            return;
+          }
+          const importableOrder = fetchedEmail
+            ? fetched
+            : {
+              ...fetched,
+              customerEmail: emailNorm
+            };
           try {
-            await this.ordersService.upsertImportedOrder(fetched);
+            await this.ordersService.upsertImportedOrder(importableOrder);
           } catch (error) {
             console.error('[ReturnsService] Shopify order upsert failed during return lookup:', error);
           }
