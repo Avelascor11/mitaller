@@ -371,7 +371,7 @@ describe('SupplierOrderService', () => {
     }));
   });
 
-  it('resuelve camiseta rosa con Falk & Ross 5000 / 180.09 Azalea en lugar de B&C TG002', async () => {
+  it('resuelve camiseta rosa con Falk & Ross 5000 / 180.09 Light Pink en lugar de B&C TG002', async () => {
     const { service, prisma } = buildService({
       matrix: {
         groups: [{
@@ -404,7 +404,7 @@ describe('SupplierOrderService', () => {
           supplierSku: '180095003',
           styleCode: '180.09',
           productName: '5000 - Heavy Cotton Adult T-Shirt',
-          color: 'Azalea',
+          color: 'Light Pink',
           size: 'M',
           purchasePrice: null
         }
@@ -420,14 +420,14 @@ describe('SupplierOrderService', () => {
           orderNote: expect.stringContaining('Camiseta Gildan 180.09'),
           lines: [expect.objectContaining({
             supplierSku: '180095003',
-            name: 'Camiseta Azalea - M',
+            name: 'Camiseta Light Pink - M',
             quantity: 2
           })]
         }),
         lines: expect.objectContaining({
           create: [expect.objectContaining({
             supplierSku: '180095003',
-            name: 'Camiseta Azalea - M',
+            name: 'Camiseta Light Pink - M',
             supplierAvailableQuantity: 12,
             rawDataJson: expect.objectContaining({
               stockItemSupplierSku: 'FR-TS-PNK-M',

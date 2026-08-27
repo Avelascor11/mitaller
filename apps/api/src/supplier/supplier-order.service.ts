@@ -388,7 +388,7 @@ export class SupplierOrderService {
     if (expectedColor === 'SAND') return this.normalizedToken(articleColor).includes('mastic');
     if (expectedColor === 'CHARCOAL') return this.normalizedToken(articleColor).includes('dark grey') || this.normalizedToken(articleColor).includes('dark gray');
     if (expectedColor === 'TANGERINE') return this.normalizedToken(articleColor).includes('tangerine') || this.normalizedToken(articleColor).includes('orange');
-    if (expectedColor === 'ROSA') return this.normalizedToken(articleColor).includes('azalea');
+    if (expectedColor === 'ROSA') return this.normalizedToken(articleColor).includes('light pink');
     if (expectedColor === 'MARRON') return this.normalizedToken(articleColor).includes('dark chocolate');
     return this.normalizedColor(articleColor) === expectedColor;
   }
@@ -405,7 +405,7 @@ export class SupplierOrderService {
     if (normalized === 'SAND') return 'Mastic';
     if (normalized === 'CHARCOAL') return 'Dark Grey';
     if (normalized === 'TANGERINE') return 'Tangerine';
-    if (normalized === 'ROSA') return 'Azalea';
+    if (normalized === 'ROSA') return 'Light Pink';
     if (normalized === 'MARRON') return 'Dark Chocolate';
     return null;
   }
