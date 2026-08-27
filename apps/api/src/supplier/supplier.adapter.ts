@@ -455,7 +455,7 @@ export class SupplierAdapter {
       return cells.find((cell) => /^\d{6,}$/.test(cell.replace(/\D/g, '')))?.trim() ?? null;
     }
     if (candidates.some((candidate) => ['style', 'stylecode', 'productnumber', 'suppliercode'].includes(this.normalizeHeader(candidate)))) {
-      return joined.match(/\b(TG002|WG005|2000|032\.?42|102\.?09|237\.?42|240\.?42|290\.?09)\b/i)?.[1] ?? null;
+      return joined.match(/\b(TG002|WG002|WG005|2000|032\.?42|102\.?09|208\.?42|237\.?42|240\.?42|290\.?09)\b/i)?.[1] ?? null;
     }
     return null;
   }
@@ -486,7 +486,7 @@ export class SupplierAdapter {
   }
 
   private inferStyleCode(value: string) {
-    return value.match(/\b(TG002|WG005|2000|032\.?42|102\.?09|237\.?42|240\.?42|290\.?09)\b/i)?.[1] ?? null;
+    return value.match(/\b(TG002|WG002|WG005|2000|032\.?42|102\.?09|208\.?42|237\.?42|240\.?42|290\.?09)\b/i)?.[1] ?? null;
   }
 
   private inferBrand(value: string) {

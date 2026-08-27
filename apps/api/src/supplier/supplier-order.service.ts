@@ -11,13 +11,12 @@ const OPEN_SUPPLIER_ORDER_STATUSES = ['SUBMITTED'];
 const FALKROSS_PRICE_NOTE = [
   'Camiseta 032.42 -> 2.73 EUR',
   'Camiseta Gildan 180.09 -> revisar tarifa Falk & Ross',
-  'Sudadera 290.09 -> 7.30 EUR',
-  'Sudadera 237.42 -> 6.60 EUR',
-  'Sudadera 240.42 -> 6.00 EUR'
+  'Sudadera 208.42 / WG002 -> 10.75 EUR'
 ].join(' | ');
 
 const FALKROSS_STYLE_PRICES: Record<string, string> = {
   '03242': '2.73',
+  '20842': '10.75',
   '23742': '6.60',
   '24042': '6.00',
   '29009': '7.30'
@@ -417,7 +416,7 @@ export class SupplierOrderService {
   }
 
   private expectedFalkRossStyles(garmentType: string, color: string) {
-    if (garmentType === 'SUDADERA') return ['WG005', '237.42', '23742'];
+    if (garmentType === 'SUDADERA') return ['WG002', '208.42', '20842'];
     if (['MARRON', 'ROSA', 'TANGERINE'].includes(this.normalizedColor(color))) return ['5000', '180.09', '18009'];
     return ['TG002', '032.42', '03242'];
   }
@@ -425,6 +424,7 @@ export class SupplierOrderService {
   private falkRossStyleKey(value: string) {
     const normalized = this.normalizedToken(value).replace(/\s/g, '');
     if (normalized.includes('03242') || normalized.includes('tg002')) return '03242';
+    if (normalized.includes('20842') || normalized.includes('wg002')) return '20842';
     if (normalized.includes('23742') || normalized.includes('wg005')) return '23742';
     if (normalized.includes('24042')) return '24042';
     if (normalized.includes('29009')) return '29009';

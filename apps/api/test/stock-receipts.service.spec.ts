@@ -119,12 +119,12 @@ describe('StockReceiptsService', () => {
         '#E220 T-Shirt',
         '03242 TG002 Mastic XL 1',
         '#E220 T-Shirt',
-        '23742 WG005 White M 1',
-        'ID.333 Hoodie',
-        '23742 WG005 Black M 1',
-        'ID.333 Hoodie',
-        '23742 WG005 Orange M 1',
-        'ID.333 Hoodie'
+        '20842 WG002 White M 1',
+        'Iconic 195 Hoodie',
+        '20842 WG002 Black M 1',
+        'Iconic 195 Hoodie',
+        '20842 WG002 Orange M 1',
+        'Iconic 195 Hoodie'
       ].join('\n')
     });
 
@@ -156,10 +156,10 @@ describe('StockReceiptsService', () => {
 
     await service.scanReceipt({
       rawText: [
-        '23742',
-        'WG005 White M',
+        '20842',
+        'WG002 White M',
         '1',
-        'ID.333 Hoodie'
+        'Iconic 195 Hoodie'
       ].join('\n')
     });
 

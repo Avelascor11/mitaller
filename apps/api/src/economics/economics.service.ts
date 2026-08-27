@@ -387,7 +387,7 @@ export class EconomicsService {
 
   private estimatedBlankCost(garmentType?: string, color?: string, name?: string) {
     const text = this.normalize(`${garmentType ?? ''} ${color ?? ''} ${name ?? ''}`);
-    if (/sudadera/.test(text)) return this.moneyConfig('GROWTH_SWEATSHIRT_UNIT_COST', 8.05);
+    if (/sudadera/.test(text)) return this.moneyConfig('GROWTH_SWEATSHIRT_UNIT_COST', 10.75);
     if (/boxy/.test(text)) return this.moneyConfig('GROWTH_BOXY_TSHIRT_UNIT_COST', 4.9);
     if (/camiseta|shirt/.test(text)) return this.moneyConfig(/marron|rosa|azalea|chocolate/.test(text) ? 'GROWTH_GILDAN_TSHIRT_UNIT_COST' : 'GROWTH_TSHIRT_UNIT_COST', /marron|rosa|azalea|chocolate/.test(text) ? 2.84 : 3.19);
     return this.moneyConfig('GROWTH_OTHER_PURCHASE_UNIT_COST', 0);
@@ -1401,7 +1401,7 @@ export class EconomicsService {
       print = 2.25 + 0.45; // siempre DTF
       description = 'Bañador (DTF espalda+frontal)';
     } else if (isSudadera) {
-      blank = 6.60;
+      blank = 10.75;
       if (isBlack) {
         print = 2.25 + 0.45;
         description = 'Sudadera negra (DTF espalda+frontal)';

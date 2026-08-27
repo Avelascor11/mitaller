@@ -102,7 +102,7 @@ Mitaller usa GoCardless Bank Account Data para conectar N26 por Open Banking/PSD
 - `GROWTH_MAX_DAILY_ADS_SCALE_EUR`: subida maxima diaria recomendada para Ads. Por defecto `50`.
 - `GROWTH_TSHIRT_UNIT_COST`: coste estimado de camiseta para decisiones de caja. Por defecto `3.19`.
 - `GROWTH_GILDAN_TSHIRT_UNIT_COST`: coste estimado de camisetas Gildan marron/rosa. Por defecto `2.84`.
-- `GROWTH_SWEATSHIRT_UNIT_COST`: coste estimado de sudadera para decisiones de caja. Por defecto `8.05`.
+- `GROWTH_SWEATSHIRT_UNIT_COST`: coste estimado de sudadera para decisiones de caja. Por defecto `10.75`.
 
 ## UGC / videos de influencers
 

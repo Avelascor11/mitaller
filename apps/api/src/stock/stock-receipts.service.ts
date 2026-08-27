@@ -180,7 +180,8 @@ export class StockReceiptsService {
       normalized === 'descripcion' ||
       normalized === 'cantidad' ||
       normalized === 'e220 t shirt' ||
-      normalized === 'id 333 hoodie';
+      normalized === 'id 333 hoodie' ||
+      normalized === 'iconic 195 hoodie';
   }
 
   private addParsedResult(
@@ -201,11 +202,11 @@ export class StockReceiptsService {
   }
 
   private parsePackzettelLine(line: string, stockItems: StockItem[]) {
-    const match = line.match(/^\d{4,}\s+(TG002|WG005)\s+(.+?)\s+(2XL|XXL|XL|L|M|S)\s+([1-9]\d{0,2})$/i);
+    const match = line.match(/^\d{4,}\s+(TG002|WG002|WG005)\s+(.+?)\s+(2XL|XXL|XL|L|M|S)\s+([1-9]\d{0,2})$/i);
     if (!match) return null;
 
     const [, code, colorText, sizeText, quantityText] = match;
-    const kind = code.toUpperCase() === 'WG005' ? 'sudadera' : 'camiseta';
+    const kind = code.toUpperCase().startsWith('WG') ? 'sudadera' : 'camiseta';
     const color = this.detectColor(this.normalize(colorText));
     const size = this.normalizeSize(sizeText);
     const quantity = Number(quantityText);
@@ -280,7 +281,7 @@ export class StockReceiptsService {
 
   private detectKind(value: string) {
     if (value.includes('banador') || value.includes('swim') || value.includes('bikini')) return 'banador';
-    if (value.includes('sudadera') || value.includes('hoodie') || /\bwg005\b/.test(value)) return 'sudadera';
+    if (value.includes('sudadera') || value.includes('hoodie') || /\bwg(?:002|005)\b/.test(value)) return 'sudadera';
     if (value.includes('camiseta') || value.includes('shirt') || value.includes('tshirt') || value.includes('t shirt') || /\btg002\b/.test(value)) return 'camiseta';
     return undefined;
   }
@@ -293,7 +294,7 @@ export class StockReceiptsService {
     const text = this.normalize(`${stockItem.name} ${stockItem.sku} ${stockItem.supplierSku ?? ''}`);
     if (this.isManualOnlyStockItemText(text)) return false;
     if (text.includes('banador') || text.includes('swim') || text.includes('bikini')) return false;
-    return text.includes('camiseta') || text.includes('sudadera') || /\btg002\b/.test(text) || /\bwg005\b/.test(text);
+    return text.includes('camiseta') || text.includes('sudadera') || /\btg002\b/.test(text) || /\bwg(?:002|005)\b/.test(text);
   }
 
   private isManualOnlyStockItemText(text: string) {

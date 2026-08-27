@@ -237,7 +237,7 @@ describe('SupplierOrderService', () => {
     }));
   });
 
-  it('resuelve sudadera azul como Royal Blue y no como Nordic Blue', async () => {
+  it('resuelve sudaderas con Falk & Ross WG002 / 208.42 y precio acordado', async () => {
     const { service, prisma } = buildService({
       matrix: {
         groups: [{
@@ -259,25 +259,25 @@ describe('SupplierOrderService', () => {
       },
       supplierArticles: [
         {
-          supplierSku: '237422142',
-          styleCode: '237.42',
-          productName: 'WG005 - ID.333 Hoodie',
+          supplierSku: '208422142',
+          styleCode: '208.42',
+          productName: 'WG002 - Iconic 195 Hoodie',
           color: 'Nordic Blue',
           size: 'S',
           purchasePrice: null
         },
         {
-          supplierSku: '237423002',
-          styleCode: '237.42',
-          productName: 'WG005 - ID.333 Hoodie',
+          supplierSku: '208423002',
+          styleCode: '208.42',
+          productName: 'WG002 - Iconic 195 Hoodie',
           color: 'Royal Blue',
           size: 'S',
           purchasePrice: null
         }
       ],
       supplierStocks: [
-        { supplierSku: '237422142', availableQuantity: 0, stockSpain24h: 0, stockCentral3To5Days: 0, stockSupplier5To20Days: 0 },
-        { supplierSku: '237423002', availableQuantity: 134, stockSpain24h: 36, stockCentral3To5Days: 98, stockSupplier5To20Days: 1500 }
+        { supplierSku: '208422142', availableQuantity: 0, stockSpain24h: 0, stockCentral3To5Days: 0, stockSupplier5To20Days: 0 },
+        { supplierSku: '208423002', availableQuantity: 134, stockSpain24h: 36, stockCentral3To5Days: 98, stockSupplier5To20Days: 1500 }
       ]
     });
 
@@ -286,18 +286,21 @@ describe('SupplierOrderService', () => {
     expect(prisma.supplierPurchaseOrder.create).toHaveBeenCalledWith(expect.objectContaining({
       data: expect.objectContaining({
         rawRequestJson: expect.objectContaining({
-          lines: [expect.objectContaining({ supplierSku: '237423002', quantity: 1 })]
+          orderNote: expect.stringContaining('Sudadera 208.42 / WG002 -> 10.75 EUR'),
+          lines: [expect.objectContaining({ supplierSku: '208423002', quantity: 1 })]
         }),
         lines: expect.objectContaining({
           create: [expect.objectContaining({
-            supplierSku: '237423002',
+            supplierSku: '208423002',
             supplierAvailableQuantity: 134,
             supplierStockSpain24h: 36,
             supplierStockCentral3To5Days: 98,
             supplierStockSupplier5To20Days: 1500,
+            purchasePrice: '10.75',
             rawDataJson: expect.objectContaining({
-              resolvedSupplierSku: '237423002',
-              resolvedStyleCode: '237.42'
+              resolvedSupplierSku: '208423002',
+              resolvedStyleCode: '208.42',
+              expectedProductNumber: '208.42'
             })
           })]
         })
