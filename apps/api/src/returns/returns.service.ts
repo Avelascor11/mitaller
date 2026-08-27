@@ -23,6 +23,11 @@ const RETURN_REASONS: Record<string, string> = {
 const VALID_REASONS = Object.keys(RETURN_REASONS);
 const VALID_TYPES = ['RETURN', 'EXCHANGE'];
 
+const validDateOrNull = (date?: Date | null) => {
+  if (!date) return null;
+  return Number.isFinite(date.getTime()) ? date : null;
+};
+
 @Injectable()
 export class ReturnsService {
   constructor(
@@ -172,11 +177,15 @@ export class ReturnsService {
     if (shipment?.trackingNumber) {
       deliveredAt = await this.sendcloud.getDeliveryDate(order.orderNumber);
     }
+    deliveredAt = validDateOrNull(deliveredAt);
     if (deliveredAt && deliveredAt.getTime() > Date.now()) {
       deliveredAt = null;
     }
     // fallback: use preparedAt or orderedAt
-    const referenceDate = deliveredAt ?? order.preparedAt ?? order.orderedAt;
+    const referenceDate = deliveredAt
+      ?? validDateOrNull(order.preparedAt)
+      ?? validDateOrNull(order.orderedAt)
+      ?? new Date();
     const daysSince = (Date.now() - referenceDate.getTime()) / (1000 * 60 * 60 * 24);
     const effectiveWindow = config.windowDays + exceptions.extendDays;
     const windowExpired = !exceptions.acceptExpired && daysSince > effectiveWindow;
