@@ -1,8 +1,9 @@
 import { execFile } from 'node:child_process';
-import { copyFile, mkdir, stat, writeFile } from 'node:fs/promises';
+import { copyFile, mkdir, readFile, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { extname, join } from 'node:path';
 import { promisify } from 'node:util';
+import { deflateSync, inflateSync } from 'node:zlib';
 
 const execFileAsync = promisify(execFile);
 
@@ -18,6 +19,7 @@ const PACKING_LETTER_ENABLED = String(process.env.PACKING_LETTER_ENABLED ?? 'fal
 const PACKING_LETTER_PRINTER_NAME = process.env.PACKING_LETTER_PRINTER_NAME ?? '';
 const PACKING_LETTER_PAPER_SIZE = process.env.PACKING_LETTER_PAPER_SIZE ?? 'A4';
 const PACKING_LETTER_PRINT_SETTINGS = process.env.PACKING_LETTER_PRINT_SETTINGS ?? 'fit';
+const PACKING_LETTER_LOGO_PATH = process.env.PACKING_LETTER_LOGO_PATH ?? '';
 const DTF_PRINT_ENABLED = String(process.env.DTF_PRINT_ENABLED ?? 'false').toLowerCase() === 'true';
 const DTF_PRINTER_NAME = process.env.DTF_PRINTER_NAME ?? '';
 const DTF_HOT_FOLDER = process.env.DTF_HOT_FOLDER ?? '';
@@ -206,12 +208,13 @@ async function createPackingLetterPdf(shipment) {
   await mkdir(dir, { recursive: true });
   const cleanOrder = (shipment.orderNumber || 'pedido').replace(/[^a-zA-Z0-9_-]/g, '');
   const file = join(dir, `${cleanOrder || 'pedido'}-speedwear-carta.pdf`);
-  const pdf = buildPackingLetterPdf(shipment);
+  const logoImage = await loadPackingLetterLogo();
+  const pdf = buildPackingLetterPdf(shipment, logoImage);
   await writeFile(file, pdf);
   return file;
 }
 
-function buildPackingLetterPdf(shipment) {
+function buildPackingLetterPdf(shipment, logoImage = null) {
   const width = 595.28;
   const height = 841.89;
   const content = [];
@@ -219,6 +222,7 @@ function buildPackingLetterPdf(shipment) {
     width,
     height,
     stream: content,
+    images: logoImage ? [['/Im1', logoImage]] : [],
     fonts: [
       ['/F1', 'Helvetica'],
       ['/F2', 'Helvetica-Bold'],
@@ -226,63 +230,63 @@ function buildPackingLetterPdf(shipment) {
     ]
   };
 
-  drawRect(page, 42, 42, width - 84, height - 84, null, [0.12, 0.12, 0.12], 1);
-  drawRect(page, 42, height - 92, width - 84, 8, [0.89, 0.09, 0.08]);
-  drawText(page, 'SPEEDWEAR', 64, height - 138, 30, 'F2', [0.04, 0.04, 0.04]);
-  drawText(page, `Pedido ${shipment.orderNumber || ''}`, width - 64, height - 128, 10, 'F2', [0.89, 0.09, 0.08], 'right');
-  drawText(page, 'Preparado en el taller', width - 64, height - 144, 9, 'F1', [0.35, 0.35, 0.35], 'right');
-
   const firstName = firstCustomerName(shipment.customerName);
-  drawText(page, `Hola ${firstName},`, 64, height - 205, 24, 'F2');
 
-  const body = [
-    `Tu pedido ${shipment.orderNumber || ''} ya está listo para salir del taller.`,
-    'No es solo una etiqueta y una bolsa: aquí dentro va una pieza preparada una a una, con el mismo cuidado con el que nos gustaría recibirla a nosotros.',
-    'Gracias por apoyar una marca pequeña que está construyendo todo esto desde cero.'
-  ];
+  drawRect(page, 32, 32, width - 64, height - 64, null, [0, 0, 0], 1.4);
+  drawRect(page, 48, 48, width - 96, height - 96, null, [0.68, 0.68, 0.68], 0.6);
+  drawRect(page, 48, height - 200, width - 96, 152, [0, 0, 0]);
+  drawRect(page, 48, height - 72, width - 96, 7, [1, 1, 1]);
+  drawRect(page, 48, height - 93, width - 96, 3, [1, 1, 1]);
 
-  let y = height - 245;
-  for (const paragraph of body) {
-    y = drawWrappedText(page, paragraph, 64, y, 468, 13, 20, 'F1', [0.13, 0.13, 0.13]) - 13;
+  if (logoImage) {
+    const logoW = 104;
+    const logoH = logoW * logoImage.height / logoImage.width;
+    drawImage(page, '/Im1', 66, height - 170, logoW, logoH);
+  } else {
+    drawText(page, 'SPEEDWEAR', 66, height - 136, 22, 'F2', [1, 1, 1]);
   }
 
-  y -= 10;
-  drawRect(page, 64, y - 86, 468, 86, [0.97, 0.97, 0.96], [0.82, 0.82, 0.8], 1);
-  drawText(page, 'DENTRO VA', 84, y - 28, 9, 'F2', [0.89, 0.09, 0.08]);
-  const itemSummary = packingItemSummary(shipment);
-  drawWrappedText(page, itemSummary, 84, y - 52, 428, 12, 17, 'F1', [0.16, 0.16, 0.16]);
+  drawText(page, 'ESTO YA ESTA LISTO', width - 66, height - 110, 14, 'F2', [1, 1, 1], 'right');
+  drawText(page, shipment.orderNumber || 'PEDIDO', width - 66, height - 138, 31, 'F2', [1, 1, 1], 'right');
+  drawText(page, 'PREPARADO UNO A UNO', width - 66, height - 164, 10, 'F2', [0.76, 0.76, 0.76], 'right');
 
-  y -= 130;
-  drawWrappedText(page, 'Si te gusta cuando llegue, nos ayuda muchísimo que nos etiquetes en Instagram: @speedwear.es', 64, y, 468, 13, 20, 'F2', [0.04, 0.04, 0.04]);
+  drawText(page, 'HOLA', 66, height - 244, 18, 'F2', [0, 0, 0]);
+  drawRect(page, 66, height - 330, width - 132, 66, [0, 0, 0]);
+  drawCenteredText(page, firstName, width / 2, height - 307, fitFontSize(firstName, width - 168, 42), 'F2', [1, 1, 1]);
+  drawWrappedText(page, 'TU PEDIDO ACABA DE SALIR DE NUESTRA MESA DE TRABAJO.', 66, height - 366, 410, 11, 14, 'F2', [0, 0, 0]);
 
-  y -= 72;
-  drawText(page, 'Nos vemos en la pista,', 64, y, 14, 'F1');
-  drawText(page, 'Angel / SpeedWear', 64, y - 34, 21, 'F3', [0.04, 0.04, 0.04]);
+  drawRect(page, 66, height - 428, 218, 42, [0, 0, 0]);
+  drawCenteredText(page, 'HECHO EN EL TALLER', 175, height - 412, 10.6, 'F2', [1, 1, 1]);
+  drawRect(page, 303, height - 428, 235, 42, null, [0, 0, 0], 1);
+  drawCenteredText(page, 'LISTO PARA SALIR', 420.5, height - 412, 10.6, 'F2', [0, 0, 0]);
 
-  drawText(page, 'THANKS FOR RIDING WITH US', 64, 96, 10, 'F2', [0.89, 0.09, 0.08]);
-  drawText(page, 'speedwear.es', width - 64, 96, 10, 'F2', [0.04, 0.04, 0.04], 'right');
+  const body = [
+    'SPEEDWEAR NACE DE UNA IDEA SIMPLE: ROPA PARA QUIEN VIVE EL MOTOR COMO PARTE DE SU HISTORIA.',
+    'NO HACEMOS MERCH RÁPIDA. PREPARAMOS PIEZAS CON IDENTIDAD, REVISADAS UNA A UNA EN EL TALLER.'
+  ];
+
+  let y = height - 474;
+  for (const paragraph of body) {
+    y = drawWrappedText(page, paragraph, 66, y, 440, 9.6, 14.5, 'F2', [0.08, 0.08, 0.08]) - 10;
+  }
+
+  drawRect(page, 66, 212, width - 132, 82, [0, 0, 0]);
+  drawCenteredText(page, 'SI TE GUSTA, ETIQUÉTANOS', width / 2, 258, 15, 'F2', [1, 1, 1]);
+  drawCenteredText(page, '@SPEEDWEAR.ES', width / 2, 230, 24, 'F2', [1, 1, 1]);
+
+  drawText(page, 'NOS VEMOS EN LA PISTA,', 66, 145, 11.5, 'F2', [0, 0, 0]);
+  drawText(page, 'ÁNGEL / SPEEDWEAR', 66, 108, 24, 'F2', [0, 0, 0]);
+
+  drawText(page, 'GRACIAS POR APOYAR UNA MARCA PEQUEÑA.', 66, 75, 9.5, 'F2', [0, 0, 0]);
+  drawText(page, 'SPEEDWEAR.ES', width - 66, 75, 9.5, 'F2', [0, 0, 0], 'right');
 
   return writePdfDocument(page);
 }
 
 function firstCustomerName(name) {
   const clean = String(name || '').trim();
-  if (!clean || /^cliente shopify$/i.test(clean)) return 'rider';
-  return clean.split(/\s+/)[0];
-}
-
-function packingItemSummary(shipment) {
-  const items = Array.isArray(shipment.items) ? shipment.items : [];
-  const summary = items
-    .slice(0, 4)
-    .map((item) => {
-      const title = [item.title, item.variantTitle].filter(Boolean).join(' - ');
-      return `${item.quantity || 1}x ${title || 'Producto SpeedWear'}`;
-    })
-    .join('  /  ');
-  if (!summary) return `${shipment.itemCount || 1} articulo(s) SpeedWear preparado(s) para ti.`;
-  if (items.length > 4) return `${summary}  /  +${items.length - 4} mas`;
-  return summary;
+  if (!clean || /^cliente shopify$/i.test(clean)) return 'RIDER';
+  return clean.split(/\s+/)[0].toUpperCase();
 }
 
 function drawText(page, text, x, y, size = 12, font = 'F1', color = [0, 0, 0], align = 'left') {
@@ -299,6 +303,17 @@ function drawText(page, text, x, y, size = 12, font = 'F1', color = [0, 0, 0], a
     const width = approxTextWidth(text, size);
     page.stream.splice(page.stream.length - 2, 1, `${x - width} ${y} Td (${safe}) Tj`);
   }
+}
+
+function drawCenteredText(page, text, centerX, y, size = 12, font = 'F1', color = [0, 0, 0]) {
+  const width = approxTextWidth(text, size);
+  drawText(page, text, centerX - width / 2, y, size, font, color);
+}
+
+function fitFontSize(text, maxWidth, preferredSize) {
+  let size = preferredSize;
+  while (size > 14 && approxTextWidth(text, size) > maxWidth) size -= 1;
+  return size;
 }
 
 function drawWrappedText(page, text, x, y, maxWidth, size = 12, lineHeight = 16, font = 'F1', color = [0, 0, 0]) {
@@ -320,6 +335,139 @@ function drawRect(page, x, y, width, height, fill = null, stroke = null, lineWid
   page.stream.push('Q');
 }
 
+function drawImage(page, name, x, y, width, height) {
+  page.stream.push(
+    'q',
+    `${formatNumber(width)} 0 0 ${formatNumber(height)} ${formatNumber(x)} ${formatNumber(y)} cm`,
+    `${name} Do`,
+    'Q'
+  );
+}
+
+async function loadPackingLetterLogo() {
+  if (!PACKING_LETTER_LOGO_PATH) return null;
+  try {
+    const bytes = await readFile(PACKING_LETTER_LOGO_PATH);
+    return pngToGrayscaleImage(bytes, 760);
+  } catch (error) {
+    console.error('Could not load packing letter logo:', error instanceof Error ? error.message : error);
+    return null;
+  }
+}
+
+function pngToGrayscaleImage(bytes, maxWidth) {
+  const png = parsePng(bytes);
+  if (png.bitDepth !== 8 || ![0, 2, 4, 6].includes(png.colorType)) {
+    throw new Error(`Unsupported PNG format bitDepth=${png.bitDepth} colorType=${png.colorType}`);
+  }
+  const channels = ({ 0: 1, 2: 3, 4: 2, 6: 4 })[png.colorType];
+  const raw = unfilterPng(png.width, png.height, channels, inflateSync(png.data));
+  const bbox = pngAlphaBBox(raw, png.width, png.height, channels);
+  const crop = bbox ?? { x: 0, y: 0, width: png.width, height: png.height };
+  const targetWidth = Math.min(maxWidth, crop.width);
+  const targetHeight = Math.max(1, Math.round(crop.height * targetWidth / crop.width));
+  const pixels = Buffer.alloc(targetWidth * targetHeight);
+  for (let y = 0; y < targetHeight; y += 1) {
+    const sy = crop.y + Math.min(crop.height - 1, Math.floor(y * crop.height / targetHeight));
+    for (let x = 0; x < targetWidth; x += 1) {
+      const sx = crop.x + Math.min(crop.width - 1, Math.floor(x * crop.width / targetWidth));
+      const source = (sy * png.width + sx) * channels;
+      const r = raw[source];
+      const g = channels >= 3 ? raw[source + 1] : r;
+      const b = channels >= 3 ? raw[source + 2] : r;
+      const a = channels === 4 ? raw[source + 3] : channels === 2 ? raw[source + 1] : 255;
+      const lum = Math.round(0.299 * r + 0.587 * g + 0.114 * b);
+      pixels[y * targetWidth + x] = Math.round((lum * a + 255 * (255 - a)) / 255);
+    }
+  }
+  return { width: targetWidth, height: targetHeight, data: deflateSync(pixels) };
+}
+
+function parsePng(bytes) {
+  const signature = bytes.subarray(0, 8).toString('hex');
+  if (signature !== '89504e470d0a1a0a') throw new Error('Invalid PNG signature');
+  let offset = 8;
+  let width = 0;
+  let height = 0;
+  let bitDepth = 0;
+  let colorType = 0;
+  const idat = [];
+  while (offset < bytes.length) {
+    const length = bytes.readUInt32BE(offset);
+    const type = bytes.subarray(offset + 4, offset + 8).toString('ascii');
+    const data = bytes.subarray(offset + 8, offset + 8 + length);
+    if (type === 'IHDR') {
+      width = data.readUInt32BE(0);
+      height = data.readUInt32BE(4);
+      bitDepth = data[8];
+      colorType = data[9];
+    } else if (type === 'IDAT') {
+      idat.push(data);
+    } else if (type === 'IEND') {
+      break;
+    }
+    offset += length + 12;
+  }
+  return { width, height, bitDepth, colorType, data: Buffer.concat(idat) };
+}
+
+function unfilterPng(width, height, channels, inflated) {
+  const rowBytes = width * channels;
+  const output = Buffer.alloc(rowBytes * height);
+  let inputOffset = 0;
+  for (let y = 0; y < height; y += 1) {
+    const filter = inflated[inputOffset];
+    inputOffset += 1;
+    const rowOffset = y * rowBytes;
+    for (let x = 0; x < rowBytes; x += 1) {
+      const raw = inflated[inputOffset + x];
+      const left = x >= channels ? output[rowOffset + x - channels] : 0;
+      const up = y > 0 ? output[rowOffset - rowBytes + x] : 0;
+      const upLeft = y > 0 && x >= channels ? output[rowOffset - rowBytes + x - channels] : 0;
+      let value = raw;
+      if (filter === 1) value = raw + left;
+      else if (filter === 2) value = raw + up;
+      else if (filter === 3) value = raw + Math.floor((left + up) / 2);
+      else if (filter === 4) value = raw + paeth(left, up, upLeft);
+      else if (filter !== 0) throw new Error(`Unsupported PNG filter ${filter}`);
+      output[rowOffset + x] = value & 0xff;
+    }
+    inputOffset += rowBytes;
+  }
+  return output;
+}
+
+function paeth(a, b, c) {
+  const p = a + b - c;
+  const pa = Math.abs(p - a);
+  const pb = Math.abs(p - b);
+  const pc = Math.abs(p - c);
+  if (pa <= pb && pa <= pc) return a;
+  if (pb <= pc) return b;
+  return c;
+}
+
+function pngAlphaBBox(raw, width, height, channels) {
+  if (![2, 4].includes(channels)) return null;
+  let minX = width;
+  let minY = height;
+  let maxX = -1;
+  let maxY = -1;
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      const alpha = raw[(y * width + x) * channels + channels - 1];
+      if (alpha > 12) {
+        if (x < minX) minX = x;
+        if (y < minY) minY = y;
+        if (x > maxX) maxX = x;
+        if (y > maxY) maxY = y;
+      }
+    }
+  }
+  if (maxX < minX || maxY < minY) return null;
+  return { x: minX, y: minY, width: maxX - minX + 1, height: maxY - minY + 1 };
+}
+
 function wrapText(text, maxWidth, size) {
   const words = text.split(/\s+/).filter(Boolean);
   const lines = [];
@@ -338,7 +486,7 @@ function wrapText(text, maxWidth, size) {
 }
 
 function approxTextWidth(text, size) {
-  return String(text ?? '').length * size * 0.52;
+  return String(text ?? '').length * size * 0.62;
 }
 
 function pdfEscape(text) {
@@ -364,10 +512,13 @@ function writePdfDocument(page) {
   const pagesId = addObject('<< /Type /Pages /Kids [3 0 R] /Count 1 >>');
   const pageId = addObject('');
   const fontIds = page.fonts.map(([, baseFont]) => addObject(`<< /Type /Font /Subtype /Type1 /BaseFont /${baseFont} /Encoding /WinAnsiEncoding >>`));
+  const imageIds = (page.images ?? []).map(([, image]) => addObject(`<< /Type /XObject /Subtype /Image /Width ${image.width} /Height ${image.height} /ColorSpace /DeviceGray /BitsPerComponent 8 /Filter /FlateDecode /Length ${image.data.length} >>\nstream\n${image.data.toString('binary')}\nendstream`));
   const streamText = page.stream.join('\n');
   const streamId = addObject(`<< /Length ${Buffer.byteLength(streamText, 'latin1')} >>\nstream\n${streamText}\nendstream`);
   const resources = page.fonts.map(([name], index) => `${name} ${fontIds[index]} 0 R`).join(' ');
-  objects[pageId - 1] = `<< /Type /Page /Parent ${pagesId} 0 R /MediaBox [0 0 ${formatNumber(page.width)} ${formatNumber(page.height)}] /Resources << /Font << ${resources} >> >> /Contents ${streamId} 0 R >>`;
+  const imageResources = (page.images ?? []).map(([name], index) => `${name} ${imageIds[index]} 0 R`).join(' ');
+  const xObjectResources = imageResources ? ` /XObject << ${imageResources} >>` : '';
+  objects[pageId - 1] = `<< /Type /Page /Parent ${pagesId} 0 R /MediaBox [0 0 ${formatNumber(page.width)} ${formatNumber(page.height)}] /Resources << /Font << ${resources} >>${xObjectResources} >> /Contents ${streamId} 0 R >>`;
   objects[catalogId - 1] = '<< /Type /Catalog /Pages 2 0 R >>';
 
   let pdf = '%PDF-1.4\n';
