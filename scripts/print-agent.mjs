@@ -261,6 +261,7 @@ function buildPackingLetterPdf(shipment, logoImage = null, templateImage = null)
   const body = [
     `HOLA, ${firstName}.`,
     'SI ESTÁS LEYENDO ESTO, TU PEDIDO YA HA LLEGADO A TUS MANOS. ESPERAMOS QUE AL ABRIRLO SIENTAS QUE HAY ALGO MÁS QUE UNA PRENDA DENTRO.',
+    productEnjoymentLine(shipment),
     'SPEEDWEAR NACE DE ESA FORMA DE VIVIR EL MOTOR QUE NO SIEMPRE SE EXPLICA, PERO SE ENTIENDE AL INSTANTE: HISTORIA, REFERENCIAS, DETALLES Y PIEZAS QUE DICEN ALGO SIN TENER QUE GRITAR.',
     'CADA DISEÑO PASA POR MUCHAS VUELTAS ANTES DE SALIR. SE PIENSA, SE PRUEBA, SE REVISA Y SE PREPARA UNO A UNO PARA QUE CUANDO LLEGUE A CASA TENGA SENTIDO.',
     'NO BUSCAMOS HACER MERCH RÁPIDA. BUSCAMOS CREAR PRENDAS CON IDENTIDAD, DE ESAS QUE TE APETECE PONERTE POR LO QUE REPRESENTAN.',
@@ -288,6 +289,52 @@ function firstCustomerName(name) {
   const clean = String(name || '').trim();
   if (!clean || /^cliente shopify$/i.test(clean)) return 'RIDER';
   return clean.split(/\s+/)[0].toUpperCase();
+}
+
+function productEnjoymentLine(shipment) {
+  const items = Array.isArray(shipment.items) ? shipment.items : [];
+  const products = items
+    .flatMap((item) => {
+      const quantity = Math.max(1, Number(item.quantity || 1));
+      const label = productLetterName(item);
+      return Array.from({ length: Math.min(quantity, 3) }, () => label);
+    })
+    .filter(Boolean)
+    .slice(0, 4);
+
+  if (!products.length) {
+    return 'ESPERAMOS QUE DISFRUTES MUCHO DE TU PEDIDO Y QUE LO SIENTAS TUYO DESDE EL PRIMER DÍA.';
+  }
+
+  return `ESPERAMOS QUE DISFRUTES MUCHO DE ${joinSpanishList(products)}.`;
+}
+
+function productLetterName(item) {
+  const title = String(item?.title || '').trim();
+  if (!title) return 'TU PRENDA SPEEDWEAR';
+
+  const clean = title
+    .replace(/\s+/g, ' ')
+    .replace(/\b(SPEEDWEAR|CAMISETA|SUDADERA|PARKA|MOCHILA|BAÑADOR)\b/gi, '')
+    .trim();
+  const type = productType(title);
+  return `${type} ${clean || title}`.toUpperCase();
+}
+
+function productType(title) {
+  const text = String(title || '').toLowerCase();
+  if (text.includes('sudadera')) return 'TU SUDADERA';
+  if (text.includes('parka')) return 'TU PARKA';
+  if (text.includes('mochila')) return 'TU MOCHILA';
+  if (text.includes('bañador') || text.includes('banador')) return 'TU BAÑADOR';
+  if (text.includes('camiseta')) return 'TU CAMISETA';
+  return 'TU PRENDA';
+}
+
+function joinSpanishList(items) {
+  if (items.length === 1) return items[0];
+  if (items.length === 2) return `${items[0]} Y ${items[1]}`;
+  return `${items.slice(0, -1).join(', ')} Y ${items.at(-1)}`;
 }
 
 function drawText(page, text, x, y, size = 12, font = 'F1', color = [0, 0, 0], align = 'left') {
