@@ -53,6 +53,7 @@ Shopify es obligatorio para importar pedidos. Si faltan dominio o token, la API 
 - `PACKING_LETTER_PAPER_SIZE`
 - `PACKING_LETTER_PRINT_SETTINGS`
 - `PACKING_LETTER_LOGO_PATH`
+- `PACKING_LETTER_TEMPLATE_PATH`
 
 Sendcloud es obligatorio para crear etiquetas. Si faltan claves, la API devuelve error claro. La creacion de etiquetas usa Shipments API v3 con `POST /shipments/announce-with-shipping-rules`, `apply_shipping_defaults=true` y `apply_shipping_rules=true`, para que entren tus reglas de Sendcloud. `SENDCLOUD_SHIPPING_OPTION_CODE` queda por defecto en `sendcloud:letter`, que Sendcloud recomienda como punto de partida cuando se aplican reglas de envio.
 
@@ -62,7 +63,7 @@ Puedes consultar metodos disponibles con `GET /shipments/shipping-methods`. En l
 
 Para imprimir etiquetas automaticamente en el taller, instala la Honeywell PC42d en macOS y pon su nombre CUPS exacto en `LABEL_PRINTER_NAME`. Activa `AUTO_PRINT_LABELS=true`. Para etiquetas 100x150 mm usa `LABEL_PAPER_SIZE=Custom.100x150mm`. El backend descarga el PDF de Sendcloud y lo envia con `lp` justo despues de crear la etiqueta.
 
-Para imprimir una carta de pedido despues de cada etiqueta desde el ordenador del taller, activa `PACKING_LETTER_ENABLED=true` en el `.env` del `print-agent` y define `PACKING_LETTER_PRINTER_NAME` con la impresora normal. Por defecto usa A4. Si quieres incluir el logo, define `PACKING_LETTER_LOGO_PATH` con la ruta absoluta del PNG.
+Para imprimir una carta de pedido despues de cada etiqueta desde el ordenador del taller, activa `PACKING_LETTER_ENABLED=true` en el `.env` del `print-agent` y define `PACKING_LETTER_PRINTER_NAME` con la impresora normal. Por defecto usa A4 y la plantilla incluida en `assets/packing-letter-template.png`. Si quieres usar otra plantilla, define `PACKING_LETTER_TEMPLATE_PATH` con la ruta absoluta del PNG. Si imprimes sin plantilla, puedes incluir un logo con `PACKING_LETTER_LOGO_PATH`.
 
 ## Impresion DTF automatica
 

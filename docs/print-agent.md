@@ -36,6 +36,7 @@ PACKING_LETTER_PRINTER_NAME=
 PACKING_LETTER_PAPER_SIZE=A4
 PACKING_LETTER_PRINT_SETTINGS=fit
 PACKING_LETTER_LOGO_PATH=
+PACKING_LETTER_TEMPLATE_PATH=
 
 # Windows
 LABEL_PRINTER_BIN=
@@ -54,7 +55,7 @@ SENDCLOUD_SECRET_KEY=
 
 Si `LABEL_PRINTER_NAME` no esta definido, usa `Honeywell_PC42d`.
 
-Para imprimir una carta de pedido junto a cada etiqueta, activa `PACKING_LETTER_ENABLED=true` y pon en `PACKING_LETTER_PRINTER_NAME` el nombre exacto de la impresora normal. La carta se genera como PDF A4 en blanco y negro, con el nombre del cliente destacado y el numero de pedido. Si quieres incluir el logo, define `PACKING_LETTER_LOGO_PATH` con la ruta absoluta del PNG.
+Para imprimir una carta de pedido junto a cada etiqueta, activa `PACKING_LETTER_ENABLED=true` y pon en `PACKING_LETTER_PRINTER_NAME` el nombre exacto de la impresora normal. La carta se genera como PDF A4 en blanco y negro, con el nombre del cliente destacado y el numero de pedido. Por defecto usa la plantilla incluida en `assets/packing-letter-template.png`; si quieres cambiarla, define `PACKING_LETTER_TEMPLATE_PATH` con la ruta absoluta de otro PNG. Si imprimes sin plantilla, puedes incluir un logo con `PACKING_LETTER_LOGO_PATH`.
 
 Para DTF, lo recomendado es usar `DTF_HOT_FOLDER` si el software/RIP de la impresora tiene una carpeta de entrada automatica. El agente copia un archivo por unidad pendiente, por ejemplo si faltan 3 transfers del mismo diseno deja 3 archivos en esa carpeta. Si no hay hot folder, define `DTF_PRINTER_NAME` para imprimir mediante el sistema operativo.
 
