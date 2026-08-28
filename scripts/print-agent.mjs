@@ -251,12 +251,12 @@ function buildPackingLetterPdf(shipment, logoImage = null, templateImage = null)
     drawText(page, 'SPEEDWEAR', 66, height - 84, 22, 'F2', [0, 0, 0]);
   }
 
-  drawText(page, 'PEDIDO', width - 62, 660, 8.4, 'F2', [0.82, 0.82, 0.82], 'right');
-  drawText(page, shipment.orderNumber || '#----', width - 62, 638, 20, 'F2', [1, 1, 1], 'right');
-  drawText(page, 'GRACIAS POR TU PEDIDO', width - 62, 622, 7.8, 'F2', [0.82, 0.82, 0.82], 'right');
+  drawText(page, 'PEDIDO', width - 58, 662, 9.8, 'F2', [0.82, 0.82, 0.82], 'right');
+  drawText(page, shipment.orderNumber || '#----', width - 58, 636, 23, 'F2', [1, 1, 1], 'right');
+  drawText(page, 'GRACIAS POR TU PEDIDO', width - 58, 618, 8.8, 'F2', [0.82, 0.82, 0.82], 'right');
 
-  drawCenteredText(page, 'CARTA DE TALLER', width / 2, 554, 14, 'F2', [1, 1, 1]);
-  drawRect(page, 214, 539, width - 428, 1.2, [1, 1, 1]);
+  drawCenteredText(page, 'CARTA DE TALLER', width / 2, 554, 16.5, 'F2', [1, 1, 1]);
+  drawRect(page, 202, 537, width - 404, 1.4, [1, 1, 1]);
 
   const body = [
     `HOLA, ${firstName}.`,
@@ -267,19 +267,19 @@ function buildPackingLetterPdf(shipment, logoImage = null, templateImage = null)
     'GRACIAS POR CONFIAR EN SPEEDWEAR Y POR FORMAR PARTE DE LO QUE ESTAMOS CONSTRUYENDO PEDIDO A PEDIDO.'
   ];
 
-  let y = 508;
+  let y = 506;
   for (const [index, paragraph] of body.entries()) {
     const isGreeting = index === 0;
-    y = drawWrappedText(page, paragraph, 52, y, 490, isGreeting ? 11.5 : 8.8, isGreeting ? 15.5 : 12.2, 'F2', [1, 1, 1]) - (isGreeting ? 14 : 9);
+    y = drawWrappedText(page, paragraph, 48, y, 500, isGreeting ? 13.5 : 10, isGreeting ? 17 : 13.8, 'F2', [1, 1, 1]) - (isGreeting ? 13 : 8);
   }
 
-  drawText(page, 'SI TE GUSTA AL ESTRENARLA, ETIQUÉTANOS', 52, 128, 9, 'F2', [1, 1, 1]);
-  drawText(page, '@SPEEDWEAR.ES', 52, 100, 18, 'F2', [1, 1, 1]);
+  drawText(page, 'SI TE GUSTA AL ESTRENARLA, ETIQUÉTANOS', 48, 132, 10.5, 'F2', [1, 1, 1]);
+  drawText(page, '@SPEEDWEAR.ES', 48, 101, 21, 'F2', [1, 1, 1]);
 
-  drawText(page, 'NOS VEMOS EN LA PISTA,', width - 52, 104, 8.8, 'F2', [0.9, 0.9, 0.9], 'right');
-  drawText(page, 'ÁNGEL / SPEEDWEAR', width - 52, 78, 16, 'F2', [1, 1, 1], 'right');
+  drawText(page, 'NOS VEMOS EN LA PISTA,', width - 48, 106, 9.8, 'F2', [0.9, 0.9, 0.9], 'right');
+  drawText(page, 'ÁNGEL / SPEEDWEAR', width - 48, 78, 18.5, 'F2', [1, 1, 1], 'right');
 
-  drawCenteredText(page, 'GRACIAS POR APOYAR UNA MARCA PEQUEÑA.', width / 2, 34, 7.6, 'F2', [0.85, 0.85, 0.85]);
+  drawCenteredText(page, 'GRACIAS POR APOYAR UNA MARCA PEQUEÑA.', width / 2, 34, 8.6, 'F2', [0.85, 0.85, 0.85]);
 
   return writePdfDocument(page);
 }
