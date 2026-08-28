@@ -95,11 +95,17 @@ export class ShipmentsService {
     return deduped.map((shipment) => ({
       id: shipment.id,
       orderNumber: shipment.order.orderNumber,
+      customerName: shipment.order.customerName,
       labelUrl: shipment.labelUrl,
       trackingNumber: shipment.trackingNumber,
       carrier: shipment.carrier,
       createdAt: shipment.createdAt,
-      itemCount: shipment.order.items.reduce((total, item) => total + item.quantity, 0)
+      itemCount: shipment.order.items.reduce((total, item) => total + item.quantity, 0),
+      items: shipment.order.items.map((item) => ({
+        title: item.title,
+        quantity: item.quantity,
+        variantTitle: item.variantTitle
+      }))
     }));
   }
 

@@ -30,6 +30,12 @@ PRINT_AGENT_POLL_SECONDS=15
 PRINT_AGENT_DRY_RUN=false
 PRINT_AGENT_TOKEN=
 
+# Carta de pedido, impresa en impresora normal tras cada etiqueta
+PACKING_LETTER_ENABLED=false
+PACKING_LETTER_PRINTER_NAME=
+PACKING_LETTER_PAPER_SIZE=A4
+PACKING_LETTER_PRINT_SETTINGS=fit
+
 # Windows
 LABEL_PRINTER_BIN=
 LABEL_PRINT_SETTINGS=noscale
@@ -46,6 +52,8 @@ SENDCLOUD_SECRET_KEY=
 ```
 
 Si `LABEL_PRINTER_NAME` no esta definido, usa `Honeywell_PC42d`.
+
+Para imprimir una carta de pedido junto a cada etiqueta, activa `PACKING_LETTER_ENABLED=true` y pon en `PACKING_LETTER_PRINTER_NAME` el nombre exacto de la impresora normal. La carta se genera como PDF A4 con el nombre del cliente, numero de pedido y resumen de articulos.
 
 Para DTF, lo recomendado es usar `DTF_HOT_FOLDER` si el software/RIP de la impresora tiene una carpeta de entrada automatica. El agente copia un archivo por unidad pendiente, por ejemplo si faltan 3 transfers del mismo diseno deja 3 archivos en esa carpeta. Si no hay hot folder, define `DTF_PRINTER_NAME` para imprimir mediante el sistema operativo.
 
