@@ -243,9 +243,6 @@ function buildPackingLetterPdf(shipment, logoImage = null, templateImage = null)
     drawRect(page, 0, 0, width, height, [1, 1, 1]);
   }
 
-  drawRect(page, 42, 82, width - 84, 598, [1, 1, 1], [0, 0, 0], 1.4);
-  drawRect(page, 56, 646, width - 112, 20, [0, 0, 0]);
-
   if (!templateImage && logoImage) {
     const logoW = 104;
     const logoH = logoW * logoImage.height / logoImage.width;
@@ -254,39 +251,38 @@ function buildPackingLetterPdf(shipment, logoImage = null, templateImage = null)
     drawText(page, 'SPEEDWEAR', 66, height - 84, 22, 'F2', [0, 0, 0]);
   }
 
-  drawText(page, 'ESTO YA ESTA LISTO', width - 66, 626, 13, 'F2', [0, 0, 0], 'right');
-  drawText(page, shipment.orderNumber || 'PEDIDO', width - 66, 594, 32, 'F2', [0, 0, 0], 'right');
-  drawText(page, 'PREPARADO UNO A UNO', width - 66, 578, 8.6, 'F2', [0.28, 0.28, 0.28], 'right');
+  drawText(page, 'ESTO YA ESTA LISTO', width - 72, 670, 12, 'F2', [1, 1, 1], 'right');
+  drawText(page, shipment.orderNumber || 'PEDIDO', width - 72, 638, 30, 'F2', [1, 1, 1], 'right');
+  drawText(page, 'PREPARADO UNO A UNO', width - 72, 618, 8.6, 'F2', [0.82, 0.82, 0.82], 'right');
 
-  drawText(page, 'HOLA', 66, 615, 18, 'F2', [0, 0, 0]);
-  drawRect(page, 66, 494, width - 132, 68, [0, 0, 0]);
-  drawCenteredText(page, firstName, width / 2, 516, fitFontSize(firstName, width - 168, 44), 'F2', [1, 1, 1]);
-  drawWrappedText(page, 'TU PEDIDO ACABA DE SALIR DE NUESTRA MESA DE TRABAJO.', 66, 472, 420, 11, 14, 'F2', [0, 0, 0]);
+  drawCenteredText(page, 'HOLA', width / 2, 574, 17, 'F2', [1, 1, 1]);
+  drawCenteredText(page, firstName, width / 2, 500, fitFontSize(firstName, width - 128, 54), 'F2', [1, 1, 1]);
+  drawRect(page, 118, 486, width - 236, 2.6, [1, 1, 1]);
+  drawCenteredText(page, 'TU PEDIDO ACABA DE SALIR DE NUESTRA MESA DE TRABAJO.', width / 2, 450, 10.8, 'F2', [1, 1, 1]);
 
-  drawRect(page, 66, 410, 218, 42, [0, 0, 0]);
-  drawCenteredText(page, 'HECHO EN EL TALLER', 175, 426, 10.6, 'F2', [1, 1, 1]);
-  drawRect(page, 303, 410, 226, 42, null, [0, 0, 0], 1);
-  drawCenteredText(page, 'LISTO PARA SALIR', 416, 426, 10.6, 'F2', [0, 0, 0]);
+  drawCenteredText(page, 'HECHO EN EL TALLER', 200, 402, 10.4, 'F2', [1, 1, 1]);
+  drawRect(page, 126, 392, 148, 1, [1, 1, 1]);
+  drawCenteredText(page, 'LISTO PARA SALIR', 394, 402, 10.4, 'F2', [1, 1, 1]);
+  drawRect(page, 322, 392, 144, 1, [1, 1, 1]);
 
   const body = [
     'SPEEDWEAR NACE DE UNA IDEA SIMPLE: ROPA PARA QUIEN VIVE EL MOTOR COMO PARTE DE SU HISTORIA.',
     'NO HACEMOS MERCH RÁPIDA. PREPARAMOS PIEZAS CON IDENTIDAD, REVISADAS UNA A UNA EN EL TALLER.'
   ];
 
-  let y = 372;
+  let y = 342;
   for (const paragraph of body) {
-    y = drawWrappedText(page, paragraph, 66, y, 440, 9.6, 14.5, 'F2', [0.08, 0.08, 0.08]) - 10;
+    y = drawWrappedText(page, paragraph, 84, y, 428, 9.2, 14.2, 'F2', [1, 1, 1]) - 10;
   }
 
-  drawRect(page, 66, 222, width - 132, 74, [0, 0, 0]);
-  drawCenteredText(page, 'SI TE GUSTA, ETIQUÉTANOS', width / 2, 264, 14, 'F2', [1, 1, 1]);
-  drawCenteredText(page, '@SPEEDWEAR.ES', width / 2, 238, 23, 'F2', [1, 1, 1]);
+  drawCenteredText(page, 'SI TE GUSTA, ETIQUÉTANOS', width / 2, 250, 13.5, 'F2', [1, 1, 1]);
+  drawCenteredText(page, '@SPEEDWEAR.ES', width / 2, 218, 25, 'F2', [1, 1, 1]);
+  drawRect(page, 170, 204, width - 340, 2, [1, 1, 1]);
 
-  drawText(page, 'NOS VEMOS EN LA PISTA,', 66, 178, 11.5, 'F2', [0, 0, 0]);
-  drawText(page, 'ÁNGEL / SPEEDWEAR', 66, 146, 24, 'F2', [0, 0, 0]);
+  drawCenteredText(page, 'NOS VEMOS EN LA PISTA,', width / 2, 156, 10.8, 'F2', [1, 1, 1]);
+  drawCenteredText(page, 'ÁNGEL / SPEEDWEAR', width / 2, 124, 22, 'F2', [1, 1, 1]);
 
-  drawText(page, 'GRACIAS POR APOYAR UNA MARCA PEQUEÑA.', 66, 104, 9.5, 'F2', [0, 0, 0]);
-  drawText(page, 'SPEEDWEAR.ES', width - 66, 104, 9.5, 'F2', [0, 0, 0], 'right');
+  drawCenteredText(page, 'GRACIAS POR APOYAR UNA MARCA PEQUEÑA.', width / 2, 82, 8.6, 'F2', [1, 1, 1]);
 
   return writePdfDocument(page);
 }
