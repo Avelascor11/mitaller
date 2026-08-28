@@ -293,12 +293,16 @@ function firstCustomerName(name) {
 
 function productEnjoymentLine(shipment) {
   const items = Array.isArray(shipment.items) ? shipment.items : [];
-  const products = items
-    .flatMap((item) => {
-      const quantity = Math.max(1, Number(item.quantity || 1));
-      const label = productLetterName(item);
-      return Array.from({ length: Math.min(quantity, 3) }, () => label);
-    })
+  const grouped = new Map();
+  for (const item of items) {
+    const product = productLetterName(item);
+    if (!product) continue;
+    const current = grouped.get(product.key) ?? { ...product, quantity: 0 };
+    current.quantity += Math.max(1, Number(item.quantity || 1));
+    grouped.set(product.key, current);
+  }
+  const products = [...grouped.values()]
+    .map(productEnjoymentName)
     .filter(Boolean)
     .slice(0, 4);
 
@@ -311,24 +315,34 @@ function productEnjoymentLine(shipment) {
 
 function productLetterName(item) {
   const title = String(item?.title || '').trim();
-  if (!title) return 'TU PRENDA SPEEDWEAR';
+  if (!title) return { key: 'PRENDA SPEEDWEAR', name: 'PRENDA SPEEDWEAR', type: productType('') };
 
   const clean = title
     .replace(/\s+/g, ' ')
+    .replace(/\s+-\s+[^-]+$/g, '')
+    .replace(/["“”]/g, '')
     .replace(/\b(SPEEDWEAR|CAMISETA|SUDADERA|PARKA|MOCHILA|BAÑADOR)\b/gi, '')
     .trim();
   const type = productType(title);
-  return `${type} ${clean || title}`.toUpperCase();
+  const name = (clean || title).toUpperCase();
+  return { key: `${type.singular}:${name}`, name, type };
 }
 
 function productType(title) {
   const text = String(title || '').toLowerCase();
-  if (text.includes('sudadera')) return 'TU SUDADERA';
-  if (text.includes('parka')) return 'TU PARKA';
-  if (text.includes('mochila')) return 'TU MOCHILA';
-  if (text.includes('bañador') || text.includes('banador')) return 'TU BAÑADOR';
-  if (text.includes('camiseta')) return 'TU CAMISETA';
-  return 'TU PRENDA';
+  if (text.includes('sudadera')) return { singular: 'SUDADERA', plural: 'SUDADERAS' };
+  if (text.includes('parka')) return { singular: 'PARKA', plural: 'PARKAS' };
+  if (text.includes('mochila')) return { singular: 'MOCHILA', plural: 'MOCHILAS' };
+  if (text.includes('bañador') || text.includes('banador')) return { singular: 'BAÑADOR', plural: 'BAÑADORES' };
+  if (text.includes('camiseta')) return { singular: 'CAMISETA', plural: 'CAMISETAS' };
+  return { singular: 'PRENDA', plural: 'PRENDAS' };
+}
+
+function productEnjoymentName(product) {
+  const type = product.quantity > 1 ? product.type.plural : product.type.singular;
+  const possessive = product.quantity > 1 ? 'TUS' : 'TU';
+  const quantity = product.quantity > 1 ? `${product.quantity} ` : '';
+  return `${possessive} ${quantity}${type} ${product.name}`;
 }
 
 function joinSpanishList(items) {
