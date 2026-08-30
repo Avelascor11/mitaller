@@ -13527,7 +13527,7 @@ struct ExtremeSavingsView: View {
                 ExtremeSavingsMetric(title: "Ventas", value: formatMoney(summary.currentMonth.revenue, currency: summary.currency), color: AppTheme.blue)
                 ExtremeSavingsMetric(title: "Variables", value: formatMoney(summary.currentMonth.variableCost, currency: summary.currency), color: AppTheme.purple)
                 ExtremeSavingsMetric(title: "Fijos", value: formatMoney(summary.currentMonth.fixedCost, currency: summary.currency), color: AppTheme.amber)
-                ExtremeSavingsMetric(title: "Ahorro seguro", value: formatMoney(summary.currentMonth.safeSavings, currency: summary.currency), color: AppTheme.green)
+                ExtremeSavingsMetric(title: "Ahorro calculado", value: formatMoney(summary.currentMonth.safeSavings, currency: summary.currency), color: AppTheme.green)
             }
 
             Text("Referencia: \(formatMoney(summary.revenue.historicalRevenue, currency: summary.currency)) en \(summary.revenue.monthsTracked) meses, una media de \(formatMoney(summary.revenue.averageMonthlyRevenue, currency: summary.currency))/mes.")
@@ -13625,8 +13625,8 @@ struct ExtremeSavingsView: View {
 
             ForEach(summary.costs.fixed.items) { item in
                 HStack(spacing: 10) {
-                    Image(systemName: item.active ? "checkmark.circle.fill" : "pause.circle")
-                        .foregroundStyle(item.active ? AppTheme.green : AppTheme.muted)
+                    Image(systemName: item.reconciliationStatus?.uppercased() == "PAID" ? "checkmark.circle.fill" : item.reconciliationStatus?.uppercased() == "REJECTED" ? "exclamationmark.triangle.fill" : item.active ? "clock.fill" : "pause.circle")
+                        .foregroundStyle(item.reconciliationStatus?.uppercased() == "PAID" ? AppTheme.green : item.reconciliationStatus?.uppercased() == "REJECTED" ? AppTheme.red : item.active ? AppTheme.amber : AppTheme.muted)
                         .frame(width: 20)
                     VStack(alignment: .leading, spacing: 2) {
                         Text(item.name)
@@ -13643,9 +13643,9 @@ struct ExtremeSavingsView: View {
                         }
                     }
                     Spacer()
-                    Text(formatMoney(item.amount, currency: summary.currency))
+                    Text(formatMoney(item.effectiveAmount ?? item.amount, currency: summary.currency))
                         .font(.caption.weight(.black))
-                        .foregroundStyle(item.active ? AppTheme.inkSoft : AppTheme.muted)
+                        .foregroundStyle(item.reconciliationStatus?.uppercased() == "REJECTED" ? AppTheme.red : item.reconciliationStatus?.uppercased() == "PAID" ? AppTheme.green : item.active ? AppTheme.inkSoft : AppTheme.muted)
                 }
                 .padding(.vertical, 5)
             }
@@ -14472,12 +14472,12 @@ struct FixedExpenseRow: View {
                 }
                 Spacer()
                 VStack(alignment: .trailing, spacing: 4) {
-                    Text(formatMoney(item.amount, currency: item.currency))
+                    Text(formatMoney(item.effectiveAmount ?? item.amount, currency: item.currency))
                         .font(.title3.weight(.black))
                         .foregroundStyle(AppTheme.ink)
-                    Text(item.paid == true ? "Pagado" : "Pendiente")
+                    Text(statusLabel)
                         .font(.caption.weight(.black))
-                        .foregroundStyle(item.paid == true ? AppTheme.green : AppTheme.amber)
+                        .foregroundStyle(statusColor)
                 }
             }
 
@@ -14530,6 +14530,20 @@ struct FixedExpenseRow: View {
         if let dueDay = item.dueDay { parts.append("Día \(dueDay)") }
         if let period { parts.append(period) }
         return parts.joined(separator: " · ")
+    }
+
+    private var statusColor: Color {
+        switch item.reconciliationStatus?.uppercased() {
+        case "PAID": return AppTheme.green
+        case "REJECTED": return AppTheme.red
+        default: return item.paid == true ? AppTheme.green : AppTheme.amber
+        }
+    }
+
+    private var statusLabel: String {
+        if item.reconciliationStatus?.uppercased() == "REJECTED" { return "Recibo rechazado" }
+        if item.paid == true { return item.paymentSource == "BANK" ? "Pagado · N26" : "Pagado" }
+        return "Pendiente"
     }
 
     private func run(_ action: @escaping () async -> Void) async {
@@ -14840,6 +14854,18 @@ struct CashflowAllocationGrid: View {
 
     var body: some View {
         LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 10) {
+            if let variable = allocation.variableReserve, variable > 0 {
+                CashflowAllocationTile(label: "Variables", amount: variable, currency: currency, color: AppTheme.amber, icon: "shippingbox.fill")
+            }
+            if let debt = allocation.debtReserve, debt > 0 {
+                CashflowAllocationTile(label: "Deuda", amount: debt, currency: currency, color: AppTheme.red, icon: "creditcard.fill")
+            }
+            if let savings = allocation.savingsReserve, savings > 0 {
+                CashflowAllocationTile(label: "Ahorro", amount: savings, currency: currency, color: AppTheme.green, icon: "lock.fill")
+            }
+            if let fixed = allocation.fixedReserve, fixed > 0 {
+                CashflowAllocationTile(label: "Gastos fijos", amount: fixed, currency: currency, color: AppTheme.blue, icon: "calendar.badge.exclamationmark")
+            }
             CashflowAllocationTile(label: "Hacienda / IVA", amount: allocation.taxReserve, currency: currency, color: AppTheme.red, icon: "building.columns.fill")
             CashflowAllocationTile(label: "Producción", amount: allocation.production, currency: currency, color: AppTheme.amber, icon: "tshirt.fill")
             CashflowAllocationTile(label: "Envíos", amount: allocation.shipping, currency: currency, color: AppTheme.blue, icon: "shippingbox.fill")
@@ -15287,7 +15313,7 @@ struct RetroAstonPaymentPlanCard: View {
                     Text("Plan de pagos Retro")
                         .font(.title3.weight(.black))
                         .foregroundStyle(AppTheme.ink)
-                    Text("3 pagos de \(m(plan.installmentAmount)). Fondo creado con pedidos retro.")
+                    Text("Entrada de \(m(plan.installmentAmount)) y resto al finalizar producción.")
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(AppTheme.muted)
                 }
@@ -15318,8 +15344,8 @@ struct RetroAstonPaymentPlanCard: View {
             LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 10) {
                 PreorderMetricTile(title: "Fondo disponible", value: m(plan.fundAvailable), subtitle: "\(plan.soldUnits) uds vendidas", color: plan.canPayNext ? AppTheme.green : AppTheme.amber, icon: "safe.fill")
                 PreorderMetricTile(title: "Falta próxima cuota", value: m(plan.missingForNext), subtitle: plan.nextMilestone?.label ?? "Todo pagado", color: plan.missingForNext > 0 ? AppTheme.amber : AppTheme.green, icon: "arrow.up.forward.circle.fill")
-                PreorderMetricTile(title: "Pagado", value: m(plan.paidTotal), subtitle: "\(plan.milestones.filter(\.paid).count)/\(plan.milestones.count) cuotas", color: AppTheme.green, icon: "checkmark.seal.fill")
-                PreorderMetricTile(title: "Ajuste final", value: m(plan.adjustmentAmount), subtitle: "Diferencia vs total", color: AppTheme.blue, icon: "plusminus.circle.fill")
+                PreorderMetricTile(title: "Pagado", value: m(plan.paidTotal), subtitle: "\(plan.milestones.filter(\.paid).count)/\(plan.milestones.count) pagos", color: AppTheme.green, icon: "checkmark.seal.fill")
+                PreorderMetricTile(title: "Resto producción", value: m(max(0, plan.totalCommitment - plan.installmentAmount)), subtitle: "Al finalizar", color: AppTheme.blue, icon: "flag.checkered.circle.fill")
             }
 
             if plan.canPayNext, let next = plan.nextMilestone {

@@ -8,6 +8,11 @@ import { PurchaseService } from '../purchasing/purchase.service';
 import { ShopifyAdapter, ShopifyBalanceTransaction } from '../shopify/shopify.adapter';
 
 const SHOPIFY_FEE_RATE = 0.024; // 2.4 % comisión Shopify Payments
+const RECOVERY_VARIABLE_RATE = 0.468;
+const RECOVERY_DEBT_RATE = 0.20;
+const RECOVERY_SAVINGS_RATE = 0.1857;
+const RECOVERY_FIXED_RATE = 0.0963;
+const RECOVERY_OPERATIONS_RATE = 0.05;
 const EXTREME_SAVINGS_PLAN_ID = 'speedwear-extreme';
 const EXTREME_SAVINGS_SEED_VERSION = 2;
 
@@ -542,6 +547,13 @@ export class EconomicsService {
       const adsReserve = await this.adsReserveForSalesDays(salesDays.map(day => day.date));
       const retroPreorder = +orders.reduce((sum, order) => sum + order.retroReserve, 0).toFixed(2);
       const retroUnits = orders.reduce((sum, order) => sum + order.retroUnits, 0);
+      const recoveryAllocation = {
+        variableReserve: +(amount * RECOVERY_VARIABLE_RATE).toFixed(2),
+        debtReserve: +(amount * RECOVERY_DEBT_RATE).toFixed(2),
+        savingsReserve: +(amount * RECOVERY_SAVINGS_RATE).toFixed(2),
+        fixedReserve: +(amount * RECOVERY_FIXED_RATE).toFixed(2),
+        operationsReserve: +(amount * RECOVERY_OPERATIONS_RATE).toFixed(2)
+      };
 
       const gross = amount / (1 - shopifyFeeRate);
       return {
@@ -561,6 +573,7 @@ export class EconomicsService {
           totalCommitment: this.retroAstonTotalCommitment(),
           sellingPrice: this.retroAstonSellingPrice()
         },
+        recoveryAllocation,
         allocation: {
           taxReserve: +(gross * taxRate).toFixed(2),
           production: +(gross * productionRate).toFixed(2),
@@ -584,6 +597,10 @@ export class EconomicsService {
       adsReserve: +todayPayouts.reduce((s, p) => s + p.allocation.adsReserve, 0).toFixed(2),
       retroPreorder: +todayPayouts.reduce((s, p) => s + p.allocation.retroPreorder, 0).toFixed(2),
       operationsReserve,
+      variableReserve: +todayPayouts.reduce((s, p) => s + p.recoveryAllocation.variableReserve, 0).toFixed(2),
+      debtReserve: +todayPayouts.reduce((s, p) => s + p.recoveryAllocation.debtReserve, 0).toFixed(2),
+      savingsReserve: +todayPayouts.reduce((s, p) => s + p.recoveryAllocation.savingsReserve, 0).toFixed(2),
+      fixedReserve: +todayPayouts.reduce((s, p) => s + p.recoveryAllocation.fixedReserve, 0).toFixed(2),
       cashFree: +(cashFreeBeforeOperations - operationsReserve).toFixed(2)
     };
 

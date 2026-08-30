@@ -2471,6 +2471,10 @@ struct CashflowAllocation: Decodable {
     let adsReserve: Double
     let retroPreorder: Double?
     let operationsReserve: Double?
+    let variableReserve: Double?
+    let debtReserve: Double?
+    let savingsReserve: Double?
+    let fixedReserve: Double?
     let cashFree: Double
 }
 
