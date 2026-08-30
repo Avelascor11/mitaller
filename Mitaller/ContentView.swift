@@ -1533,6 +1533,8 @@ struct MainTabView: View {
                 .tabItem { Label("Influs", systemImage: "person.2.crop.square.stack.fill") }
             CashflowView()
                 .tabItem { Label("Caja", systemImage: "banknote.fill") }
+            ExtremeSavingsView()
+                .tabItem { Label("Ahorro extremo", systemImage: "target") }
             FixedExpensesView()
                 .tabItem { Label("Gastos", systemImage: "calendar.badge.exclamationmark") }
             EmployeesView()
@@ -13257,6 +13259,709 @@ struct CashflowView: View {
             else { try await client.markPayout(payout.id) }
             summary = try await client.cashflow()
         } catch { self.error = error.localizedDescription }
+    }
+}
+
+struct ExtremeSavingsView: View {
+    @Environment(WorkshopStore.self) private var store
+    @State private var summary: ExtremeSavingsSummary?
+    @State private var loading = false
+    @State private var error: String?
+    @State private var showingContribution = false
+    @State private var liabilityToPay: ExtremeSavingsLiability?
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 16) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Ahorro extremo")
+                            .font(.system(size: 30, weight: .heavy, design: .rounded))
+                            .foregroundStyle(AppTheme.ink)
+                        Text("Objetivo 15.000 € con cada euro asignado antes de gastarlo.")
+                            .font(.subheadline.weight(.medium))
+                            .foregroundStyle(AppTheme.muted)
+                    }
+
+                    if let error {
+                        Text(error)
+                            .font(.footnote.weight(.semibold))
+                            .foregroundStyle(AppTheme.red)
+                            .glassPanel(padding: 12, accent: AppTheme.red)
+                    }
+
+                    if loading && summary == nil {
+                        ProgressView().frame(maxWidth: .infinity).padding(.top, 48)
+                    } else if let summary {
+                        savingsHero(summary)
+                        bankCashSection(summary)
+                        allocationSection(summary)
+                        currentMonthSection(summary)
+                        liabilitiesSection(summary)
+                        fixedCostsSection(summary)
+                        variableCostsSection(summary)
+                        contributionsSection(summary)
+                    }
+                }
+                .padding()
+            }
+            .screenBackground()
+            .navigationTitle("Ahorro extremo")
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button { showingContribution = true } label: {
+                        Image(systemName: "plus")
+                            .font(.headline.weight(.black))
+                    }
+                    .help("Registrar ahorro")
+                }
+            }
+            .task { await load() }
+            .refreshable { await load() }
+            .sheet(isPresented: $showingContribution) {
+                ExtremeSavingsContributionSheet { amount, notes in
+                    await addContribution(amount: amount, notes: notes)
+                }
+            }
+            .sheet(item: $liabilityToPay) { liability in
+                ExtremeLiabilityPaymentSheet(liability: liability, currency: summary?.currency ?? "EUR") { amount in
+                    await pay(liability: liability, amount: amount)
+                }
+            }
+        }
+    }
+
+    private func savingsHero(_ summary: ExtremeSavingsSummary) -> some View {
+        let progress = min(1, max(0, summary.plan.progressPct / 100))
+        return VStack(alignment: .leading, spacing: 16) {
+            HStack(alignment: .top, spacing: 12) {
+                VStack(alignment: .leading, spacing: 5) {
+                    Text("OBJETIVO DE AHORRO")
+                        .font(.caption.weight(.black))
+                        .foregroundStyle(AppTheme.green)
+                    Text(formatMoney(summary.plan.goalAmount, currency: summary.currency))
+                        .font(.system(size: 36, weight: .black, design: .rounded))
+                        .foregroundStyle(AppTheme.ink)
+                        .minimumScaleFactor(0.65)
+                }
+                Spacer()
+                VStack(alignment: .trailing, spacing: 5) {
+                    Text("AHORRADO")
+                        .font(.caption.weight(.black))
+                        .foregroundStyle(AppTheme.muted)
+                    Text(formatMoney(summary.plan.savedAmount, currency: summary.currency))
+                        .font(.title2.weight(.black))
+                        .foregroundStyle(AppTheme.green)
+                }
+            }
+
+            ProgressView(value: progress)
+                .tint(AppTheme.green)
+
+            HStack(spacing: 10) {
+                ExtremeSavingsMetric(title: "Falta", value: formatMoney(summary.plan.remainingGoal, currency: summary.currency), color: AppTheme.amber)
+                ExtremeSavingsMetric(title: "Apartar", value: "\(percentage(summary.allocation.savingsPct))%", color: AppTheme.green)
+                ExtremeSavingsMetric(title: "Plazo", value: summary.plan.monthsToGoal.map { "\($0) meses" } ?? "Sin plazo", color: AppTheme.blue)
+            }
+
+            Text(summary.allocation.headline)
+                .font(.subheadline.weight(.black))
+                .foregroundStyle(AppTheme.ink)
+            Text(summary.allocation.recommendation)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(AppTheme.muted)
+                .fixedSize(horizontal: false, vertical: true)
+
+            Text(summary.bank.savingsSource == "BANK" ? "Ahorro verificado con el banco" : summary.bank.savingsSource == "MANUAL" ? "Ahorro registrado manualmente" : "Todavía no hay ahorro separado")
+                .font(.caption2.weight(.black))
+                .foregroundStyle(summary.bank.savingsSource == "BANK" ? AppTheme.green : AppTheme.muted)
+
+            Button { showingContribution = true } label: {
+                Label("Registrar dinero ahorrado", systemImage: "eurosign.arrow.circlepath")
+                    .font(.subheadline.weight(.black))
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 12)
+            }
+            .buttonStyle(.borderedProminent)
+            .tint(AppTheme.green)
+        }
+        .glassPanel(padding: 18, accent: AppTheme.green)
+    }
+
+    private func bankCashSection(_ summary: ExtremeSavingsSummary) -> some View {
+        let bank = summary.bank
+        let statusColor = !bank.connected || !bank.balanceAvailable || bank.cashShortfall > 0 ? AppTheme.red : AppTheme.green
+        return VStack(alignment: .leading, spacing: 14) {
+            HStack(alignment: .top, spacing: 12) {
+                VStack(alignment: .leading, spacing: 3) {
+                    Label("Caja real", systemImage: "building.columns.fill")
+                        .font(.headline.weight(.black))
+                        .foregroundStyle(AppTheme.ink)
+                    Text(bank.connected ? "Datos de la cuenta bancaria conectada" : "Banco sin conectar")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(AppTheme.muted)
+                }
+                Spacer()
+                Text(bank.balanceAvailable ? formatMoney(bank.totalBalance, currency: bank.currency) : "Sin saldo")
+                    .font(.title2.weight(.black))
+                    .foregroundStyle(statusColor)
+                    .minimumScaleFactor(0.7)
+            }
+
+            LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 10) {
+                ExtremeSavingsMetric(title: "Operativa", value: formatMoney(bank.operatingBalance, currency: bank.currency), color: AppTheme.blue)
+                ExtremeSavingsMetric(title: "Ahorro detectado", value: formatMoney(bank.detectedSavingsAmount, currency: bank.currency), color: AppTheme.green)
+                ExtremeSavingsMetric(title: "Dinero protegido", value: formatMoney(bank.protectedCash, currency: bank.currency), color: AppTheme.amber)
+                ExtremeSavingsMetric(title: "Disponible real", value: formatMoney(bank.availableForAllocation, currency: bank.currency), color: bank.cashShortfall > 0 ? AppTheme.red : AppTheme.green)
+            }
+
+            HStack(spacing: 8) {
+                Image(systemName: bank.cashShortfall > 0 ? "exclamationmark.triangle.fill" : "checkmark.shield.fill")
+                    .foregroundStyle(statusColor)
+                Text(bank.recommendation)
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(AppTheme.inkSoft)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            if bank.balanceAvailable && !bank.accounts.isEmpty {
+                VStack(spacing: 0) {
+                    ForEach(bank.accounts) { account in
+                        HStack(spacing: 10) {
+                            Image(systemName: account.isSavings ? "lock.fill" : "creditcard.fill")
+                                .foregroundStyle(account.isSavings ? AppTheme.green : AppTheme.blue)
+                                .frame(width: 22)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(account.name)
+                                    .font(.caption.weight(.black))
+                                    .foregroundStyle(AppTheme.ink)
+                                Text(account.isSavings ? "Cuenta de ahorro protegida" : "Cuenta operativa")
+                                    .font(.caption2.weight(.semibold))
+                                    .foregroundStyle(AppTheme.muted)
+                            }
+                            Spacer()
+                            Text(account.balance.map { formatMoney($0, currency: account.currency) } ?? "Sin saldo")
+                                .font(.caption.weight(.black))
+                                .foregroundStyle(account.isSavings ? AppTheme.green : AppTheme.ink)
+                        }
+                        .padding(.vertical, 8)
+                        if account.id != bank.accounts.last?.id {
+                            Divider().overlay(AppTheme.line)
+                        }
+                    }
+                }
+            }
+
+            Text("Protegido = gastos fijos pendientes (\(formatMoney(bank.pendingFixedExpenses, currency: bank.currency))) + colchón mínimo (\(formatMoney(bank.safetyBuffer, currency: bank.currency))).")
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(AppTheme.muted)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .glassPanel(padding: 16, accent: statusColor)
+    }
+
+    private func allocationSection(_ summary: ExtremeSavingsSummary) -> some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("Cada 100 € que entren")
+                        .font(.headline.weight(.black))
+                        .foregroundStyle(AppTheme.ink)
+                    Text("Porcentajes recalculados con ventas, pedidos y gastos actuales.")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(AppTheme.muted)
+                }
+                Spacer()
+                Text("100 €")
+                    .font(.title3.weight(.black))
+                    .foregroundStyle(AppTheme.ink)
+            }
+
+            ExtremeSavingsAllocationBar(items: summary.allocation.perHundred)
+
+            VStack(spacing: 0) {
+                ForEach(summary.allocation.perHundred) { item in
+                    HStack(spacing: 10) {
+                        Circle()
+                            .fill(extremeSavingsColor(item.color))
+                            .frame(width: 10, height: 10)
+                        Text(item.label)
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(AppTheme.inkSoft)
+                        Spacer()
+                        Text(formatMoney(item.amount, currency: summary.currency))
+                            .font(.subheadline.weight(.black))
+                            .foregroundStyle(extremeSavingsColor(item.color))
+                    }
+                    .padding(.vertical, 9)
+                    if item.id != summary.allocation.perHundred.last?.id {
+                        Divider().overlay(AppTheme.line)
+                    }
+                }
+            }
+
+            HStack(spacing: 8) {
+                Image(systemName: "arrow.up.right.circle.fill")
+                    .foregroundStyle(AppTheme.green)
+                Text("Al terminar las deudas podrás subir el ahorro al \(percentage(summary.allocation.afterDebtSavingsPct))%.")
+                    .font(.caption.weight(.black))
+                    .foregroundStyle(AppTheme.ink)
+            }
+        }
+        .glassPanel(padding: 16, accent: AppTheme.blue)
+    }
+
+    private func currentMonthSection(_ summary: ExtremeSavingsSummary) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Text("Este mes")
+                    .font(.headline.weight(.black))
+                    .foregroundStyle(AppTheme.ink)
+                Spacer()
+                Text("\(summary.revenue.orderCount) pedidos analizados")
+                    .font(.caption2.weight(.black))
+                    .foregroundStyle(AppTheme.muted)
+            }
+
+            LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 10) {
+                ExtremeSavingsMetric(title: "Ventas", value: formatMoney(summary.currentMonth.revenue, currency: summary.currency), color: AppTheme.blue)
+                ExtremeSavingsMetric(title: "Variables", value: formatMoney(summary.currentMonth.variableCost, currency: summary.currency), color: AppTheme.purple)
+                ExtremeSavingsMetric(title: "Fijos", value: formatMoney(summary.currentMonth.fixedCost, currency: summary.currency), color: AppTheme.amber)
+                ExtremeSavingsMetric(title: "Ahorro seguro", value: formatMoney(summary.currentMonth.safeSavings, currency: summary.currency), color: AppTheme.green)
+            }
+
+            Text("Referencia: \(formatMoney(summary.revenue.historicalRevenue, currency: summary.currency)) en \(summary.revenue.monthsTracked) meses, una media de \(formatMoney(summary.revenue.averageMonthlyRevenue, currency: summary.currency))/mes.")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(AppTheme.muted)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .glassPanel(padding: 16, accent: AppTheme.purple)
+    }
+
+    private func liabilitiesSection(_ summary: ExtremeSavingsSummary) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .firstTextBaseline) {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("Deuda y atrasos")
+                        .font(.headline.weight(.black))
+                        .foregroundStyle(AppTheme.ink)
+                    Text("Primero protege el taller; después acelera la deuda cara.")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(AppTheme.muted)
+                }
+                Spacer()
+                Text(formatMoney(summary.costs.liabilities.remainingTotal, currency: summary.currency))
+                    .font(.title3.weight(.black))
+                    .foregroundStyle(AppTheme.red)
+            }
+
+            ForEach(summary.costs.liabilities.items) { liability in
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack(alignment: .top, spacing: 10) {
+                        Text("\(liability.priority)")
+                            .font(.caption.weight(.black))
+                            .foregroundStyle(AppTheme.red)
+                            .frame(width: 26, height: 26)
+                            .background(AppTheme.redSoft)
+                            .clipShape(Circle())
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text(liability.name)
+                                .font(.subheadline.weight(.black))
+                                .foregroundStyle(AppTheme.ink)
+                            HStack(spacing: 7) {
+                                if let interest = liability.interestRate {
+                                    Text("TAE \(percentage(interest))%")
+                                }
+                                if let monthly = liability.monthlyPayment {
+                                    Text("Mínimo \(formatMoney(monthly, currency: summary.currency))/mes")
+                                }
+                            }
+                            .font(.caption2.weight(.black))
+                            .foregroundStyle(AppTheme.muted)
+                        }
+                        Spacer()
+                        VStack(alignment: .trailing, spacing: 3) {
+                            Text(formatMoney(liability.remainingAmount, currency: summary.currency))
+                                .font(.subheadline.weight(.black))
+                                .foregroundStyle(liability.remainingAmount > 0 ? AppTheme.red : AppTheme.green)
+                            Text("de \(formatMoney(liability.originalAmount, currency: summary.currency))")
+                                .font(.caption2.weight(.semibold))
+                                .foregroundStyle(AppTheme.muted)
+                        }
+                    }
+
+                    if liability.remainingAmount > 0 {
+                        Button { liabilityToPay = liability } label: {
+                            Label("Registrar pago", systemImage: "checkmark.circle")
+                                .font(.caption.weight(.black))
+                        }
+                        .buttonStyle(.bordered)
+                        .tint(AppTheme.red)
+                    }
+                }
+                .padding(.vertical, 8)
+                Divider().overlay(AppTheme.line)
+            }
+        }
+        .glassPanel(padding: 16, accent: AppTheme.red)
+    }
+
+    private func fixedCostsSection(_ summary: ExtremeSavingsSummary) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .firstTextBaseline) {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("Gastos fijos")
+                        .font(.headline.weight(.black))
+                        .foregroundStyle(AppTheme.ink)
+                    Text("Incluye los importes mensuales conocidos.")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(AppTheme.muted)
+                }
+                Spacer()
+                Text(formatMoney(summary.costs.fixed.monthlyTotal, currency: summary.currency))
+                    .font(.title3.weight(.black))
+                    .foregroundStyle(AppTheme.amber)
+            }
+
+            ForEach(summary.costs.fixed.items) { item in
+                HStack(spacing: 10) {
+                    Image(systemName: item.active ? "checkmark.circle.fill" : "pause.circle")
+                        .foregroundStyle(item.active ? AppTheme.green : AppTheme.muted)
+                        .frame(width: 20)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(item.name)
+                            .font(.caption.weight(.black))
+                            .foregroundStyle(item.active ? AppTheme.ink : AppTheme.muted)
+                        if let dueDay = item.dueDay {
+                            Text("Día \(dueDay)")
+                                .font(.caption2.weight(.semibold))
+                                .foregroundStyle(AppTheme.muted)
+                        } else if !item.active {
+                            Text(item.amount > 0 ? "Condicional" : "Actualmente 0 €")
+                                .font(.caption2.weight(.semibold))
+                                .foregroundStyle(AppTheme.muted)
+                        }
+                    }
+                    Spacer()
+                    Text(formatMoney(item.amount, currency: summary.currency))
+                        .font(.caption.weight(.black))
+                        .foregroundStyle(item.active ? AppTheme.inkSoft : AppTheme.muted)
+                }
+                .padding(.vertical, 5)
+            }
+        }
+        .glassPanel(padding: 16, accent: AppTheme.amber)
+    }
+
+    private func variableCostsSection(_ summary: ExtremeSavingsSummary) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .firstTextBaseline) {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("Gastos variables")
+                        .font(.headline.weight(.black))
+                        .foregroundStyle(AppTheme.ink)
+                    Text("La app usa las unidades y envíos reales de cada pedido.")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(AppTheme.muted)
+                }
+                Spacer()
+                Text("\(percentage(summary.costs.variable.ratePct))%")
+                    .font(.title3.weight(.black))
+                    .foregroundStyle(AppTheme.purple)
+            }
+
+            DisclosureGroup {
+                VStack(spacing: 0) {
+                    ForEach(summary.costs.variable.items) { item in
+                        HStack(alignment: .top, spacing: 10) {
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text(item.name)
+                                    .font(.caption.weight(.black))
+                                    .foregroundStyle(AppTheme.ink)
+                                Text(item.notes)
+                                    .font(.caption2.weight(.semibold))
+                                    .foregroundStyle(AppTheme.muted)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
+                            Spacer()
+                            Text(variableValue(item, currency: summary.currency))
+                                .font(.caption.weight(.black))
+                                .foregroundStyle(AppTheme.purple)
+                                .multilineTextAlignment(.trailing)
+                        }
+                        .padding(.vertical, 8)
+                        Divider().overlay(AppTheme.line)
+                    }
+                }
+            } label: {
+                Text("Ver costes por prenda, envío y porcentaje")
+                    .font(.subheadline.weight(.black))
+                    .foregroundStyle(AppTheme.ink)
+            }
+
+            if summary.costs.variable.currentAdSpend <= 0 {
+                Label("Publicidad: 0 € este mes", systemImage: "megaphone.fill")
+                    .font(.caption.weight(.black))
+                    .foregroundStyle(AppTheme.green)
+            }
+        }
+        .glassPanel(padding: 16, accent: AppTheme.purple)
+    }
+
+    private func contributionsSection(_ summary: ExtremeSavingsSummary) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Text("Movimientos de ahorro")
+                    .font(.headline.weight(.black))
+                    .foregroundStyle(AppTheme.ink)
+                Spacer()
+                Button { showingContribution = true } label: {
+                    Image(systemName: "plus.circle.fill")
+                        .font(.title3)
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(AppTheme.green)
+                .help("Registrar ahorro")
+            }
+
+            if summary.contributions.isEmpty {
+                Text("Todavía no hay traspasos registrados. El primer movimiento debe hacerse al recibir el próximo cobro de Shopify.")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(AppTheme.muted)
+                    .fixedSize(horizontal: false, vertical: true)
+            } else {
+                ForEach(summary.contributions.prefix(12)) { item in
+                    HStack(spacing: 10) {
+                        Image(systemName: "arrow.down.to.line.circle.fill")
+                            .foregroundStyle(AppTheme.green)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(item.contributedAt.formatted(date: .abbreviated, time: .omitted))
+                                .font(.caption.weight(.black))
+                                .foregroundStyle(AppTheme.ink)
+                            if let notes = item.notes, !notes.isEmpty {
+                                Text(notes)
+                                    .font(.caption2.weight(.semibold))
+                                    .foregroundStyle(AppTheme.muted)
+                            }
+                        }
+                        Spacer()
+                        Text("+\(formatMoney(item.amount, currency: summary.currency))")
+                            .font(.subheadline.weight(.black))
+                            .foregroundStyle(AppTheme.green)
+                        Button(role: .destructive) {
+                            Task { await deleteContribution(item) }
+                        } label: {
+                            Image(systemName: "trash")
+                        }
+                        .buttonStyle(.plain)
+                        .help("Eliminar movimiento")
+                    }
+                    .padding(.vertical, 5)
+                }
+            }
+        }
+        .glassPanel(padding: 16, accent: AppTheme.green)
+    }
+
+    private func load() async {
+        guard let client = store.apiClient else { error = "API no configurada"; return }
+        loading = true
+        defer { loading = false }
+        do {
+            summary = try await client.extremeSavingsPlan()
+            error = nil
+        } catch {
+            self.error = error.localizedDescription
+        }
+    }
+
+    private func addContribution(amount: Double, notes: String?) async -> Bool {
+        guard let client = store.apiClient else { return false }
+        do {
+            try await client.addExtremeSavingsContribution(amount: amount, notes: notes)
+            await load()
+            return true
+        } catch {
+            self.error = error.localizedDescription
+            return false
+        }
+    }
+
+    private func deleteContribution(_ contribution: ExtremeSavingsContribution) async {
+        guard let client = store.apiClient else { return }
+        do {
+            try await client.deleteExtremeSavingsContribution(id: contribution.id)
+            await load()
+        } catch {
+            self.error = error.localizedDescription
+        }
+    }
+
+    private func pay(liability: ExtremeSavingsLiability, amount: Double) async -> Bool {
+        guard let client = store.apiClient else { return false }
+        do {
+            try await client.payExtremeSavingsLiability(id: liability.id, amount: amount)
+            await load()
+            return true
+        } catch {
+            self.error = error.localizedDescription
+            return false
+        }
+    }
+
+    private func variableValue(_ item: ExtremeSavingsVariableItem, currency: String) -> String {
+        switch item.unit {
+        case "PORCENTAJE_VENTA", "PORCENTAJE_PRODUCCION": return "\(percentage(item.amount))%"
+        case "VARIABLE": return item.amount > 0 ? formatMoney(item.amount, currency: currency) : "Según gasto"
+        default: return formatMoney(item.amount, currency: currency)
+        }
+    }
+
+    private func percentage(_ value: Double) -> String {
+        value.formatted(.number.precision(.fractionLength(value.rounded() == value ? 0 : 1)))
+    }
+}
+
+struct ExtremeSavingsMetric: View {
+    let title: String
+    let value: String
+    let color: Color
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(title.uppercased())
+                .font(.caption2.weight(.black))
+                .foregroundStyle(AppTheme.muted)
+            Text(value)
+                .font(.subheadline.weight(.black))
+                .foregroundStyle(color)
+                .lineLimit(1)
+                .minimumScaleFactor(0.62)
+        }
+        .frame(maxWidth: .infinity, minHeight: 48, alignment: .leading)
+        .padding(10)
+        .background(AppTheme.surfaceSoft)
+        .overlay(RoundedRectangle(cornerRadius: 12).stroke(AppTheme.line))
+        .clipShape(RoundedRectangle(cornerRadius: 12))
+    }
+}
+
+struct ExtremeSavingsAllocationBar: View {
+    let items: [ExtremeSavingsAllocationItem]
+
+    private var total: Double {
+        max(0.01, items.reduce(0) { $0 + max(0, $1.amount) })
+    }
+
+    var body: some View {
+        GeometryReader { proxy in
+            HStack(spacing: 2) {
+                ForEach(items) { item in
+                    Rectangle()
+                        .fill(extremeSavingsColor(item.color))
+                        .frame(width: max(2, proxy.size.width * item.amount / total))
+                }
+            }
+            .clipShape(RoundedRectangle(cornerRadius: 5))
+        }
+        .frame(height: 12)
+        .accessibilityLabel("Distribución de cada cien euros")
+    }
+}
+
+struct ExtremeSavingsContributionSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    @State private var amount = ""
+    @State private var notes = ""
+    @State private var saving = false
+    let onSave: (Double, String?) async -> Bool
+
+    private var parsedAmount: Double? {
+        Double(amount.replacingOccurrences(of: ",", with: "."))
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("Nuevo ahorro") {
+                    TextField("Importe", text: $amount)
+                    TextField("Nota opcional", text: $notes)
+                }
+                Section {
+                    Text("Registra solo el dinero que ya hayas movido a una cuenta o espacio separado.")
+                        .font(.footnote)
+                        .foregroundStyle(AppTheme.muted)
+                }
+            }
+            .navigationTitle("Registrar ahorro")
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button("Cancelar") { dismiss() } }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Guardar") {
+                        guard let value = parsedAmount, value > 0 else { return }
+                        saving = true
+                        Task {
+                            if await onSave(value, notes.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : notes) {
+                                dismiss()
+                            }
+                            saving = false
+                        }
+                    }
+                    .disabled(saving || (parsedAmount ?? 0) <= 0)
+                }
+            }
+        }
+        .frame(minWidth: 360, minHeight: 260)
+    }
+}
+
+struct ExtremeLiabilityPaymentSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    @State private var amount = ""
+    @State private var saving = false
+    let liability: ExtremeSavingsLiability
+    let currency: String
+    let onSave: (Double) async -> Bool
+
+    private var parsedAmount: Double? {
+        Double(amount.replacingOccurrences(of: ",", with: "."))
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section(liability.name) {
+                    LabeledContent("Pendiente", value: formatMoney(liability.remainingAmount, currency: currency))
+                    TextField("Importe pagado", text: $amount)
+                }
+            }
+            .navigationTitle("Registrar pago")
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button("Cancelar") { dismiss() } }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Guardar") {
+                        guard let value = parsedAmount, value > 0 else { return }
+                        saving = true
+                        Task {
+                            if await onSave(value) { dismiss() }
+                            saving = false
+                        }
+                    }
+                    .disabled(saving || (parsedAmount ?? 0) <= 0)
+                }
+            }
+        }
+        .frame(minWidth: 360, minHeight: 240)
+    }
+}
+
+private func extremeSavingsColor(_ name: String) -> Color {
+    switch name.uppercased() {
+    case "GREEN": AppTheme.green
+    case "AMBER": AppTheme.amber
+    case "RED": AppTheme.red
+    case "PURPLE": AppTheme.purple
+    default: AppTheme.blue
     }
 }
 

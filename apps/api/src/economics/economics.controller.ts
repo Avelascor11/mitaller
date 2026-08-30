@@ -47,6 +47,26 @@ export class EconomicsController {
     return this.economics.salesCashflow();
   }
 
+  @Get('extreme-savings')
+  extremeSavingsPlan() {
+    return this.economics.extremeSavingsPlan();
+  }
+
+  @Post('extreme-savings/contributions')
+  addExtremeSavingsContribution(@Body() body: { amount?: number; contributedAt?: string; notes?: string | null }) {
+    return this.economics.addExtremeSavingsContribution(body);
+  }
+
+  @Delete('extreme-savings/contributions/:id')
+  deleteExtremeSavingsContribution(@Param('id') id: string) {
+    return this.economics.deleteExtremeSavingsContribution(id);
+  }
+
+  @Post('extreme-savings/liabilities/:id/pay')
+  payExtremeSavingsLiability(@Param('id') id: string, @Body() body: { amount?: number }) {
+    return this.economics.payExtremeSavingsLiability(id, body);
+  }
+
   @Get('preorders/retro-aston')
   retroAstonPlan() {
     return this.economics.retroAstonPlan();

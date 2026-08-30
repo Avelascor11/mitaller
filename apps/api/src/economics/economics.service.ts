@@ -8,6 +8,8 @@ import { PurchaseService } from '../purchasing/purchase.service';
 import { ShopifyAdapter, ShopifyBalanceTransaction } from '../shopify/shopify.adapter';
 
 const SHOPIFY_FEE_RATE = 0.024; // 2.4 % comisión Shopify Payments
+const EXTREME_SAVINGS_PLAN_ID = 'speedwear-extreme';
+const EXTREME_SAVINGS_SEED_VERSION = 1;
 
 interface ItemCost {
   blank: number;
@@ -751,6 +753,280 @@ export class EconomicsService {
     };
   }
 
+  async extremeSavingsPlan() {
+    const plan = await this.ensureExtremeSavingsPlan();
+    const now = new Date();
+    const currentMonthStart = new Date(now.getFullYear(), now.getMonth(), 1, 0, 0, 0, 0);
+
+    const [fixedExpenses, contributions, liabilities, orders, currentAdSpend, bankAccounts] = await Promise.all([
+      this.fixedExpenses(),
+      this.prisma.extremeSavingsContribution.findMany({
+        where: { planId: plan.id },
+        orderBy: { contributedAt: 'desc' }
+      }),
+      this.prisma.extremeSavingsLiability.findMany({
+        where: { planId: plan.id, active: true },
+        orderBy: [{ priority: 'asc' }, { name: 'asc' }]
+      }),
+      this.prisma.order.findMany({
+        where: {
+          orderedAt: { gte: plan.revenueStartAt, lte: now },
+          operationalStatus: { not: OperationalStatus.CANCELLED }
+        },
+        include: { items: true, shipments: true },
+        orderBy: { orderedAt: 'asc' }
+      }),
+      this.meta.spendForRange(currentMonthStart.toISOString().slice(0, 10), now.toISOString().slice(0, 10)).catch(() => 0),
+      this.bank.accounts().catch(() => ({
+        currency: 'EUR',
+        totalBalance: 0,
+        balanceAvailable: false,
+        accounts: [] as Array<Record<string, unknown>>
+      }))
+    ]);
+
+    const activeOrders = orders.filter((order) => !['refunded', 'voided', 'cancelled'].includes(String(order.financialStatus ?? '').toLowerCase()));
+    const breakdowns = activeOrders.map((order) => this.computeOrderBreakdown(order));
+    const trackedRevenue = this.roundMoney(breakdowns.reduce((sum, item) => sum + item.grossRevenue, 0));
+    const reportedRevenue = this.roundMoney(plan.reportedRevenue);
+    const trackedDataIsComplete = trackedRevenue >= reportedRevenue * 0.8;
+    const historicalRevenue = trackedDataIsComplete ? trackedRevenue : Math.max(trackedRevenue, reportedRevenue);
+    const monthsTracked = this.inclusiveMonthCount(plan.revenueStartAt, now);
+    const averageMonthlyRevenue = this.roundMoney(historicalRevenue / Math.max(1, monthsTracked));
+
+    const historicalProductCost = breakdowns.reduce((sum, item) => sum + item.productCost, 0);
+    const historicalWasteCost = breakdowns.reduce((sum, item) => sum + item.wasteCost, 0);
+    const historicalShippingCost = breakdowns.reduce((sum, item) => sum + item.shippingCost, 0);
+    const historicalShopifyFees = breakdowns.reduce((sum, item) => sum + item.shopifyFee, 0);
+    const historicalTaxReserve = breakdowns.reduce((sum, item) => sum + item.taxReserve, 0);
+    const historicalVariableCost = historicalProductCost + historicalWasteCost + historicalShippingCost + historicalShopifyFees + historicalTaxReserve;
+    const fallbackVariableRate = this.productionRate() + this.shippingRate() + SHOPIFY_FEE_RATE + this.taxReserveRate();
+    const variableRate = trackedRevenue > 0
+      ? Math.min(0.75, Math.max(0, historicalVariableCost / trackedRevenue))
+      : fallbackVariableRate;
+
+    const currentBreakdowns = breakdowns.filter((item) => item.orderedAt >= currentMonthStart);
+    const currentRevenue = this.roundMoney(currentBreakdowns.reduce((sum, item) => sum + item.grossRevenue, 0));
+    const currentVariableCost = this.roundMoney(
+      currentBreakdowns.reduce((sum, item) => sum + item.productCost + item.wasteCost + item.shippingCost + item.shopifyFee + item.taxReserve, 0)
+      + currentAdSpend
+    );
+
+    const recordedSavingsAmount = this.roundMoney(contributions.reduce((sum, contribution) => sum + contribution.amount, 0));
+    const savingsAccounts = bankAccounts.accounts.filter((account: any) => this.isSavingsBankAccount(account));
+    const detectedSavingsAmount = this.roundMoney(savingsAccounts.reduce((sum: number, account: any) => {
+      const balance = account.currentBalance ?? account.availableBalance ?? 0;
+      return sum + Math.max(0, Number(balance) || 0);
+    }, 0));
+    // A manual movement may describe the same money held in the savings account.
+    // Taking the greater amount prevents counting it twice.
+    const savedAmount = this.roundMoney(Math.max(recordedSavingsAmount, detectedSavingsAmount));
+    const remainingGoal = this.roundMoney(Math.max(0, plan.goalAmount - savedAmount));
+    const liabilityItems = liabilities.map((item) => ({
+      id: item.id,
+      name: item.name,
+      category: item.category,
+      originalAmount: this.roundMoney(item.originalAmount),
+      paidAmount: this.roundMoney(item.paidAmount),
+      remainingAmount: this.roundMoney(Math.max(0, item.originalAmount - item.paidAmount)),
+      monthlyPayment: item.monthlyPayment == null ? null : this.roundMoney(item.monthlyPayment),
+      interestRate: item.interestRate,
+      priority: item.priority,
+      notes: item.notes
+    }));
+    const liabilitiesOriginal = this.roundMoney(liabilityItems.reduce((sum, item) => sum + item.originalAmount, 0));
+    const liabilitiesPaid = this.roundMoney(liabilityItems.reduce((sum, item) => sum + item.paidAmount, 0));
+    const liabilitiesRemaining = this.roundMoney(liabilityItems.reduce((sum, item) => sum + item.remainingAmount, 0));
+
+    const fixedRate = averageMonthlyRevenue > 0 ? Math.min(1, fixedExpenses.totalMonthly / averageMonthlyRevenue) : 0;
+    const debtRate = liabilitiesRemaining > 0 ? 0.20 : 0;
+    const minimumBufferRate = 0.05;
+    const roomForSavings = Math.max(0, 1 - variableRate - fixedRate - debtRate - minimumBufferRate);
+    const recommendedSavingsRate = Math.min(0.20, roomForSavings);
+    const afterDebtSavingsRate = Math.min(0.25, Math.max(0, 1 - variableRate - fixedRate - minimumBufferRate));
+    const operationsRate = Math.max(0, 1 - variableRate - fixedRate - debtRate - recommendedSavingsRate);
+    const monthlySavingsTarget = this.roundMoney(averageMonthlyRevenue * recommendedSavingsRate);
+    const monthsToGoal = monthlySavingsTarget > 0 ? Math.ceil(remainingGoal / monthlySavingsTarget) : null;
+    const targetDate = monthsToGoal == null ? null : this.addMonths(now, monthsToGoal).toISOString();
+    const currentDebtTarget = this.roundMoney(Math.min(liabilitiesRemaining, currentRevenue * debtRate));
+    const currentSavingsTarget = this.roundMoney(currentRevenue * recommendedSavingsRate);
+    const currentAvailableAfterMandatory = this.roundMoney(Math.max(0, currentRevenue - currentVariableCost - fixedExpenses.totalMonthly - currentDebtTarget));
+    const safeSavingsThisMonth = this.roundMoney(Math.min(currentSavingsTarget, currentAvailableAfterMandatory));
+
+    const bankBalanceAvailable = Boolean(bankAccounts.balanceAvailable);
+    const bankTotalBalance = this.roundMoney(bankAccounts.totalBalance ?? 0);
+    const operatingBalance = this.roundMoney(bankTotalBalance - detectedSavingsAmount);
+    const safetyBuffer = this.roundMoney(this.cashSafetyBuffer());
+    const pendingFixedExpenses = this.roundMoney(fixedExpenses.pending);
+    const protectedCash = this.roundMoney(pendingFixedExpenses + safetyBuffer);
+    const availableForAllocation = this.roundMoney(Math.max(0, operatingBalance - protectedCash));
+    const cashShortfall = this.roundMoney(Math.max(0, protectedCash - operatingBalance));
+    const savingsSource = detectedSavingsAmount > 0 && detectedSavingsAmount >= recordedSavingsAmount
+      ? 'BANK'
+      : recordedSavingsAmount > 0
+        ? 'MANUAL'
+        : 'NONE';
+    const bankAccountItems = bankAccounts.accounts.map((account: any) => ({
+      id: account.id,
+      name: account.name,
+      institutionName: account.institutionName ?? null,
+      currency: account.currency ?? bankAccounts.currency ?? 'EUR',
+      balance: account.currentBalance ?? account.availableBalance ?? null,
+      isSavings: this.isSavingsBankAccount(account),
+      balanceUpdatedAt: account.balanceUpdatedAt ?? null,
+      balanceError: account.balanceError ?? null
+    }));
+
+    const fixedItems = fixedExpenses.items.map((item: any) => ({
+      id: item.id,
+      name: item.name,
+      category: item.category,
+      amount: this.roundMoney(item.amount),
+      dueDay: item.dueDay,
+      active: item.active,
+      notes: item.notes
+    }));
+
+    return {
+      currency: fixedExpenses.currency ?? 'EUR',
+      plan: {
+        id: plan.id,
+        goalAmount: this.roundMoney(plan.goalAmount),
+        savedAmount,
+        remainingGoal,
+        progressPct: plan.goalAmount > 0 ? this.roundMoney((savedAmount / plan.goalAmount) * 100) : 100,
+        revenueStartAt: plan.revenueStartAt,
+        monthsToGoal,
+        targetDate
+      },
+      bank: {
+        connected: bankAccounts.accounts.length > 0,
+        balanceAvailable: bankBalanceAvailable,
+        currency: bankAccounts.currency ?? fixedExpenses.currency ?? 'EUR',
+        totalBalance: bankTotalBalance,
+        operatingBalance,
+        detectedSavingsAmount,
+        recordedSavingsAmount,
+        effectiveSavingsAmount: savedAmount,
+        savingsSource,
+        pendingFixedExpenses,
+        safetyBuffer,
+        protectedCash,
+        availableForAllocation,
+        cashShortfall,
+        accounts: bankAccountItems,
+        recommendation: !bankAccounts.accounts.length
+          ? 'Conecta el banco en la pestaña Banco para calcular la caja real.'
+          : !bankBalanceAvailable
+            ? 'La cuenta está conectada, pero no se ha podido leer el saldo. Sincroniza o renueva el permiso bancario.'
+            : savingsAccounts.length === 0
+              ? 'No se ha detectado una cuenta de ahorro. Pon “Ahorro” o “Ahorro 15K” en el nombre del espacio para contarla automáticamente.'
+              : cashShortfall > 0
+                ? `Faltan ${cashShortfall.toFixed(2)} € para cubrir los gastos fijos pendientes y el colchón mínimo.`
+                : 'La caja operativa cubre los gastos fijos pendientes y el colchón mínimo.'
+      },
+      revenue: {
+        trackedRevenue,
+        reportedRevenue,
+        historicalRevenue: this.roundMoney(historicalRevenue),
+        source: trackedDataIsComplete ? 'ORDERS' : 'REPORTED',
+        monthsTracked,
+        averageMonthlyRevenue,
+        currentMonthRevenue: currentRevenue,
+        orderCount: breakdowns.length
+      },
+      costs: {
+        fixed: {
+          monthlyTotal: this.roundMoney(fixedExpenses.totalMonthly),
+          ratePct: this.roundMoney(fixedRate * 100),
+          activeCount: fixedExpenses.activeCount,
+          items: fixedItems
+        },
+        variable: {
+          historicalTotal: this.roundMoney(historicalVariableCost),
+          currentMonthTotal: currentVariableCost,
+          currentAdSpend: this.roundMoney(currentAdSpend),
+          ratePct: this.roundMoney(variableRate * 100),
+          items: this.extremeSavingsVariableCosts()
+        },
+        liabilities: {
+          originalTotal: liabilitiesOriginal,
+          paidTotal: liabilitiesPaid,
+          remainingTotal: liabilitiesRemaining,
+          items: liabilityItems
+        }
+      },
+      allocation: {
+        variablePct: this.roundMoney(variableRate * 100),
+        fixedPct: this.roundMoney(fixedRate * 100),
+        debtPct: this.roundMoney(debtRate * 100),
+        savingsPct: this.roundMoney(recommendedSavingsRate * 100),
+        operationsPct: this.roundMoney(operationsRate * 100),
+        afterDebtSavingsPct: this.roundMoney(afterDebtSavingsRate * 100),
+        monthlySavingsTarget,
+        perHundred: [
+          { key: 'VARIABLE', label: 'Producción, envíos, Shopify e impuestos', amount: this.roundMoney(variableRate * 100), color: 'BLUE' },
+          { key: 'FIXED', label: 'Gastos fijos', amount: this.roundMoney(fixedRate * 100), color: 'AMBER' },
+          { key: 'DEBT', label: 'Deuda y atrasos', amount: this.roundMoney(debtRate * 100), color: 'RED' },
+          { key: 'SAVINGS', label: 'Ahorro 15.000 €', amount: this.roundMoney(recommendedSavingsRate * 100), color: 'GREEN' },
+          { key: 'OPERATIONS', label: 'Colchón operativo', amount: this.roundMoney(operationsRate * 100), color: 'PURPLE' }
+        ],
+        headline: recommendedSavingsRate >= 0.20
+          ? 'El 20% de cada cobro puede ir directo al ahorro.'
+          : `Ahora mismo el porcentaje prudente es ${this.roundMoney(recommendedSavingsRate * 100)}%.`,
+        recommendation: liabilitiesRemaining > 0
+          ? 'Separa el ahorro al cobrar y usa el bloque de deuda para poner al día luz e internet; después acelera Cetelem. Cuando terminen, el porcentaje de ahorro sube automáticamente.'
+          : 'Sin atrasos pendientes, aumenta el traspaso de ahorro hasta el porcentaje posterior a deuda.'
+      },
+      currentMonth: {
+        revenue: currentRevenue,
+        variableCost: currentVariableCost,
+        fixedCost: this.roundMoney(fixedExpenses.totalMonthly),
+        debtTarget: currentDebtTarget,
+        savingsTarget: currentSavingsTarget,
+        safeSavings: safeSavingsThisMonth,
+        availableAfterMandatory: currentAvailableAfterMandatory
+      },
+      contributions: contributions.map((item) => ({
+        id: item.id,
+        amount: this.roundMoney(item.amount),
+        contributedAt: item.contributedAt,
+        notes: item.notes
+      }))
+    };
+  }
+
+  async addExtremeSavingsContribution(body: { amount?: number; contributedAt?: string; notes?: string | null }) {
+    const plan = await this.ensureExtremeSavingsPlan();
+    const amount = Number(body.amount);
+    if (!Number.isFinite(amount) || amount <= 0) throw new BadRequestException('El ahorro debe ser mayor que cero');
+    return this.prisma.extremeSavingsContribution.create({
+      data: {
+        planId: plan.id,
+        amount: this.money(amount),
+        contributedAt: body.contributedAt ? new Date(body.contributedAt) : new Date(),
+        notes: body.notes?.trim() || null
+      }
+    });
+  }
+
+  async deleteExtremeSavingsContribution(id: string) {
+    await this.prisma.extremeSavingsContribution.deleteMany({ where: { id, planId: EXTREME_SAVINGS_PLAN_ID } });
+    return { ok: true, id };
+  }
+
+  async payExtremeSavingsLiability(id: string, body: { amount?: number }) {
+    await this.ensureExtremeSavingsPlan();
+    const amount = Number(body.amount);
+    if (!Number.isFinite(amount) || amount <= 0) throw new BadRequestException('El pago debe ser mayor que cero');
+    const liability = await this.prisma.extremeSavingsLiability.findFirst({ where: { id, planId: EXTREME_SAVINGS_PLAN_ID, active: true } });
+    if (!liability) throw new BadRequestException('Deuda no encontrada');
+    return this.prisma.extremeSavingsLiability.update({
+      where: { id },
+      data: { paidAmount: this.roundMoney(Math.min(liability.originalAmount, liability.paidAmount + amount)) }
+    });
+  }
+
   async retroAstonPlan() {
     const preorderKey = this.retroAstonPreorderKey();
     const milestones = this.retroAstonMilestones();
@@ -956,6 +1232,148 @@ export class EconomicsService {
   private isRetroAstonItem(item: { title: string; variantTitle: string | null; sku: string }) {
     const text = this.normalizeSearchText([item.title, item.variantTitle, item.sku].filter(Boolean).join(' '));
     return text.includes('retro') && (text.includes('aston') || text.includes('astn') || text.includes('alonso'));
+  }
+
+  private async ensureExtremeSavingsPlan() {
+    let plan = await this.prisma.extremeSavingsPlan.upsert({
+      where: { id: EXTREME_SAVINGS_PLAN_ID },
+      create: {
+        id: EXTREME_SAVINGS_PLAN_ID,
+        goalAmount: 15000,
+        reportedRevenue: 114000,
+        revenueStartAt: new Date('2025-11-01T00:00:00.000Z')
+      },
+      update: {}
+    });
+
+    if (plan.seedVersion >= EXTREME_SAVINGS_SEED_VERSION) return plan;
+
+    const fixedSeeds = [
+      { name: 'Alquiler taller', aliases: ['Alquiler'], category: 'ALQUILER', amount: 363, dueDay: 10, active: true, notes: 'Pago entre los días 1 y 10.' },
+      { name: 'Luz taller (estimación)', aliases: ['Luz'], category: 'SUMINISTROS', amount: 91.18, dueDay: null, active: true, notes: 'Media provisional de las cinco facturas pendientes. Ajustar cuando llegue una factura mensual normal.' },
+      { name: 'Internet taller', aliases: ['Internet'], category: 'TELECOM', amount: 36, dueDay: null, active: true, notes: 'Cuota mensual habitual.' },
+      { name: 'Cuota autónomos', aliases: ['Autónomos', 'Autonomos'], category: 'AUTONOMOS', amount: 150, dueDay: null, active: true, notes: 'Cuota mensual.' },
+      { name: 'Préstamo Retro / Cetelem', aliases: ['Préstamo', 'Prestamo'], category: 'DEUDA', amount: 85, dueDay: 3, active: true, notes: 'Pago mínimo mensual. El plan añade amortización extraordinaria para reducir intereses.' },
+      { name: 'Shopify', aliases: [], category: 'SOFTWARE', amount: 70, dueDay: null, active: true, notes: 'Estimación mensual.' },
+      { name: 'Klaviyo', aliases: [], category: 'SOFTWARE', amount: 129.46, dueDay: 11, active: true, notes: 'Ciclo de facturación mensual iniciado el día 11.' },
+      { name: 'Dominio web', aliases: ['Dominio'], category: 'SOFTWARE', amount: 5.99, dueDay: 27, active: true, notes: 'Renovación mensual.' },
+      { name: 'Canva', aliases: [], category: 'SOFTWARE', amount: 16, dueDay: null, active: true, notes: 'Suscripción mensual.' },
+      { name: 'ChatGPT', aliases: [], category: 'SOFTWARE', amount: 19, dueDay: null, active: true, notes: 'Suscripción mensual.' },
+      { name: 'Diseñador - pack 3 diseños', aliases: ['Diseñador'], category: 'DISENO', amount: 365, dueDay: null, active: false, notes: 'Condicional: activar solo el mes en que se encarguen tres diseños.' },
+      { name: 'Agua', aliases: [], category: 'SUMINISTROS', amount: 0, dueDay: null, active: false, notes: 'Actualmente sin coste.' },
+      { name: 'Gestoría', aliases: ['Gestoria'], category: 'GESTORIA', amount: 0, dueDay: null, active: false, notes: 'Actualmente sin coste.' },
+      { name: 'Seguro', aliases: [], category: 'SEGUROS', amount: 0, dueDay: null, active: false, notes: 'Actualmente sin coste.' }
+    ];
+
+    await this.prisma.$transaction(async (tx) => {
+      for (const seed of fixedSeeds) {
+        const names = [seed.name, ...seed.aliases];
+        const existing = await tx.fixedExpense.findFirst({ where: { name: { in: names, mode: 'insensitive' } } });
+        const data = {
+          name: seed.name,
+          category: seed.category,
+          amount: seed.amount,
+          currency: 'EUR',
+          dueDay: seed.dueDay,
+          active: seed.active,
+          notes: seed.notes
+        };
+        if (existing) await tx.fixedExpense.update({ where: { id: existing.id }, data });
+        else await tx.fixedExpense.create({ data });
+      }
+
+      for (const liability of [
+        {
+          id: 'extreme-cetelem-retro',
+          name: 'Deuda Retro / Cetelem',
+          category: 'DEUDA_INTERESES',
+          originalAmount: 2738.48,
+          monthlyPayment: 85,
+          interestRate: 19.56,
+          priority: 3,
+          notes: 'Deuda cara por su TAE. Acelerar al terminar los atrasos de suministros, sin dejar descubiertos alquiler ni pedidos.'
+        },
+        {
+          id: 'extreme-electricity-arrears',
+          name: 'Facturas de luz pendientes',
+          category: 'ATRASO_SUMINISTROS',
+          originalAmount: 455.91,
+          monthlyPayment: null,
+          interestRate: null,
+          priority: 1,
+          notes: '54,73 + 46,37 + 41,37 + 135,30 + 178,14 €.'
+        },
+        {
+          id: 'extreme-internet-arrears',
+          name: 'Facturas de internet pendientes',
+          category: 'ATRASO_TELECOM',
+          originalAmount: 172.52,
+          monthlyPayment: null,
+          interestRate: null,
+          priority: 2,
+          notes: '28,52 + 36 + 36 + 36 + 36 €.'
+        }
+      ]) {
+        await tx.extremeSavingsLiability.upsert({
+          where: { id: liability.id },
+          create: { ...liability, planId: plan.id },
+          update: {
+            name: liability.name,
+            category: liability.category,
+            originalAmount: liability.originalAmount,
+            monthlyPayment: liability.monthlyPayment,
+            interestRate: liability.interestRate,
+            priority: liability.priority,
+            notes: liability.notes,
+            active: true
+          }
+        });
+      }
+
+      await tx.extremeSavingsPlan.update({
+        where: { id: plan.id },
+        data: { seedVersion: EXTREME_SAVINGS_SEED_VERSION }
+      });
+    });
+
+    plan = await this.prisma.extremeSavingsPlan.findUniqueOrThrow({ where: { id: plan.id } });
+    return plan;
+  }
+
+  private extremeSavingsVariableCosts() {
+    return [
+      { id: 'tee-white', name: 'Camiseta blanca normal', amount: 3.23, unit: 'POR_UNIDAD', notes: 'Prenda 2,73 € + impresión 0,50 €.' },
+      { id: 'tee-black', name: 'Camiseta negra normal', amount: 5.43, unit: 'POR_UNIDAD', notes: 'Prenda 2,73 € + DTF 2,70 €.' },
+      { id: 'tee-boxy', name: 'Camiseta blanca BOXY', amount: 5.40, unit: 'POR_UNIDAD', notes: 'Prenda 4,90 € + impresión 0,50 €. Costes trabajados sin IVA recuperable.' },
+      { id: 'sweatshirt-white', name: 'Sudadera blanca', amount: 11.25, unit: 'POR_UNIDAD', notes: 'Prenda 10,75 € + impresión estimada 0,50 €.' },
+      { id: 'sweatshirt-color', name: 'Sudadera negra o Light Pink', amount: 13.45, unit: 'POR_UNIDAD', notes: 'Prenda 10,75 € + DTF 2,70 €.' },
+      { id: 'swimsuit', name: 'Bañador', amount: 7.43, unit: 'POR_UNIDAD', notes: 'Prenda 4,725 € + DTF 2,70 €.' },
+      { id: 'shipping-light', name: 'Envío ligero España', amount: 3.31, unit: 'POR_ENVIO', notes: 'Reserva según método real.' },
+      { id: 'shipping-standard', name: 'Envío estándar España', amount: 3.81, unit: 'POR_ENVIO', notes: 'Reserva según método real.' },
+      { id: 'shipping-premium', name: 'Envío premium España', amount: 4.26, unit: 'POR_ENVIO', notes: 'Reserva según método real.' },
+      { id: 'shipping-heavy', name: 'Envío España 1-2 kg', amount: 3.98, unit: 'POR_ENVIO', notes: 'Reserva para pedidos de mayor peso.' },
+      { id: 'shipping-international', name: 'Envío internacional', amount: 12.45, unit: 'POR_ENVIO', notes: 'Estimación base.' },
+      { id: 'shopify-fee', name: 'Comisión Shopify Payments', amount: SHOPIFY_FEE_RATE * 100, unit: 'PORCENTAJE_VENTA', notes: '2,4% sobre ventas cobradas.' },
+      { id: 'tax-reserve', name: 'Reserva fiscal', amount: this.taxReserveRate() * 100, unit: 'PORCENTAJE_VENTA', notes: 'Dinero intocable para impuestos.' },
+      { id: 'waste', name: 'Merma de producción', amount: this.wasteRate() * 100, unit: 'PORCENTAJE_PRODUCCION', notes: 'Reserva para errores y prendas dañadas.' },
+      { id: 'designer', name: 'Diseñador - 3 diseños', amount: 365, unit: 'POR_ENCARGO', notes: 'Solo se cuenta cuando se contrata.' },
+      { id: 'ads', name: 'Publicidad', amount: 0, unit: 'VARIABLE', notes: 'Actualmente sin campañas. El gasto real se suma automáticamente cuando Meta tenga actividad.' }
+    ];
+  }
+
+  private inclusiveMonthCount(start: Date, end: Date) {
+    return Math.max(1, (end.getFullYear() - start.getFullYear()) * 12 + end.getMonth() - start.getMonth() + 1);
+  }
+
+  private addMonths(date: Date, months: number) {
+    const result = new Date(date);
+    result.setMonth(result.getMonth() + months);
+    return result;
+  }
+
+  private isSavingsBankAccount(account: { name?: string | null; product?: string | null; cashAccountType?: string | null }) {
+    const text = this.normalizeSearchText([account.name, account.product, account.cashAccountType].filter(Boolean).join(' '));
+    return ['ahorro', 'savings', 'saving', 'vault', 'hucha', '15k', '15000'].some((keyword) => text.includes(keyword));
   }
 
   private normalizeSearchText(value: string) {
@@ -1392,6 +1810,7 @@ export class EconomicsService {
     const isCamiseta = !isBanador && (/camiset/.test(type) || !isSudadera);
     const isBlack = /negro|black/.test(color);
     const isWhite = /blanco|white/.test(color);
+    const isPink = /rosa|pink/.test(color);
 
     let blank = 0;
     let print = 0;
@@ -1402,9 +1821,9 @@ export class EconomicsService {
       description = 'Bañador (DTF espalda+frontal)';
     } else if (isSudadera) {
       blank = 10.75;
-      if (isBlack) {
+      if (isBlack || isPink) {
         print = 2.25 + 0.45;
-        description = 'Sudadera negra (DTF espalda+frontal)';
+        description = isPink ? 'Sudadera Light Pink (DTF espalda+frontal)' : 'Sudadera negra (DTF espalda+frontal)';
       } else {
         print = 0.50;
         description = 'Sudadera blanca (DTG)';

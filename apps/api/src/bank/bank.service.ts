@@ -175,6 +175,7 @@ export class BankService {
         currency: account.currency ?? 'EUR',
         ownerName: account.ownerName,
         product: account.product,
+        cashAccountType: account.cashAccountType,
         currentBalance,
         availableBalance: account.availableBalance ?? account.currentBalance ?? null,
         balanceUpdatedAt: account.balanceUpdatedAt ?? null,

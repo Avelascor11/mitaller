@@ -667,6 +667,53 @@ model FixedExpensePayment {
   @@map("fixed_expense_payments")
 }
 
+model ExtremeSavingsPlan {
+  id                String                       @id @default("speedwear-extreme")
+  goalAmount        Float                        @default(15000)
+  reportedRevenue   Float                        @default(114000)
+  revenueStartAt    DateTime                     @default(dbgenerated("'2025-11-01 00:00:00'::timestamp without time zone"))
+  seedVersion       Int                          @default(0)
+  createdAt         DateTime                     @default(now())
+  updatedAt         DateTime                     @updatedAt
+  contributions     ExtremeSavingsContribution[]
+  liabilities       ExtremeSavingsLiability[]
+
+  @@map("extreme_savings_plans")
+}
+
+model ExtremeSavingsContribution {
+  id            String             @id @default(cuid())
+  planId        String
+  amount        Float
+  contributedAt DateTime           @default(now())
+  notes         String?
+  createdAt     DateTime           @default(now())
+  plan          ExtremeSavingsPlan @relation(fields: [planId], references: [id], onDelete: Cascade)
+
+  @@index([planId, contributedAt])
+  @@map("extreme_savings_contributions")
+}
+
+model ExtremeSavingsLiability {
+  id             String             @id
+  planId         String
+  name           String
+  category       String
+  originalAmount Float
+  paidAmount     Float              @default(0)
+  monthlyPayment Float?
+  interestRate   Float?
+  priority       Int                @default(1)
+  notes          String?
+  active         Boolean            @default(true)
+  createdAt      DateTime           @default(now())
+  updatedAt      DateTime           @updatedAt
+  plan           ExtremeSavingsPlan @relation(fields: [planId], references: [id], onDelete: Cascade)
+
+  @@index([planId, active, priority])
+  @@map("extreme_savings_liabilities")
+}
+
 model Employee {
   id              String                      @id @default(cuid())
   name            String

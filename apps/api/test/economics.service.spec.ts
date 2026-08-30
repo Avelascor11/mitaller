@@ -22,6 +22,7 @@ function service(config: Record<string, string> = {}) {
       cashFree: number;
       netMargin: number;
     };
+    isSavingsBankAccount: (account: { name?: string | null; product?: string | null; cashAccountType?: string | null }) => boolean;
   };
 }
 
@@ -46,6 +47,14 @@ function fixedExpenseService(expenses: unknown[]) {
 }
 
 describe('EconomicsService', () => {
+  it('solo trata como ahorro las cuentas identificadas para ese fin', () => {
+    const economics = service();
+
+    expect(economics.isSavingsBankAccount({ name: 'Ahorro 15K' })).toBe(true);
+    expect(economics.isSavingsBankAccount({ name: 'N26 Main Account', product: 'Current Account' })).toBe(false);
+    expect(economics.isSavingsBankAccount({ name: 'Reserva impuestos' })).toBe(false);
+  });
+
   it('imputa coste de envio aunque el cliente tenga envio gratis', () => {
     const breakdown = service().computeOrderBreakdown({
       id: 'order-1',
@@ -176,6 +185,37 @@ describe('EconomicsService', () => {
 
     expect(breakdown.taxReserve).toBe(21);
     expect(breakdown.cashFree).toBeCloseTo(72.79);
+  });
+
+  it('calcula la sudadera Light Pink con el nuevo coste y DTF', () => {
+    const breakdown = service().computeOrderBreakdown({
+      id: 'order-pink',
+      orderNumber: '#PINK',
+      customerName: 'Cliente',
+      orderedAt: new Date('2026-08-30T10:00:00Z'),
+      currency: 'EUR',
+      shippingMethod: 'Correos Estandar',
+      shippingCountry: 'ES',
+      subtotalPrice: 49.95,
+      totalShipping: 0,
+      totalDiscount: 0,
+      totalPrice: 49.95,
+      shipments: [],
+      items: [
+        {
+          id: 'pink-sweatshirt',
+          sku: 'WG002-LIGHT-PINK-M',
+          title: 'Sudadera Fernando',
+          productType: 'Sudadera',
+          color: 'Light Pink',
+          size: 'M',
+          quantity: 1,
+          unitPrice: 49.95
+        }
+      ]
+    });
+
+    expect(breakdown.productCost).toBe(13.45);
   });
 
   it('calcula gastos fijos pendientes del mes', async () => {

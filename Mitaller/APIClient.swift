@@ -330,6 +330,28 @@ struct APIClient {
     func economicsProducts() async throws -> [ProductMarginRow] { try await get("/economics/products") }
     func economicsGrowthControl() async throws -> GrowthControlSummary { try await get("/economics/growth-control") }
     func salesCashflow() async throws -> SalesCashflowSummary { try await get("/economics/sales-cashflow") }
+    func extremeSavingsPlan() async throws -> ExtremeSavingsSummary { try await get("/economics/extreme-savings") }
+    func addExtremeSavingsContribution(amount: Double, notes: String? = nil) async throws {
+        let request = try jsonRequest(
+            path: "/economics/extreme-savings/contributions",
+            method: "POST",
+            body: ExtremeSavingsContributionRequest(amount: amount, notes: notes)
+        )
+        let _: EmptyResponse = try await perform(request)
+    }
+    func deleteExtremeSavingsContribution(id: String) async throws {
+        var request = try self.request(path: "/economics/extreme-savings/contributions/\(Self.pathSegment(id))", method: "DELETE")
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        let _: EmptyResponse = try await perform(request)
+    }
+    func payExtremeSavingsLiability(id: String, amount: Double) async throws {
+        let request = try jsonRequest(
+            path: "/economics/extreme-savings/liabilities/\(Self.pathSegment(id))/pay",
+            method: "POST",
+            body: ExtremeSavingsLiabilityPaymentRequest(amount: amount)
+        )
+        let _: EmptyResponse = try await perform(request)
+    }
     func economicsPayouts() async throws -> ShopifyPayoutsSummary { try await get("/economics/payouts") }
     func economicsForOrder(_ id: String) async throws -> OrderBreakdown {
         try await get("/economics/order/\(Self.pathSegment(id))")
@@ -2146,6 +2168,15 @@ private struct FixedExpensePayRequest: Encodable {
     let amount: Double?
 }
 
+private struct ExtremeSavingsContributionRequest: Encodable {
+    let amount: Double
+    let notes: String?
+}
+
+private struct ExtremeSavingsLiabilityPaymentRequest: Encodable {
+    let amount: Double
+}
+
 struct FixedExpenseTemplate: Decodable, Identifiable {
     let name: String
     let category: String
@@ -2225,6 +2256,166 @@ struct FixedExpenseCoverage: Decodable {
         headline = try container.decodeIfPresent(String.self, forKey: .headline) ?? "Gastos fijos"
         recommendation = try container.decodeIfPresent(String.self, forKey: .recommendation) ?? "Revisa tus gastos fijos del mes."
     }
+}
+
+struct ExtremeSavingsSummary: Decodable {
+    let currency: String
+    let plan: ExtremeSavingsPlanProgress
+    let bank: ExtremeSavingsBankSummary
+    let revenue: ExtremeSavingsRevenue
+    let costs: ExtremeSavingsCosts
+    let allocation: ExtremeSavingsAllocation
+    let currentMonth: ExtremeSavingsCurrentMonth
+    let contributions: [ExtremeSavingsContribution]
+}
+
+struct ExtremeSavingsBankSummary: Decodable {
+    let connected: Bool
+    let balanceAvailable: Bool
+    let currency: String
+    let totalBalance: Double
+    let operatingBalance: Double
+    let detectedSavingsAmount: Double
+    let recordedSavingsAmount: Double
+    let effectiveSavingsAmount: Double
+    let savingsSource: String
+    let pendingFixedExpenses: Double
+    let safetyBuffer: Double
+    let protectedCash: Double
+    let availableForAllocation: Double
+    let cashShortfall: Double
+    let accounts: [ExtremeSavingsBankAccount]
+    let recommendation: String
+}
+
+struct ExtremeSavingsBankAccount: Decodable, Identifiable {
+    let id: String
+    let name: String
+    let institutionName: String?
+    let currency: String
+    let balance: Double?
+    let isSavings: Bool
+    let balanceUpdatedAt: Date?
+    let balanceError: String?
+}
+
+struct ExtremeSavingsPlanProgress: Decodable {
+    let id: String
+    let goalAmount: Double
+    let savedAmount: Double
+    let remainingGoal: Double
+    let progressPct: Double
+    let revenueStartAt: Date
+    let monthsToGoal: Int?
+    let targetDate: Date?
+}
+
+struct ExtremeSavingsRevenue: Decodable {
+    let trackedRevenue: Double
+    let reportedRevenue: Double
+    let historicalRevenue: Double
+    let source: String
+    let monthsTracked: Int
+    let averageMonthlyRevenue: Double
+    let currentMonthRevenue: Double
+    let orderCount: Int
+}
+
+struct ExtremeSavingsCosts: Decodable {
+    let fixed: ExtremeSavingsFixedCosts
+    let variable: ExtremeSavingsVariableCosts
+    let liabilities: ExtremeSavingsLiabilities
+}
+
+struct ExtremeSavingsFixedCosts: Decodable {
+    let monthlyTotal: Double
+    let ratePct: Double
+    let activeCount: Int
+    let items: [ExtremeSavingsFixedItem]
+}
+
+struct ExtremeSavingsFixedItem: Decodable, Identifiable {
+    let id: String
+    let name: String
+    let category: String
+    let amount: Double
+    let dueDay: Int?
+    let active: Bool
+    let notes: String?
+}
+
+struct ExtremeSavingsVariableCosts: Decodable {
+    let historicalTotal: Double
+    let currentMonthTotal: Double
+    let currentAdSpend: Double
+    let ratePct: Double
+    let items: [ExtremeSavingsVariableItem]
+}
+
+struct ExtremeSavingsVariableItem: Decodable, Identifiable {
+    let id: String
+    let name: String
+    let amount: Double
+    let unit: String
+    let notes: String
+}
+
+struct ExtremeSavingsLiabilities: Decodable {
+    let originalTotal: Double
+    let paidTotal: Double
+    let remainingTotal: Double
+    let items: [ExtremeSavingsLiability]
+}
+
+struct ExtremeSavingsLiability: Decodable, Identifiable {
+    let id: String
+    let name: String
+    let category: String
+    let originalAmount: Double
+    let paidAmount: Double
+    let remainingAmount: Double
+    let monthlyPayment: Double?
+    let interestRate: Double?
+    let priority: Int
+    let notes: String?
+}
+
+struct ExtremeSavingsAllocation: Decodable {
+    let variablePct: Double
+    let fixedPct: Double
+    let debtPct: Double
+    let savingsPct: Double
+    let operationsPct: Double
+    let afterDebtSavingsPct: Double
+    let monthlySavingsTarget: Double
+    let perHundred: [ExtremeSavingsAllocationItem]
+    let headline: String
+    let recommendation: String
+}
+
+struct ExtremeSavingsAllocationItem: Decodable, Identifiable {
+    let key: String
+    let label: String
+    let amount: Double
+    let color: String
+    var id: String { key }
+}
+
+struct ExtremeSavingsCurrentMonth: Decodable {
+    let revenue: Double
+    let variableCost: Double
+    let fixedCost: Double
+    let debtTarget: Double
+    let savingsTarget: Double
+    let safeSavings: Double
+    let availableAfterMandatory: Double
+}
+
+struct ExtremeSavingsContribution: Decodable, Identifiable {
+    let id: String
+    let amount: Double
+    let contributedAt: Date
+    let notes: String?
 }
 
 struct CashflowPayout: Decodable, Identifiable {
