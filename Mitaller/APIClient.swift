@@ -2198,6 +2198,11 @@ struct FixedExpenseItem: Decodable, Identifiable {
     let paidAt: Date?
     let paidAmount: Double?
     let paymentId: String?
+    let paymentSource: String?
+    let reconciliationStatus: String?
+    let bankDescription: String?
+    let rejectedAmount: Double?
+    let effectiveAmount: Double?
     let createdAt: Date?
     let updatedAt: Date?
 }
@@ -2211,6 +2216,8 @@ struct FixedExpenseSummary: Decodable {
     let coverage: FixedExpenseCoverage?
     let activeCount: Int
     let paidCount: Int
+    let autoReconciledCount: Int?
+    let rejectedCount: Int?
     let items: [FixedExpenseItem]
     let upcoming: [FixedExpenseItem]
     let templates: [FixedExpenseTemplate]
@@ -2342,6 +2349,14 @@ struct ExtremeSavingsFixedItem: Decodable, Identifiable {
     let dueDay: Int?
     let active: Bool
     let notes: String?
+    let paid: Bool?
+    let paidAt: Date?
+    let paidAmount: Double?
+    let paymentSource: String?
+    let reconciliationStatus: String?
+    let bankDescription: String?
+    let rejectedAmount: Double?
+    let effectiveAmount: Double?
 }
 
 struct ExtremeSavingsVariableCosts: Decodable {

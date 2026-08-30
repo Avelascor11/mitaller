@@ -147,6 +147,19 @@ export class BankService {
     return { imported, accounts: accounts.length };
   }
 
+  async syncIfStale(from?: string, to?: string, maxAgeMinutes = 30) {
+    const latest = await this.prisma.bankConnection.findFirst({
+      where: { status: 'LINKED' },
+      orderBy: { lastSyncedAt: 'desc' },
+      select: { lastSyncedAt: true }
+    });
+    const maxAgeMs = Math.max(1, maxAgeMinutes) * 60 * 1000;
+    if (latest?.lastSyncedAt && Date.now() - latest.lastSyncedAt.getTime() < maxAgeMs) {
+      return { skipped: true, reason: 'FRESH', lastSyncedAt: latest.lastSyncedAt };
+    }
+    return { skipped: false, ...(await this.sync(from, to)) };
+  }
+
   async transactions(from?: string, to?: string) {
     const range = this.dateRange(from, to);
     return this.prisma.bankTransaction.findMany({

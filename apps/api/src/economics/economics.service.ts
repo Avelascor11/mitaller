@@ -9,7 +9,7 @@ import { ShopifyAdapter, ShopifyBalanceTransaction } from '../shopify/shopify.ad
 
 const SHOPIFY_FEE_RATE = 0.024; // 2.4 % comisión Shopify Payments
 const EXTREME_SAVINGS_PLAN_ID = 'speedwear-extreme';
-const EXTREME_SAVINGS_SEED_VERSION = 1;
+const EXTREME_SAVINGS_SEED_VERSION = 2;
 
 interface ItemCost {
   blank: number;
@@ -703,12 +703,23 @@ export class EconomicsService {
 
   async fixedExpenses(period?: string) {
     const currentPeriod = this.fixedExpensePeriod(period);
-    const expenses = await this.prisma.fixedExpense.findMany({
-      include: { payments: { where: { period: currentPeriod } } },
-      orderBy: [{ active: 'desc' }, { dueDay: 'asc' }, { name: 'asc' }]
-    });
+    const range = this.fixedExpensePeriodRange(currentPeriod);
+    await this.bank.syncIfStale(range.from, range.to).catch(() => undefined);
+    const [expenses, rawBankTransactions] = await Promise.all([
+      this.prisma.fixedExpense.findMany({
+        include: { payments: { where: { period: currentPeriod } } },
+        orderBy: [{ active: 'desc' }, { dueDay: 'asc' }, { name: 'asc' }]
+      }),
+      this.bank.transactions(range.from, range.to).catch(() => [])
+    ]);
+    const bankTransactions = this.deduplicateBankTransactions(rawBankTransactions);
     const items = expenses.map((expense) => {
       const payment = expense.payments[0] ?? null;
+      const bankReconciliation = payment ? null : this.reconcileFixedExpenseWithBank(expense, bankTransactions);
+      const paid = Boolean(payment) || bankReconciliation?.status === 'PAID';
+      const paidAt = payment?.paidAt ?? bankReconciliation?.paidAt ?? null;
+      const paidAmount = payment?.amount ?? bankReconciliation?.paidAmount ?? null;
+      const effectiveAmount = paid && paidAmount != null ? paidAmount : expense.amount;
       return {
         id: expense.id,
         name: expense.name,
@@ -719,18 +730,25 @@ export class EconomicsService {
         active: expense.active,
         matcher: expense.matcher,
         notes: expense.notes,
-        paid: Boolean(payment),
-        paidAt: payment?.paidAt ?? null,
-        paidAmount: payment?.amount ?? null,
+        paid,
+        paidAt,
+        paidAmount,
         paymentId: payment?.id ?? null,
+        paymentSource: payment ? 'MANUAL' : bankReconciliation?.status === 'PAID' ? 'BANK' : null,
+        reconciliationStatus: payment ? 'PAID' : bankReconciliation?.status ?? 'PENDING',
+        bankTransactionIds: bankReconciliation?.bankTransactionIds ?? [],
+        bankDescription: bankReconciliation?.description ?? null,
+        rejectedAmount: bankReconciliation?.rejectedAmount ?? null,
+        effectiveAmount,
         createdAt: expense.createdAt,
         updatedAt: expense.updatedAt
       };
     });
     const active = items.filter((item) => item.active);
-    const totalMonthly = +active.reduce((sum, item) => sum + item.amount, 0).toFixed(2);
-    const paid = +active.filter((item) => item.paid).reduce((sum, item) => sum + (item.paidAmount ?? item.amount), 0).toFixed(2);
-    const pending = +Math.max(0, totalMonthly - paid).toFixed(2);
+    const plannedMonthly = +active.reduce((sum, item) => sum + item.amount, 0).toFixed(2);
+    const totalMonthly = +active.reduce((sum, item) => sum + item.effectiveAmount, 0).toFixed(2);
+    const paid = +active.filter((item) => item.paid).reduce((sum, item) => sum + item.effectiveAmount, 0).toFixed(2);
+    const pending = +active.filter((item) => !item.paid).reduce((sum, item) => sum + item.effectiveAmount, 0).toFixed(2);
     const currency = active[0]?.currency ?? items[0]?.currency ?? 'EUR';
     const coverage = this.fixedExpenseCoverage(currentPeriod, totalMonthly, paid, pending, currency);
     const upcoming = active
@@ -741,12 +759,15 @@ export class EconomicsService {
     return {
       period: currentPeriod,
       currency,
+      plannedMonthly,
       totalMonthly,
       paid,
       pending,
       coverage,
       activeCount: active.length,
       paidCount: active.filter((item) => item.paid).length,
+      autoReconciledCount: active.filter((item) => item.paymentSource === 'BANK').length,
+      rejectedCount: active.filter((item) => item.reconciliationStatus === 'REJECTED').length,
       items,
       upcoming,
       templates: this.fixedExpenseTemplates()
@@ -1249,20 +1270,20 @@ export class EconomicsService {
     if (plan.seedVersion >= EXTREME_SAVINGS_SEED_VERSION) return plan;
 
     const fixedSeeds = [
-      { name: 'Alquiler taller', aliases: ['Alquiler'], category: 'ALQUILER', amount: 363, dueDay: 10, active: true, notes: 'Pago entre los días 1 y 10.' },
-      { name: 'Luz taller (estimación)', aliases: ['Luz'], category: 'SUMINISTROS', amount: 91.18, dueDay: null, active: true, notes: 'Media provisional de las cinco facturas pendientes. Ajustar cuando llegue una factura mensual normal.' },
-      { name: 'Internet taller', aliases: ['Internet'], category: 'TELECOM', amount: 36, dueDay: null, active: true, notes: 'Cuota mensual habitual.' },
-      { name: 'Cuota autónomos', aliases: ['Autónomos', 'Autonomos'], category: 'AUTONOMOS', amount: 150, dueDay: null, active: true, notes: 'Cuota mensual.' },
-      { name: 'Préstamo Retro / Cetelem', aliases: ['Préstamo', 'Prestamo'], category: 'DEUDA', amount: 85, dueDay: 3, active: true, notes: 'Pago mínimo mensual. El plan añade amortización extraordinaria para reducir intereses.' },
-      { name: 'Shopify', aliases: [], category: 'SOFTWARE', amount: 70, dueDay: null, active: true, notes: 'Estimación mensual.' },
-      { name: 'Klaviyo', aliases: [], category: 'SOFTWARE', amount: 129.46, dueDay: 11, active: true, notes: 'Ciclo de facturación mensual iniciado el día 11.' },
-      { name: 'Dominio web', aliases: ['Dominio'], category: 'SOFTWARE', amount: 5.99, dueDay: 27, active: true, notes: 'Renovación mensual.' },
-      { name: 'Canva', aliases: [], category: 'SOFTWARE', amount: 16, dueDay: null, active: true, notes: 'Suscripción mensual.' },
-      { name: 'ChatGPT', aliases: [], category: 'SOFTWARE', amount: 19, dueDay: null, active: true, notes: 'Suscripción mensual.' },
-      { name: 'Diseñador - pack 3 diseños', aliases: ['Diseñador'], category: 'DISENO', amount: 365, dueDay: null, active: false, notes: 'Condicional: activar solo el mes en que se encarguen tres diseños.' },
-      { name: 'Agua', aliases: [], category: 'SUMINISTROS', amount: 0, dueDay: null, active: false, notes: 'Actualmente sin coste.' },
-      { name: 'Gestoría', aliases: ['Gestoria'], category: 'GESTORIA', amount: 0, dueDay: null, active: false, notes: 'Actualmente sin coste.' },
-      { name: 'Seguro', aliases: [], category: 'SEGUROS', amount: 0, dueDay: null, active: false, notes: 'Actualmente sin coste.' }
+      { name: 'Alquiler taller', aliases: ['Alquiler'], category: 'ALQUILER', amount: 363, dueDay: 10, active: true, matcher: 'hermarca 2001|customwear', notes: 'Pago entre los días 1 y 10.' },
+      { name: 'Luz taller (estimación)', aliases: ['Luz'], category: 'SUMINISTROS', amount: 91.18, dueDay: null, active: true, matcher: 'octopus energy', notes: 'Media provisional de las cinco facturas pendientes. Ajustar cuando llegue una factura mensual normal.' },
+      { name: 'Internet taller', aliases: ['Internet'], category: 'TELECOM', amount: 36, dueDay: null, active: true, matcher: null, notes: 'Cuota mensual habitual.' },
+      { name: 'Cuota autónomos', aliases: ['Autónomos', 'Autonomos'], category: 'AUTONOMOS', amount: 150, dueDay: null, active: true, matcher: 'tgss|tesoreria general seguridad social|seguridad social', notes: 'Cuota mensual.' },
+      { name: 'Préstamo Retro / Cetelem', aliases: ['Préstamo', 'Prestamo'], category: 'DEUDA', amount: 85, dueDay: 3, active: true, matcher: 'cetelem|bnp paribas', notes: 'Pago mínimo mensual. El plan añade amortización extraordinaria para reducir intereses.' },
+      { name: 'Shopify', aliases: [], category: 'SOFTWARE', amount: 70, dueDay: null, active: true, matcher: 'paypal shopify', notes: 'Estimación mensual.' },
+      { name: 'Klaviyo', aliases: [], category: 'SOFTWARE', amount: 129.46, dueDay: 11, active: true, matcher: 'klaviyo', notes: 'Ciclo de facturación mensual iniciado el día 11.' },
+      { name: 'Dominio web', aliases: ['Dominio'], category: 'SOFTWARE', amount: 5.99, dueDay: 27, active: true, matcher: 'tesys internet', notes: 'Renovación mensual.' },
+      { name: 'Canva', aliases: [], category: 'SOFTWARE', amount: 16, dueDay: null, active: true, matcher: 'canva', notes: 'Suscripción mensual.' },
+      { name: 'ChatGPT', aliases: [], category: 'SOFTWARE', amount: 19, dueDay: null, active: true, matcher: 'openai|chatgpt', notes: 'Suscripción mensual.' },
+      { name: 'Diseñador - pack 3 diseños', aliases: ['Diseñador'], category: 'DISENO', amount: 365, dueDay: null, active: false, matcher: null, notes: 'Condicional: activar solo el mes en que se encarguen tres diseños.' },
+      { name: 'Agua', aliases: [], category: 'SUMINISTROS', amount: 0, dueDay: null, active: false, matcher: null, notes: 'Actualmente sin coste.' },
+      { name: 'Gestoría', aliases: ['Gestoria'], category: 'GESTORIA', amount: 0, dueDay: null, active: false, matcher: null, notes: 'Actualmente sin coste.' },
+      { name: 'Seguro', aliases: [], category: 'SEGUROS', amount: 0, dueDay: null, active: false, matcher: null, notes: 'Actualmente sin coste.' }
     ];
 
     await this.prisma.$transaction(async (tx) => {
@@ -1276,6 +1297,7 @@ export class EconomicsService {
           currency: 'EUR',
           dueDay: seed.dueDay,
           active: seed.active,
+          matcher: seed.matcher,
           notes: seed.notes
         };
         if (existing) await tx.fixedExpense.update({ where: { id: existing.id }, data });
@@ -1378,6 +1400,115 @@ export class EconomicsService {
 
   private normalizeSearchText(value: string) {
     return value.normalize('NFD').replace(/\p{Diacritic}/gu, '').toLowerCase();
+  }
+
+  private fixedExpensePeriodRange(period: string) {
+    const [year, month] = period.split('-').map(Number);
+    const lastDay = new Date(Date.UTC(year, month, 0)).getUTCDate();
+    return {
+      from: `${period}-01`,
+      to: `${period}-${String(lastDay).padStart(2, '0')}`
+    };
+  }
+
+  private deduplicateBankTransactions(transactions: any[]) {
+    const seen = new Set<string>();
+    return transactions.filter((transaction) => {
+      const text = this.bankTransactionSearchText(transaction)
+        .replace(/[^a-z0-9]+/g, ' ')
+        .trim();
+      const date = new Date(transaction.bookingDate).toISOString().slice(0, 10);
+      const signature = [transaction.accountId, date, Number(transaction.amount).toFixed(2), text].join('|');
+      if (seen.has(signature)) return false;
+      seen.add(signature);
+      return true;
+    });
+  }
+
+  private reconcileFixedExpenseWithBank(expense: any, transactions: any[]) {
+    const matchers = this.fixedExpenseMatcherTokens(expense);
+    if (matchers.length === 0) return { status: 'PENDING' as const };
+
+    const matches = transactions.filter((transaction) => {
+      if (Number(transaction.amount) >= 0) return false;
+      const text = this.bankTransactionSearchText(transaction);
+      if (this.isInternalBankTransfer(text)) return false;
+      return matchers.some((matcher) => text.includes(matcher));
+    });
+    const paidMatches = matches.filter((transaction) => !this.isRejectedBankTransaction(transaction));
+
+    if (paidMatches.length > 0) {
+      const paidAmount = this.roundMoney(paidMatches.reduce((sum, transaction) => sum + Math.abs(Number(transaction.amount) || 0), 0));
+      const paidAt = paidMatches
+        .map((transaction) => new Date(transaction.bookingDate))
+        .sort((a, b) => b.getTime() - a.getTime())[0];
+      return {
+        status: 'PAID' as const,
+        paidAt,
+        paidAmount,
+        bankTransactionIds: paidMatches.map((transaction) => transaction.id),
+        description: paidMatches.map((transaction) => transaction.description).filter(Boolean).join(' | ')
+      };
+    }
+
+    const rejectedMatches = matches.filter((transaction) => this.isRejectedBankTransaction(transaction));
+    if (rejectedMatches.length > 0) {
+      const description = rejectedMatches.map((transaction) => transaction.description).filter(Boolean).join(' | ');
+      return {
+        status: 'REJECTED' as const,
+        bankTransactionIds: rejectedMatches.map((transaction) => transaction.id),
+        description,
+        rejectedAmount: this.rejectedBankAmount(description)
+      };
+    }
+
+    return { status: 'PENDING' as const };
+  }
+
+  private fixedExpenseMatcherTokens(expense: any) {
+    const explicit = String(expense.matcher ?? '')
+      .split('|')
+      .map((value) => this.normalizeSearchText(value).replace(/[^a-z0-9]+/g, ' ').trim())
+      .filter(Boolean);
+    if (explicit.length > 0) return explicit;
+
+    const name = this.normalizeSearchText(String(expense.name ?? ''));
+    if (name.includes('alquiler')) return ['hermarca 2001', 'customwear'];
+    if (name.includes('luz')) return ['octopus energy'];
+    if (name.includes('autonom')) return ['tgss', 'tesoreria general seguridad social', 'seguridad social'];
+    if (name.includes('prestamo') || name.includes('cetelem')) return ['cetelem', 'bnp paribas'];
+    if (name.includes('shopify')) return ['paypal shopify'];
+    if (name.includes('klaviyo')) return ['klaviyo'];
+    if (name.includes('dominio')) return ['tesys internet'];
+    if (name.includes('canva')) return ['canva'];
+    if (name.includes('chatgpt')) return ['openai', 'chatgpt'];
+    return [];
+  }
+
+  private bankTransactionSearchText(transaction: any) {
+    return this.normalizeSearchText([
+      transaction.description,
+      transaction.merchantName,
+      transaction.counterpartyName,
+      transaction.remittanceInfo
+    ].filter(Boolean).join(' ')).replace(/[^a-z0-9]+/g, ' ').replace(/\s+/g, ' ').trim();
+  }
+
+  private isRejectedBankTransaction(transaction: any) {
+    const text = this.bankTransactionSearchText(transaction);
+    return /rechazad|rejected|denegad|devuelt|returned direct debit/.test(text);
+  }
+
+  private rejectedBankAmount(description: string) {
+    const normalized = description.replace(',', '.');
+    const explicit = normalized.match(/(?:sepa|domiciliad[oa]|direct debit)[^0-9]{0,24}(\d+(?:\.\d{1,2})?)/i);
+    if (!explicit) return null;
+    const value = Number(explicit[1]);
+    return Number.isFinite(value) ? this.roundMoney(value) : null;
+  }
+
+  private isInternalBankTransfer(text: string) {
+    return /(?:de|desde) cuenta .* (?:a|hacia) cuenta|internal transfer|traspaso entre cuentas/.test(text);
   }
 
   private fixedExpensePeriod(period?: string) {

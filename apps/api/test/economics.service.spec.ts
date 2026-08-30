@@ -7,7 +7,11 @@ function service(config: Record<string, string> = {}) {
     { get: (key: string) => config[key] } as never,
     {} as never,
     { spendForRange: async () => 0 } as never,
-    { accounts: async () => ({ currency: 'EUR', totalBalance: 0, balanceAvailable: false, accounts: [] }) } as never,
+    {
+      accounts: async () => ({ currency: 'EUR', totalBalance: 0, balanceAvailable: false, accounts: [] }),
+      syncIfStale: async () => ({ skipped: true }),
+      transactions: async () => []
+    } as never,
     { getPurchaseMatrix: async () => ({ groups: [] }) } as never
   ) as unknown as {
     computeOrderBreakdown: (order: unknown) => {
@@ -26,13 +30,17 @@ function service(config: Record<string, string> = {}) {
   };
 }
 
-function fixedExpenseService(expenses: unknown[]) {
+function fixedExpenseService(expenses: unknown[], transactions: unknown[] = []) {
   return new EconomicsService(
     { fixedExpense: { findMany: async () => expenses } } as never,
     { get: () => undefined } as never,
     {} as never,
     { spendForRange: async () => 0 } as never,
-    { accounts: async () => ({ currency: 'EUR', totalBalance: 0, balanceAvailable: false, accounts: [] }) } as never,
+    {
+      accounts: async () => ({ currency: 'EUR', totalBalance: 0, balanceAvailable: false, accounts: [] }),
+      syncIfStale: async () => ({ skipped: true }),
+      transactions: async () => transactions
+    } as never,
     { getPurchaseMatrix: async () => ({ groups: [] }) } as never
   ) as unknown as {
     fixedExpenses: (period?: string) => Promise<{
@@ -41,6 +49,15 @@ function fixedExpenseService(expenses: unknown[]) {
       paid: number;
       pending: number;
       activeCount: number;
+      autoReconciledCount: number;
+      rejectedCount: number;
+      items: Array<{
+        name: string;
+        paid: boolean;
+        paidAmount: number | null;
+        paymentSource: string | null;
+        reconciliationStatus: string;
+      }>;
       upcoming: Array<{ name: string }>;
     }>;
   };
@@ -270,5 +287,79 @@ describe('EconomicsService', () => {
     expect(result.pending).toBe(50);
     expect(result.activeCount).toBe(2);
     expect(result.upcoming.map((item) => item.name)).toEqual(['Internet']);
+  });
+
+  it('concilia los pagos de N26 sin contar duplicados técnicos', async () => {
+    const expense = {
+      id: 'shopify',
+      name: 'Shopify',
+      category: 'SOFTWARE',
+      amount: 70,
+      currency: 'EUR',
+      dueDay: null,
+      active: true,
+      matcher: 'paypal shopify',
+      notes: null,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+      payments: []
+    };
+    const baseTransaction = {
+      accountId: 'main',
+      bookingDate: new Date('2026-08-23T00:00:00Z'),
+      amount: -77.58,
+      merchantName: 'PAYPAL *SHOPIFY',
+      counterpartyName: null,
+      remittanceInfo: 'PAYPAL *SHOPIFY REF-1'
+    };
+    const result = await fixedExpenseService([expense], [
+      { ...baseTransaction, id: 'tx-1', description: 'PAYPAL *SHOPIFY REF-1' },
+      { ...baseTransaction, id: 'tx-duplicate', description: 'PAYPAL- SHOPIFY REF-1' }
+    ]).fixedExpenses('2026-08');
+
+    expect(result.paid).toBe(77.58);
+    expect(result.pending).toBe(0);
+    expect(result.autoReconciledCount).toBe(1);
+    expect(result.items[0]).toMatchObject({
+      paid: true,
+      paidAmount: 77.58,
+      paymentSource: 'BANK',
+      reconciliationStatus: 'PAID'
+    });
+  });
+
+  it('mantiene pendiente un recibo bancario rechazado', async () => {
+    const result = await fixedExpenseService([
+      {
+        id: 'electricity',
+        name: 'Luz taller (estimación)',
+        category: 'SUMINISTROS',
+        amount: 91.18,
+        currency: 'EUR',
+        dueDay: null,
+        active: true,
+        matcher: 'octopus energy',
+        notes: null,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+        payments: []
+      }
+    ], [
+      {
+        id: 'tx-rejected',
+        accountId: 'main',
+        bookingDate: new Date('2026-08-21T00:00:00Z'),
+        amount: -9,
+        description: 'Pago domiciliado SEPA de 178,14 EUR a OCTOPUS ENERGY rechazado',
+        merchantName: 'OCTOPUS ENERGY',
+        counterpartyName: null,
+        remittanceInfo: null
+      }
+    ]).fixedExpenses('2026-08');
+
+    expect(result.paid).toBe(0);
+    expect(result.pending).toBe(91.18);
+    expect(result.rejectedCount).toBe(1);
+    expect(result.items[0]).toMatchObject({ paid: false, reconciliationStatus: 'REJECTED' });
   });
 });
