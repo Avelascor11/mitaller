@@ -183,9 +183,9 @@ describe('PurchaseService', () => {
     expect(swim?.sizes.find((entry) => entry.size === 'M')).toMatchObject({
       pendingOrderNeed: 1,
       currentInternalStock: 0,
-      minStockTarget: 5,
-      isBestSellerSafetyStock: true,
-      recommendedPurchaseQuantity: 6
+      minStockTarget: 0,
+      isBestSellerSafetyStock: false,
+      recommendedPurchaseQuantity: 1
     });
   });
 

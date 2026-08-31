@@ -656,20 +656,24 @@ export class PurchaseService {
     orderItems: Array<{ sku: string; title: string; variantTitle?: string | null; color?: string | null; size?: string | null; productType?: string | null; quantity: number }>,
     mappingIndex: Map<string, string>
   ) {
-    const unitsByKey = new Map<string, number>();
+    const unitsByKind = new Map<string, Map<string, number>>();
     for (const item of orderItems) {
       const mapped = this.mapOrderItemToBlankGarment(item, mappingIndex);
-      if (!mapped || mapped.kind === 'DTF') continue;
+      if (!mapped || !['CAMISETA', 'SUDADERA'].includes(mapped.kind)) continue;
       const key = this.matrixKey(mapped.kind, mapped.color, mapped.size);
+      const unitsByKey = unitsByKind.get(mapped.kind) ?? new Map<string, number>();
       unitsByKey.set(key, (unitsByKey.get(key) ?? 0) + Math.max(0, item.quantity));
+      unitsByKind.set(mapped.kind, unitsByKey);
     }
-    return new Set(
-      [...unitsByKey.entries()]
-        .filter(([, units]) => units > 0)
-        .sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0]))
-        .slice(0, this.bestSellerVariantCount())
-        .map(([key]) => key)
-    );
+    const keys: string[] = [];
+    for (const unitsByKey of unitsByKind.values()) {
+      keys.push(...[...unitsByKey.entries()]
+          .filter(([, units]) => units > 0)
+          .sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0]))
+          .slice(0, this.bestSellerVariantCount())
+          .map(([key]) => key));
+    }
+    return new Set(keys);
   }
 
   private bestSellerSince() {
