@@ -133,6 +133,36 @@ export class KlaviyoService {
     });
   }
 
+  /** Internal alert: a paid return/exchange could not get a Sendcloud label. */
+  async trackReturnLabelFailed(params: {
+    returnId: string;
+    orderNumber: string;
+    customerEmail: string;
+    customerName: string;
+    returnType: string;
+    error: string;
+    checkoutUrl?: string | null;
+    source: 'payment_webhook' | 'admin_manual';
+  }) {
+    const email = this.config.get<string>('RETURN_LABEL_ALERT_EMAIL')
+      ?? this.config.get<string>('ADMIN_ALERT_EMAIL')
+      ?? this.config.get<string>('AUTOPILOT_ALERT_EMAIL')
+      ?? 'angel@speedwear.es';
+    await this.track('Return Label Failed', email, {
+      Summary: `Etiqueta no generada para ${params.orderNumber}`,
+      ReturnId: params.returnId,
+      OrderNumber: params.orderNumber,
+      CustomerEmail: params.customerEmail,
+      CustomerName: params.customerName,
+      ReturnType: params.returnType,
+      Error: params.error,
+      CheckoutUrl: params.checkoutUrl ?? '',
+      AdminUrl: `https://devoluciones.speedwear.es/admin/devoluciones/${params.returnId}`,
+      Source: params.source,
+      At: new Date().toISOString()
+    });
+  }
+
   /** Crew welcome: fired when an influencer signs up and the gift order is created. */
   async trackCrewWelcome(params: {
     email: string;

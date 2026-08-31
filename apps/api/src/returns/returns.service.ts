@@ -532,6 +532,9 @@ export class ReturnsService {
       });
     } catch (error) {
       console.error('[ReturnsService] SendCloud error after payment:', error);
+      this.trackReturnLabelFailure(returnRecord, error, 'payment_webhook').catch((err) =>
+        console.error('[ReturnsService] Klaviyo return label failure alert error:', err)
+      );
     }
 
     const updated = await this.prisma.return.update({
@@ -589,6 +592,9 @@ export class ReturnsService {
       });
     } catch (error) {
       console.error('[ReturnsService] generateLabelForReturn SendCloud error:', error);
+      this.trackReturnLabelFailure(returnRecord, error, 'admin_manual').catch((err) =>
+        console.error('[ReturnsService] Klaviyo return label failure alert error:', err)
+      );
       throw new BadRequestException(`Error creando etiqueta en SendCloud: ${error instanceof Error ? error.message : 'desconocido'}`);
     }
 
@@ -615,6 +621,31 @@ export class ReturnsService {
     }
 
     return { success: true, status: updated.status, trackingNumber: updated.trackingNumber, parcelId: sendcloudResult.parcelId };
+  }
+
+  private async trackReturnLabelFailure(
+    returnRecord: {
+      id: string;
+      shopifyOrderNumber: string;
+      customerEmail: string;
+      customerName: string;
+      type: string;
+      checkoutUrl?: string | null;
+    },
+    error: unknown,
+    source: 'payment_webhook' | 'admin_manual'
+  ) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    await this.klaviyo.trackReturnLabelFailed({
+      returnId: returnRecord.id,
+      orderNumber: returnRecord.shopifyOrderNumber,
+      customerEmail: returnRecord.customerEmail,
+      customerName: returnRecord.customerName,
+      returnType: returnRecord.type,
+      error: errorMessage,
+      checkoutUrl: returnRecord.checkoutUrl ?? null,
+      source
+    });
   }
 
   /** Admin: manually create a real Shopify order for the replacement products of an EXCHANGE. */
