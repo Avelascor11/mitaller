@@ -243,8 +243,9 @@ export class SupplierOrderService {
     if (!order) throw new BadRequestException('Pedido a proveedor no encontrado');
     if (!order.lines.length) throw new BadRequestException('El pedido a proveedor no tiene lineas');
     if (order.status === 'SUBMITTED') return { status: 'already_submitted', order: this.withOrderNote(order), lines: order.lines };
-    if (this.hasUnresolvedFalkRossSkus(order.lines)) {
-      throw new BadRequestException('Falta importar el catalogo real de Falk & Ross antes de enviar el pedido al proveedor');
+    const unresolvedLines = this.unresolvedFalkRossLines(order.lines);
+    if (unresolvedLines.length) {
+      throw new BadRequestException(`No se pudo resolver el SKU real de Falk & Ross para: ${unresolvedLines.join(', ')}`);
     }
 
     const payload = (order.rawRequestJson as unknown as SupplierPurchaseOrderPayload | null) ?? this.payloadFromOrder(order);
@@ -367,10 +368,10 @@ export class SupplierOrderService {
     return Math.min(requestedQuantity, Math.max(0, supplierAvailableQuantity));
   }
 
-  private hasUnresolvedFalkRossSkus(lines: Array<{ supplierSku: string; rawDataJson: Prisma.JsonValue | null }>) {
-    return lines.some((line) => {
+  private unresolvedFalkRossLines(lines: Array<{ name: string; size: string | null; supplierSku: string; rawDataJson: Prisma.JsonValue | null }>) {
+    return lines.flatMap((line) => {
       const rawData = line.rawDataJson as { resolvedStyleCode?: string | null } | null;
-      return !rawData?.resolvedStyleCode;
+      return rawData?.resolvedStyleCode ? [] : [`${line.name}${line.size ? ` (${line.size})` : ''}`];
     });
   }
 
@@ -422,7 +423,7 @@ export class SupplierOrderService {
   private articleMatchesFalkRossColor(article: { color: string | null; productName: string }, color: string) {
     const expectedColor = this.normalizedColor(color);
     const articleColor = article.color ?? article.productName;
-    if (expectedColor === 'AZUL') return this.normalizedToken(articleColor).includes('royal blue');
+    if (expectedColor === 'AZUL') return /\broyal(?: blue)?\b/.test(this.normalizedToken(articleColor));
     if (expectedColor === 'SAND') return this.normalizedToken(articleColor).includes('mastic');
     if (expectedColor === 'CHARCOAL') return this.normalizedToken(articleColor).includes('dark grey') || this.normalizedToken(articleColor).includes('dark gray');
     if (expectedColor === 'TANGERINE') return this.normalizedToken(articleColor).includes('tangerine') || this.normalizedToken(articleColor).includes('orange');
@@ -449,8 +450,8 @@ export class SupplierOrderService {
   }
 
   private articleMatchesStyle(article: { styleCode: string | null; productName: string }, expectedStyles: string[]) {
-    const haystack = this.normalizedToken(`${article.styleCode ?? ''} ${article.productName}`);
-    return expectedStyles.some((style) => haystack.includes(this.normalizedToken(style)));
+    const articleKey = this.falkRossStyleKey(article.styleCode ?? article.productName);
+    return expectedStyles.some((style) => this.falkRossStyleKey(style) === articleKey);
   }
 
   private expectedFalkRossStyles(garmentType: string, color: string) {

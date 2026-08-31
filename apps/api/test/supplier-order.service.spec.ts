@@ -170,6 +170,58 @@ describe('SupplierOrderService', () => {
     }));
   });
 
+  it('resuelve Royal como Royal Blue y no confunde 65000 con el modelo 5000', async () => {
+    const { service, prisma } = buildService({
+      matrix: {
+        groups: [{
+          garmentType: 'CAMISETA',
+          color: 'AZUL',
+          sizes: [{
+            stockItemId: 'stock-blue-xxl',
+            supplierSku: 'FR-TS-BLU-XXL',
+            subproductName: 'Camiseta Azul - XXL',
+            size: 'XXL',
+            recommendedPurchaseQuantity: 1,
+            supplierAvailableQuantity: null,
+            pendingOrderNeed: 1,
+            currentInternalStock: 0,
+            minStockTarget: 0,
+            demandOrders: [{ orderNumber: '#9940' }]
+          }]
+        }]
+      },
+      supplierArticles: [
+        {
+          supplierSku: 'wrong-65000',
+          styleCode: '120.09',
+          productName: '65000 - Softstyle Midweight Adult T-Shirt',
+          color: 'Royal',
+          size: '2XL',
+          purchasePrice: '3.13'
+        },
+        {
+          supplierSku: '032424506',
+          styleCode: '032.42',
+          productName: 'TG002 - #E220 T-Shirt',
+          color: 'Royal',
+          size: '2XL',
+          purchasePrice: '4.24'
+        }
+      ],
+      supplierStocks: [{ supplierSku: '032424506', availableQuantity: 12 }]
+    });
+
+    await service.generateDailyFalkRossOrder({ source: 'manual', purchaseMode: 'NORMAL' });
+
+    expect(prisma.supplierPurchaseOrder.create).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        rawRequestJson: expect.objectContaining({
+          lines: [expect.objectContaining({ supplierSku: '032424506', quantity: 1 })]
+        })
+      })
+    }));
+  });
+
   it('no descuenta borradores antiguos al recomendar una nueva compra proveedor', async () => {
     const { service, prisma } = buildService({
       matrix: {
