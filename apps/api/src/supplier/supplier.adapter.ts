@@ -14,11 +14,11 @@ export class SupplierAdapter {
   }
 
   listArticles() {
-    return this.prisma.supplierArticle.findMany({ orderBy: { productName: 'asc' }, take: 100 });
+    return this.prisma.supplierArticle.findMany({ orderBy: { productName: 'asc' }, take: 10000 });
   }
 
   listStock() {
-    return this.prisma.supplierStock.findMany({ orderBy: { supplierSku: 'asc' }, take: 100 });
+    return this.prisma.supplierStock.findMany({ orderBy: { supplierSku: 'asc' }, take: 10000 });
   }
 
   async importCatalog(sourcePath?: string) {
