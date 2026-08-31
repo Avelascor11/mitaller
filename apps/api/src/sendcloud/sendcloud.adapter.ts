@@ -207,7 +207,7 @@ export class SendcloudAdapter {
       this.config.get<string>('SENDCLOUD_RETURN_SHIPPING_PRODUCT_CODE')?.trim() || 'correos:paqretorno';
 
     const fromCustomer = this.normalizeAddress(input.customerAddressJson);
-    const fromCustomerSplit = this.splitAddressLine(fromCustomer.address1);
+    const fromCustomerSplit = this.splitAddressLine(fromCustomer.address1, fromCustomer.address2);
     const toWarehouse = await this.resolveFromAddress();
 
     const payload = {
@@ -486,10 +486,10 @@ export class SendcloudAdapter {
     return aliases[normalized] ?? value.trim().toUpperCase();
   }
 
-  private splitAddressLine(address: string) {
+  private splitAddressLine(address: string, fallbackHouseNumber?: string) {
     const trimmed = address.trim();
     const match = trimmed.match(/^(.*?)[,\s]+(\d+[a-zA-Z]?(?:\s*[-/]\s*\d+[a-zA-Z]?)?)$/);
-    if (!match) return { addressLine1: trimmed, houseNumber: '1' };
+    if (!match) return { addressLine1: trimmed, houseNumber: fallbackHouseNumber?.trim() || '1' };
     return {
       addressLine1: match[1].trim() || trimmed,
       houseNumber: match[2].trim()
