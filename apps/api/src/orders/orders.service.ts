@@ -125,6 +125,54 @@ export class OrdersService {
     };
   }
 
+  async restoreRetroPreorderOrders() {
+    const archiveLogs = await this.prisma.activityLog.findMany({
+      where: { action: 'RETRO_PREORDER_ARCHIVED', entityType: 'Order' },
+      select: { entityId: true },
+      distinct: ['entityId']
+    });
+    const archivedIds = archiveLogs.map((log) => log.entityId);
+    if (!archivedIds.length) return { restored: 0, orders: [] };
+
+    const restorable = await this.prisma.order.findMany({
+      where: {
+        id: { in: archivedIds },
+        operationalStatus: 'SHIPPED',
+        shipments: { none: { status: { not: 'CANCELLED' } } }
+      },
+      select: { id: true, orderNumber: true }
+    });
+    if (!restorable.length) return { restored: 0, orders: [] };
+
+    const ids = restorable.map((order) => order.id);
+    await this.prisma.order.updateMany({
+      where: { id: { in: ids } },
+      data: {
+        operationalStatus: 'WAITING_PRODUCTION',
+        fulfillmentStatus: 'unfulfilled',
+        preparedAt: null
+      }
+    });
+    await this.prisma.productionTask.updateMany({
+      where: { orderId: { in: ids } },
+      data: { status: 'PENDING', startedAt: null, completedAt: null, blockedReason: null }
+    });
+
+    for (const order of restorable) {
+      await this.activity.log({
+        entityType: 'Order',
+        entityId: order.id,
+        action: 'RETRO_PREORDER_RESTORED',
+        message: `Pedido ${order.orderNumber} reabierto porque la camiseta retro ya esta disponible`
+      });
+    }
+
+    return {
+      restored: restorable.length,
+      orders: restorable.map((order) => ({ id: order.id, orderNumber: order.orderNumber }))
+    };
+  }
+
   private activeOrderItemsInclude() {
     return {
       where: { status: { not: 'CANCELLED' as const } },

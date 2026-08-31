@@ -21,6 +21,11 @@ export class OrdersController {
     return this.orders.archiveRetroPreorderOrders();
   }
 
+  @Post('orders/restore-retro-preorder')
+  restoreRetroPreorderOrders() {
+    return this.orders.restoreRetroPreorderOrders();
+  }
+
   @Get('orders/:id')
   findOne(@Param('id') id: string) {
     return this.orders.findOne(id);
