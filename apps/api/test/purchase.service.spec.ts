@@ -22,6 +22,13 @@ describe('PurchaseService', () => {
     })).toBe(0);
   });
 
+  it('mantiene cinco unidades de seguridad en las variantes top ventas', () => {
+    const service = new PurchaseService({} as never, { get: () => undefined } as never);
+    expect(service.calculateMinStockTarget(0, true)).toBe(5);
+    expect(service.calculateMinStockTarget(8, true)).toBe(8);
+    expect(service.calculateMinStockTarget(2, false)).toBe(2);
+  });
+
   it('prioriza el subproducto mapeado porque es la ropa base a comprar', () => {
     const service = new PurchaseService({} as never, { get: () => undefined } as never) as unknown as {
       mapOrderItemToBlankGarment: (item: {
@@ -121,7 +128,12 @@ describe('PurchaseService', () => {
     const matrix = await service.getPurchaseMatrix();
     const navy = matrix.groups.find((group) => group.title === 'CAMISETAS NAVY');
     expect(navy?.sizes.find((entry) => entry.size === 'M')?.pendingOrderNeed).toBe(1);
-    expect(navy?.sizes.find((entry) => entry.size === 'M')?.recommendedPurchaseQuantity).toBe(1);
+    expect(navy?.sizes.find((entry) => entry.size === 'M')).toMatchObject({
+      pendingOrderNeed: 1,
+      minStockTarget: 5,
+      isBestSellerSafetyStock: true,
+      recommendedPurchaseQuantity: 6
+    });
   });
 
   it('incluye bañadores en compras recomendadas aunque no vayan a Falk & Ross', async () => {
@@ -171,7 +183,9 @@ describe('PurchaseService', () => {
     expect(swim?.sizes.find((entry) => entry.size === 'M')).toMatchObject({
       pendingOrderNeed: 1,
       currentInternalStock: 0,
-      recommendedPurchaseQuantity: 1
+      minStockTarget: 5,
+      isBestSellerSafetyStock: true,
+      recommendedPurchaseQuantity: 6
     });
   });
 

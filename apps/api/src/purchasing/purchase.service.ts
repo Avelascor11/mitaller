@@ -26,6 +26,10 @@ export class PurchaseService {
     );
   }
 
+  calculateMinStockTarget(configuredMinStock: number, isBestSeller: boolean) {
+    return Math.max(configuredMinStock, isBestSeller ? this.bestSellerMinStock() : 0);
+  }
+
   getTodayNeeds() {
     const start = new Date();
     start.setHours(0, 0, 0, 0);
@@ -252,7 +256,8 @@ export class PurchaseService {
       OperationalStatus.PICKED,
       OperationalStatus.BLOCKED
     ];
-    const [blankStockItems, transferStockItems, orderItems, supplierStocks, productMappings, orderedQuantities] = await Promise.all([
+    const bestSellerSince = this.bestSellerSince();
+    const [blankStockItems, transferStockItems, orderItems, supplierStocks, productMappings, orderedQuantities, salesHistoryItems] = await Promise.all([
       this.prisma.stockItem.findMany({
         where: { type: 'BLANK_GARMENT' },
         include: { levels: true }
@@ -270,9 +275,19 @@ export class PurchaseService {
       }),
       this.prisma.supplierStock.findMany(),
       this.prisma.productSubproductMapping.findMany(),
-      this.pendingSupplierOrderQuantityByStockItemId()
+      this.pendingSupplierOrderQuantityByStockItemId(),
+      this.prisma.orderItem.findMany({
+        where: {
+          order: {
+            orderedAt: { gte: bestSellerSince },
+            operationalStatus: { not: OperationalStatus.CANCELLED }
+          },
+          status: { not: 'CANCELLED' }
+        }
+      })
     ]);
     const mappingIndex = this.buildMappingIndex(productMappings);
+    const bestSellerKeys = this.bestSellerSafetyKeys(salesHistoryItems, mappingIndex);
 
     const stockIndex = new Map<string, StockItemWithLevels>();
     for (const item of blankStockItems) {
@@ -342,7 +357,8 @@ export class PurchaseService {
       const color = need?.color ?? this.normalizeColor(stockItem?.color ?? stockItem?.name ?? '') ?? 'SIN_COLOR';
       const size = need?.size ?? this.normalizeSize(stockItem?.size ?? stockItem?.name ?? '') ?? 'SIN_TALLA';
       const currentInternalStock = stockItem?.levels.reduce((sum, level) => sum + level.quantity, 0) ?? 0;
-      const minStockTarget = stockItem?.minStock ?? 0;
+      const isBestSellerSafetyStock = bestSellerKeys.has(key);
+      const minStockTarget = this.calculateMinStockTarget(stockItem?.minStock ?? 0, isBestSellerSafetyStock);
       const pendingOrderNeed = need?.quantity ?? 0;
       // "Ya pedido" no se descuenta de la compra: comprar = pedidos pendientes − stock.
       // El stock solo sube cuando se mete el albarán. (Se mantiene a 0 a propósito.)
@@ -373,6 +389,7 @@ export class PurchaseService {
         demandOrders: need?.orders ?? [],
         currentInternalStock,
         minStockTarget,
+        isBestSellerSafetyStock,
         alreadyOrderedQuantity,
         recommendedPurchaseQuantity,
         supplierAvailableQuantity
@@ -396,6 +413,7 @@ export class PurchaseService {
           demandOrders: [],
           currentInternalStock: 0,
           minStockTarget: 0,
+          isBestSellerSafetyStock: false,
           alreadyOrderedQuantity: 0,
           recommendedPurchaseQuantity: 0,
           supplierAvailableQuantity: null
@@ -565,7 +583,8 @@ export class PurchaseService {
       OperationalStatus.PICKED,
       OperationalStatus.BLOCKED
     ];
-    const [stockItems, supplierStocks, pendingOrderItems, productMappings] = await Promise.all([
+    const bestSellerSince = this.bestSellerSince();
+    const [stockItems, supplierStocks, pendingOrderItems, productMappings, salesHistoryItems] = await Promise.all([
       this.prisma.stockItem.findMany({ where: { type: 'BLANK_GARMENT' }, include: { levels: true } }),
       this.prisma.supplierStock.findMany(),
       this.prisma.orderItem.findMany({
@@ -575,9 +594,19 @@ export class PurchaseService {
         },
         include: { order: true }
       }),
-      this.prisma.productSubproductMapping.findMany()
+      this.prisma.productSubproductMapping.findMany(),
+      this.prisma.orderItem.findMany({
+        where: {
+          order: {
+            orderedAt: { gte: bestSellerSince },
+            operationalStatus: { not: OperationalStatus.CANCELLED }
+          },
+          status: { not: 'CANCELLED' }
+        }
+      })
     ]);
     const mappingIndex = this.buildMappingIndex(productMappings);
+    const bestSellerKeys = this.bestSellerSafetyKeys(salesHistoryItems, mappingIndex);
     const demand = new Map<string, number>();
     for (const orderItem of this.filterByMinimumOrderNumber(pendingOrderItems)) {
       const mapped = this.mapOrderItemToBlankGarment(orderItem, mappingIndex);
@@ -598,9 +627,10 @@ export class PurchaseService {
       const neededForPendingOrders = demand.get(key) ?? 0;
       const supplierAvailableQuantity = supplierStocks.find((stock) => stock.supplierSku === item.supplierSku)?.availableQuantity;
       const alreadyOrderedQuantity = 0;
+      const minStockTarget = this.calculateMinStockTarget(item.minStock, bestSellerKeys.has(key));
       const recommendedPurchaseQuantity = this.calculateRecommendedPurchaseQuantity({
         pendingOrderNeed: neededForPendingOrders,
-        minStockTarget: item.minStock,
+        minStockTarget,
         currentInternalStock,
         alreadyOrderedQuantity
       });
@@ -610,7 +640,7 @@ export class PurchaseService {
           stockItemId: item.id,
           supplierSku: item.supplierSku,
           neededForPendingOrders,
-          minStockTarget: item.minStock,
+          minStockTarget,
           currentInternalStock,
           alreadyOrderedQuantity,
           recommendedPurchaseQuantity,
@@ -620,6 +650,49 @@ export class PurchaseService {
     }
 
     return { generated: created.length, needs: created };
+  }
+
+  private bestSellerSafetyKeys(
+    orderItems: Array<{ sku: string; title: string; variantTitle?: string | null; color?: string | null; size?: string | null; productType?: string | null; quantity: number }>,
+    mappingIndex: Map<string, string>
+  ) {
+    const unitsByKey = new Map<string, number>();
+    for (const item of orderItems) {
+      const mapped = this.mapOrderItemToBlankGarment(item, mappingIndex);
+      if (!mapped || mapped.kind === 'DTF') continue;
+      const key = this.matrixKey(mapped.kind, mapped.color, mapped.size);
+      unitsByKey.set(key, (unitsByKey.get(key) ?? 0) + Math.max(0, item.quantity));
+    }
+    return new Set(
+      [...unitsByKey.entries()]
+        .filter(([, units]) => units > 0)
+        .sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0]))
+        .slice(0, this.bestSellerVariantCount())
+        .map(([key]) => key)
+    );
+  }
+
+  private bestSellerSince() {
+    const since = new Date();
+    since.setUTCDate(since.getUTCDate() - this.bestSellerLookbackDays());
+    return since;
+  }
+
+  private bestSellerMinStock() {
+    return this.positiveIntegerConfig('PURCHASE_BEST_SELLER_MIN_STOCK', 5, 100);
+  }
+
+  private bestSellerVariantCount() {
+    return this.positiveIntegerConfig('PURCHASE_BEST_SELLER_VARIANTS', 5, 50);
+  }
+
+  private bestSellerLookbackDays() {
+    return this.positiveIntegerConfig('PURCHASE_BEST_SELLER_LOOKBACK_DAYS', 90, 3650);
+  }
+
+  private positiveIntegerConfig(key: string, fallback: number, maximum: number) {
+    const value = Number(this.config.get<string>(key));
+    return Number.isInteger(value) && value > 0 && value <= maximum ? value : fallback;
   }
 
   private buildMappingIndex(mappings: Array<{ sku: string; productName: string; subproductName: string }>) {
@@ -1141,6 +1214,7 @@ interface PurchaseMatrixGroup {
     demandOrders: PurchaseMatrixDemandOrder[];
     currentInternalStock: number;
     minStockTarget: number;
+    isBestSellerSafetyStock?: boolean;
     alreadyOrderedQuantity: number;
     recommendedPurchaseQuantity: number;
     supplierAvailableQuantity: number | null;

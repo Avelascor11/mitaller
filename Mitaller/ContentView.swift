@@ -630,6 +630,7 @@ struct PurchaseMatrixEntry: Identifiable {
     let demandOrders: [PurchaseDemandOrder]
     let currentInternalStock: Int
     let minStockTarget: Int
+    let isBestSellerSafetyStock: Bool
     let alreadyOrderedQuantity: Int
     let recommendedPurchaseQuantity: Int
     let supplierAvailableQuantity: Int?
@@ -5221,6 +5222,11 @@ struct PurchaseBuyRow: View {
                         if entry.minStockTarget > 0 {
                             MiniMetric(label: "ss", value: entry.minStockTarget, color: AppTheme.amber)
                         }
+                    }
+                    if entry.isBestSellerSafetyStock {
+                        Label("Top ventas · mínimo 5", systemImage: "flame.fill")
+                            .font(.caption2.weight(.black))
+                            .foregroundStyle(AppTheme.amber)
                     }
                 }
                 Spacer(minLength: 8)
