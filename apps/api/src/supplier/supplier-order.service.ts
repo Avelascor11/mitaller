@@ -126,7 +126,8 @@ export class SupplierOrderService {
       .flatMap((group) => group.sizes.map((entry) => ({ group, entry })))
       .filter(({ entry }) => entry.stockItemId && entry.supplierSku && entry.recommendedPurchaseQuantity > 0)
       .map(({ group, entry }) => {
-        const article = this.resolveFalkRossArticle(group.garmentType, group.color, entry.size, entry.supplierSku, supplierArticles, articleBySku);
+        const article = this.resolveFalkRossArticle(group.garmentType, group.color, entry.size, entry.supplierSku, supplierArticles, articleBySku)
+          ?? this.resolveFalkRossStockOnlyFallback(group.garmentType, group.color, entry.size, supplierStocks);
         const expectedStyles = this.expectedFalkRossStyles(group.garmentType, group.color);
         const supplierSku = article?.supplierSku ?? expectedStyles[0] ?? entry.supplierSku!;
         const resolvedStyleKey = this.falkRossStyleKey(article?.styleCode ?? article?.productName ?? expectedStyles[0]);
@@ -158,7 +159,7 @@ export class SupplierOrderService {
             alreadyPendingSupplierOrderQuantity: alreadyPending,
             stockItemSupplierSku: entry.supplierSku,
             resolvedSupplierSku: supplierSku,
-            resolvedStyleCode: article?.styleCode,
+            resolvedStyleCode: article?.styleCode ?? (article ? expectedStyles[0] : undefined),
             expectedStyleCode: expectedStyles[0],
             expectedProductNumber: expectedStyles[1],
             resolvedProductName: article?.productName,
@@ -406,6 +407,26 @@ export class SupplierOrderService {
       this.articleMatchesFalkRossColor(article, color) &&
       this.normalizedSize(article.size ?? article.productName) === this.normalizedSize(size)
     );
+  }
+
+  private resolveFalkRossStockOnlyFallback(
+    garmentType: string,
+    color: string,
+    size: string,
+    stocks: Array<{ supplierSku: string }>
+  ) {
+    // Falk & Ross sometimes publishes a valid SKU in stock before its article master.
+    if (garmentType !== 'CAMISETA' || this.normalizedColor(color) !== 'AZUL' || this.normalizedSize(size) !== 'XXL') return null;
+    const supplierSku = '032424256';
+    if (!stocks.some((stock) => stock.supplierSku === supplierSku)) return null;
+    return {
+      supplierSku,
+      styleCode: '032.42',
+      productName: 'TG002 - #E220 T-Shirt',
+      color: 'Royal',
+      size: '2XL',
+      purchasePrice: null
+    };
   }
 
   private articleMatchesGarment(
