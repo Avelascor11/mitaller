@@ -1537,11 +1537,13 @@ final class WorkshopStore {
 
 struct ContentView: View {
     @State private var store = WorkshopStore()
+    @State private var notesStore = NotesStore()
     @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
         MainTabView()
             .environment(store)
+            .environment(notesStore)
             .preferredColorScheme(.dark)
             .tint(AppTheme.blue)
             .task {
@@ -1565,6 +1567,7 @@ struct ContentView: View {
 
 struct MainTabView: View {
     @Environment(WorkshopStore.self) private var store
+    @Environment(NotesStore.self) private var notesStore
 
     var body: some View {
         TabView {
@@ -1599,6 +1602,9 @@ struct MainTabView: View {
                 .tabItem { Label("Caja", systemImage: "banknote.fill") }
             ExtremeSavingsView()
                 .tabItem { Label("Ahorro extremo", systemImage: "target") }
+            NotesTasksView()
+                .badge(notesStore.pendingCount)
+                .tabItem { Label("Notas", systemImage: "note.text") }
             FixedExpensesView()
                 .tabItem { Label("Gastos", systemImage: "calendar.badge.exclamationmark") }
             EmployeesView()
@@ -17917,6 +17923,137 @@ struct GlobalSearchToolbarModifier: ViewModifier {
 
 extension View {
     func globalSearch() -> some View { modifier(GlobalSearchToolbarModifier()) }
+}
+
+@Observable
+final class NotesStore {
+    var entries: [NoteTaskEntry] = []
+    private let key = "mitaller.notes.tasks.v1"
+
+    init() { load() }
+
+    var pendingCount: Int { entries.filter { !$0.isDone }.count }
+
+    func save(_ entry: NoteTaskEntry) {
+        entries.insert(entry, at: 0)
+        persist()
+        if let date = entry.reminderDate { scheduleReminder(for: entry, date: date) }
+    }
+
+    func toggle(_ entry: NoteTaskEntry) {
+        guard let index = entries.firstIndex(where: { $0.id == entry.id }) else { return }
+        entries[index].isDone.toggle()
+        persist()
+    }
+
+    func delete(_ entry: NoteTaskEntry) {
+        entries.removeAll { $0.id == entry.id }
+        persist()
+    }
+
+    private func load() {
+        guard let data = UserDefaults.standard.data(forKey: key),
+              let decoded = try? JSONDecoder().decode([NoteTaskEntry].self, from: data) else { return }
+        entries = decoded
+    }
+
+    private func persist() {
+        if let data = try? JSONEncoder().encode(entries) { UserDefaults.standard.set(data, forKey: key) }
+    }
+
+    private func scheduleReminder(for entry: NoteTaskEntry, date: Date) {
+        let content = UNMutableNotificationContent()
+        content.title = entry.isTask ? "Tarea pendiente" : "Nota de Mitaller"
+        content.body = entry.title
+        content.sound = .default
+        let components = Calendar.current.dateComponents([.year, .month, .day, .hour, .minute], from: date)
+        let request = UNNotificationRequest(identifier: entry.id.uuidString, content: content, trigger: UNCalendarNotificationTrigger(dateMatching: components, repeats: false))
+        UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { granted, _ in
+            guard granted else { return }
+            UNUserNotificationCenter.current().add(request)
+        }
+    }
+}
+
+struct NoteTaskEntry: Codable, Identifiable, Equatable {
+    let id: UUID
+    var title: String
+    var body: String
+    var isTask: Bool
+    var priority: String
+    var reminderDate: Date?
+    var isDone: Bool = false
+}
+
+struct NotesTasksView: View {
+    @Environment(NotesStore.self) private var notesStore
+    @State private var showingEditor = false
+    @State private var filter: NotesFilter = .pending
+
+    private var visibleEntries: [NoteTaskEntry] {
+        switch filter {
+        case .pending: notesStore.entries.filter { !$0.isDone }
+        case .all: notesStore.entries
+        case .done: notesStore.entries.filter(\.isDone)
+        }
+    }
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 14) {
+                    Picker("Vista", selection: $filter) {
+                        ForEach(NotesFilter.allCases) { Text($0.title).tag($0) }
+                    }
+                    .pickerStyle(.segmented)
+                    if visibleEntries.isEmpty {
+                        ContentUnavailableView("Nada pendiente", systemImage: "checkmark.circle", description: Text("Añade una tarea o una nota para tenerla a mano."))
+                    } else {
+                        LazyVStack(spacing: 10) {
+                            ForEach(visibleEntries) { entry in
+                                NoteTaskRow(entry: entry, onToggle: { notesStore.toggle(entry) }, onDelete: { notesStore.delete(entry) })
+                            }
+                        }
+                    }
+                }
+                .padding()
+            }
+            .screenBackground()
+            .navigationTitle("Notas y tareas")
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button { showingEditor = true } label: { Image(systemName: "plus") }
+                }
+            }
+            .sheet(isPresented: $showingEditor) { NoteTaskEditor { notesStore.save($0) } }
+        }
+    }
+}
+
+enum NotesFilter: String, CaseIterable, Identifiable { case pending, all, done; var id: String { rawValue }; var title: String { self == .pending ? "Pendientes" : self == .all ? "Todas" : "Hechas" } }
+
+struct NoteTaskRow: View {
+    let entry: NoteTaskEntry
+    let onToggle: () -> Void
+    let onDelete: () -> Void
+    var body: some View {
+        HStack(alignment: .top, spacing: 12) {
+            Button(action: onToggle) { Image(systemName: entry.isDone ? "checkmark.circle.fill" : "circle").font(.title3).foregroundStyle(entry.isDone ? AppTheme.green : AppTheme.blue) }.buttonStyle(.plain)
+            VStack(alignment: .leading, spacing: 5) {
+                Text(entry.title).font(.headline.weight(.black)).strikethrough(entry.isDone).foregroundStyle(AppTheme.ink)
+                if !entry.body.isEmpty { Text(entry.body).font(.caption).foregroundStyle(AppTheme.muted).fixedSize(horizontal: false, vertical: true) }
+                HStack(spacing: 8) { Text(entry.isTask ? "TAREA" : "NOTA").font(.caption2.weight(.black)); if let date = entry.reminderDate { Label(date.formatted(.dateTime.day().month().hour().minute()), systemImage: "bell.fill") } }.font(.caption2.weight(.bold)).foregroundStyle(AppTheme.muted)
+            }
+            Spacer()
+        }.padding(12).background(AppTheme.surface).clipShape(RoundedRectangle(cornerRadius: 12)).contextMenu { Button(role: .destructive, action: onDelete) { Label("Eliminar", systemImage: "trash") } }
+    }
+}
+
+struct NoteTaskEditor: View {
+    @Environment(\.dismiss) private var dismiss
+    @State private var title = ""; @State private var details = ""; @State private var isTask = true; @State private var priority = "Normal"; @State private var hasReminder = false; @State private var reminderDate = Date().addingTimeInterval(3600)
+    let onSave: (NoteTaskEntry) -> Void
+    var body: some View { NavigationStack { Form { Section { TextField("Título", text: $title); TextField("Detalles", text: $details, axis: .vertical); Toggle("Es una tarea", isOn: $isTask) }; Section("Prioridad") { Picker("Prioridad", selection: $priority) { Text("Baja").tag("Baja"); Text("Normal").tag("Normal"); Text("Alta").tag("Alta") }.pickerStyle(.segmented) }; Section("Recordatorio") { Toggle("Activar recordatorio", isOn: $hasReminder); if hasReminder { DatePicker("Fecha y hora", selection: $reminderDate, in: Date()...) } } }.navigationTitle("Nueva nota").toolbar { ToolbarItem(placement: .cancellationAction) { Button("Cancelar") { dismiss() } }; ToolbarItem(placement: .confirmationAction) { Button("Guardar") { onSave(NoteTaskEntry(id: UUID(), title: title.trimmingCharacters(in: .whitespacesAndNewlines), body: details, isTask: isTask, priority: priority, reminderDate: hasReminder ? reminderDate : nil)); dismiss() }.disabled(title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty) } } } }
 }
 
 #Preview {
