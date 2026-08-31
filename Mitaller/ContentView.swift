@@ -784,6 +784,23 @@ final class WorkshopStore {
     var readyForShipping: Int { orders.filter { $0.status == .readyForLabel }.count }
     var urgentPendingOrders: Int { pendingPreparationOrders.filter { $0.priority == .critical }.count }
     var highPendingOrders: Int { pendingPreparationOrders.filter { $0.priority == .high }.count }
+    var safetyStockAlerts: [PurchaseMatrixEntry] {
+        purchaseMatrix
+            .flatMap(\.entries)
+            .filter {
+                $0.isBestSellerSafetyStock &&
+                $0.minStockTarget > 0 &&
+                $0.currentInternalStock < $0.minStockTarget
+            }
+            .sorted {
+                let leftMissing = $0.minStockTarget - $0.currentInternalStock
+                let rightMissing = $1.minStockTarget - $1.currentInternalStock
+                if leftMissing == rightMissing {
+                    return $0.subproductName.localizedStandardCompare($1.subproductName) == .orderedAscending
+                }
+                return leftMissing > rightMissing
+            }
+    }
     var pendingPreparationOrders: [WorkshopOrder] {
         orders
             .filter { $0.status.isPendingPreparation }
@@ -1132,6 +1149,48 @@ final class WorkshopStore {
         dtfPrintJobs = snapshot.dtfPrintJobs
         isAPIConnected = true
         lastSyncText = Date().formatted(.dateTime.hour().minute().second())
+        await notifySafetyStockIfNeeded()
+    }
+
+    private func notifySafetyStockIfNeeded() async {
+        let alerts = safetyStockAlerts
+        let defaultsKey = "stockSafetyNotificationSignature"
+        let signature = alerts
+            .map { "\($0.id):\($0.currentInternalStock):\($0.minStockTarget)" }
+            .sorted()
+            .joined(separator: "|")
+
+        guard !signature.isEmpty else {
+            UserDefaults.standard.removeObject(forKey: defaultsKey)
+            UNUserNotificationCenter.current().removePendingNotificationRequests(withIdentifiers: ["stock.safety.low"])
+            return
+        }
+        guard UserDefaults.standard.string(forKey: defaultsKey) != signature else { return }
+
+        do {
+            let granted = try await UNUserNotificationCenter.current()
+                .requestAuthorization(options: [.alert, .sound, .badge])
+            guard granted else { return }
+
+            let content = UNMutableNotificationContent()
+            content.title = "Stock de seguridad bajo"
+            content.body = alerts.count == 1
+                ? "\(alerts[0].subproductName), talla \(alerts[0].size), ha bajado de \(alerts[0].minStockTarget) unidades."
+                : "Hay \(alerts.count) tallas top por debajo del minimo. Revisa Compras."
+            content.sound = .default
+            content.badge = NSNumber(value: alerts.count)
+
+            let request = UNNotificationRequest(
+                identifier: "stock.safety.low",
+                content: content,
+                trigger: UNTimeIntervalNotificationTrigger(timeInterval: 1, repeats: false)
+            )
+            UNUserNotificationCenter.current().removePendingNotificationRequests(withIdentifiers: ["stock.safety.low"])
+            try await UNUserNotificationCenter.current().add(request)
+            UserDefaults.standard.set(signature, forKey: defaultsKey)
+        } catch {
+            // La alerta dentro de Compras sigue disponible aunque iOS deniegue el aviso.
+        }
     }
 
     func generateDtfPrintJobs() async {
@@ -1504,6 +1563,8 @@ struct ContentView: View {
 }
 
 struct MainTabView: View {
+    @Environment(WorkshopStore.self) private var store
+
     var body: some View {
         TabView {
             DashboardView()
@@ -1521,6 +1582,7 @@ struct MainTabView: View {
             DTFView()
                 .tabItem { Label("DTF", systemImage: "photo.on.rectangle.angled") }
             PurchaseMatrixView()
+                .badge(store.safetyStockAlerts.count)
                 .tabItem { Label("Compras", systemImage: "cart.badge.plus") }
             FinalizedView()
                 .tabItem { Label("Finalizados", systemImage: "checkmark.seal.fill") }
@@ -4593,6 +4655,10 @@ struct PurchaseMatrixView: View {
         store.purchaseMatrix.filter { $0.garmentType != "DTF" }
     }
 
+    private var safetyAlerts: [PurchaseMatrixEntry] {
+        store.safetyStockAlerts
+    }
+
     var body: some View {
         NavigationStack {
             ScrollView {
@@ -4605,6 +4671,10 @@ struct PurchaseMatrixView: View {
                         Text("Unidades a comprar segun pedidos sin preparar y stock actual.")
                             .font(.subheadline.weight(.medium))
                             .foregroundStyle(AppTheme.muted)
+                    }
+
+                    if !safetyAlerts.isEmpty {
+                        SafetyStockAlertCard(entries: safetyAlerts)
                     }
 
                     LazyVGrid(columns: [GridItem(.adaptive(minimum: 104), spacing: 10)], spacing: 10) {
@@ -4646,6 +4716,46 @@ struct PurchaseMatrixView: View {
                 await store.refreshSupplierPurchaseRecommendation()
             }
         }
+    }
+}
+
+struct SafetyStockAlertCard: View {
+    let entries: [PurchaseMatrixEntry]
+
+    private var missingUnits: Int {
+        entries.reduce(0) { $0 + max(0, $1.minStockTarget - $1.currentInternalStock) }
+    }
+
+    private var summary: String {
+        let names = entries.prefix(3).map { "\($0.subproductName) · \($0.size)" }
+        let suffix = entries.count > 3 ? " y \(entries.count - 3) mas" : ""
+        return names.joined(separator: ", ") + suffix
+    }
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 12) {
+            Image(systemName: "bell.badge.fill")
+                .font(.title2.weight(.bold))
+                .foregroundStyle(AppTheme.red)
+                .frame(width: 38, height: 38)
+                .background(AppTheme.red.opacity(0.14), in: RoundedRectangle(cornerRadius: 8))
+
+            VStack(alignment: .leading, spacing: 5) {
+                Text("STOCK DE SEGURIDAD BAJO")
+                    .font(.subheadline.weight(.black))
+                    .foregroundStyle(AppTheme.ink)
+                Text("\(entries.count) tallas top estan por debajo de 5 unidades. Faltan \(missingUnits) unidades para recuperar el minimo.")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(AppTheme.inkSoft)
+                    .fixedSize(horizontal: false, vertical: true)
+                Text(summary)
+                    .font(.caption2.weight(.bold))
+                    .foregroundStyle(AppTheme.muted)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer(minLength: 0)
+        }
+        .glassPanel(padding: 14, accent: AppTheme.red)
     }
 }
 
