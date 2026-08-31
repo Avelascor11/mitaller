@@ -277,8 +277,12 @@ struct APIClient {
         try await get("/supplier/purchase-orders")
     }
 
-    func generateDailySupplierPurchaseOrder(submit: Bool = false) async throws -> SupplierPurchaseOrderActionResponse {
-        let request = try jsonRequest(path: "/supplier/purchase-orders/daily", method: "POST", body: SupplierPurchaseOrderGenerateRequest(submit: submit))
+    func generateDailySupplierPurchaseOrder(submit: Bool = false, purchaseMode: SupplierPurchaseMode = .safetyStock) async throws -> SupplierPurchaseOrderActionResponse {
+        let request = try jsonRequest(
+            path: "/supplier/purchase-orders/daily",
+            method: "POST",
+            body: SupplierPurchaseOrderGenerateRequest(submit: submit, purchaseMode: purchaseMode.rawValue)
+        )
         return try await perform(request)
     }
 
@@ -1707,6 +1711,14 @@ private struct ConfirmStockReceiptRequest: Encodable {
 
 private struct SupplierPurchaseOrderGenerateRequest: Encodable {
     let submit: Bool
+    let purchaseMode: String
+}
+
+enum SupplierPurchaseMode: String, CaseIterable, Identifiable {
+    case normal = "NORMAL"
+    case safetyStock = "SAFETY_STOCK"
+
+    var id: String { rawValue }
 }
 
 struct SupplierPurchaseOrderActionResponse: Decodable {
@@ -1726,12 +1738,24 @@ struct SupplierPurchaseOrder: Decodable, Identifiable {
     let submittedAt: Date?
     let errorMessage: String?
     let orderNote: String?
+    let purchaseMode: String?
+    let costSummary: SupplierPurchaseCostSummary?
     let createdAt: Date?
     let lines: [SupplierPurchaseOrderLine]
 
     var totalQuantity: Int {
         lines.reduce(0) { $0 + $1.quantity }
     }
+}
+
+struct SupplierPurchaseCostSummary: Decodable {
+    let currency: String
+    let subtotal: Double
+    let shippingCost: Double?
+    let vatRate: Double
+    let vatAmount: Double
+    let total: Double
+    let unpricedLines: Int
 }
 
 struct SupplierPurchaseOrderLine: Decodable, Identifiable {

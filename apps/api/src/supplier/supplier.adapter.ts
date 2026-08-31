@@ -653,6 +653,7 @@ export interface SupplierPurchaseOrderPayload {
   orderNumber: string;
   requestedAt: string;
   source: string;
+  purchaseMode?: 'NORMAL' | 'SAFETY_STOCK';
   orderNote?: string;
   lines: Array<{
     supplierSku: string;

@@ -40,6 +40,43 @@ function buildService(options: {
 }
 
 describe('SupplierOrderService', () => {
+  it('separa la compra normal de la compra con stock de seguridad', async () => {
+    const matrix = {
+      groups: [{
+        garmentType: 'CAMISETA',
+        color: 'BLANCA',
+        sizes: [{
+          stockItemId: 'stock-1',
+          supplierSku: '180000002',
+          subproductName: 'Camiseta Blanca - M',
+          size: 'M',
+          recommendedPurchaseQuantity: 7,
+          supplierAvailableQuantity: 20,
+          pendingOrderNeed: 4,
+          currentInternalStock: 2,
+          minStockTarget: 5,
+          demandOrders: [{ orderNumber: '#9510' }]
+        }]
+      }]
+    };
+    const normal = buildService({ matrix });
+    const safety = buildService({ matrix });
+
+    await normal.service.generateDailyFalkRossOrder({ source: 'manual', purchaseMode: 'NORMAL' });
+    await safety.service.generateDailyFalkRossOrder({ source: 'manual', purchaseMode: 'SAFETY_STOCK' });
+
+    expect(normal.prisma.supplierPurchaseOrder.create).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        rawRequestJson: expect.objectContaining({ purchaseMode: 'NORMAL', lines: [expect.objectContaining({ quantity: 2 })] })
+      })
+    }));
+    expect(safety.prisma.supplierPurchaseOrder.create).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        rawRequestJson: expect.objectContaining({ purchaseMode: 'SAFETY_STOCK', lines: [expect.objectContaining({ quantity: 7 })] })
+      })
+    }));
+  });
+
   it('genera borrador diario sin enviarlo automaticamente aunque submit venga a true', async () => {
     const { service, prisma } = buildService({
       matrix: {

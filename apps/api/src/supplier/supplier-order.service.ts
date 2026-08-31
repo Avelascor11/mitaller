@@ -10,12 +10,13 @@ import { SupplierAdapter, SupplierPurchaseOrderPayload } from './supplier.adapte
 const OPEN_SUPPLIER_ORDER_STATUSES = ['SUBMITTED'];
 const FALKROSS_PRICE_NOTE = [
   'Camiseta 032.42 -> 2.73 EUR',
-  'Camiseta Gildan 180.09 -> revisar tarifa Falk & Ross',
+  'Camiseta Gildan 180.09 -> 2.84 EUR',
   'Sudadera 208.42 / WG002 -> 10.75 EUR'
 ].join(' | ');
 
 const FALKROSS_STYLE_PRICES: Record<string, string> = {
   '03242': '2.73',
+  '18009': '2.84',
   '20842': '10.75',
   '23742': '6.60',
   '24042': '6.00',
@@ -97,7 +98,8 @@ export class SupplierOrderService {
     }
   }
 
-  async generateDailyFalkRossOrder(options: { submit?: boolean; source?: string } = {}) {
+  async generateDailyFalkRossOrder(options: { submit?: boolean; source?: string; purchaseMode?: 'NORMAL' | 'SAFETY_STOCK' } = {}) {
+    const purchaseMode = options.purchaseMode ?? 'SAFETY_STOCK';
     const orderDate = this.todayStart();
     const existing = await this.prisma.supplierPurchaseOrder.findUnique({
       where: { supplier_orderDate: { supplier: 'FALK_ROSS', orderDate } },
@@ -131,7 +133,9 @@ export class SupplierOrderService {
         const supplierStock = article ? stockBySku.get(supplierSku) : null;
         const supplierAvailableQuantity = supplierStock?.availableQuantity ?? null;
         const alreadyPending = entry.alreadyOrderedQuantity ?? 0;
-        const requestedQuantity = entry.recommendedPurchaseQuantity;
+        const requestedQuantity = purchaseMode === 'NORMAL'
+          ? Math.max(0, entry.pendingOrderNeed - entry.currentInternalStock)
+          : Math.max(0, entry.pendingOrderNeed + entry.minStockTarget - entry.currentInternalStock);
         const quantity = this.orderableQuantity(requestedQuantity, supplierAvailableQuantity);
         return {
           stockItemId: entry.stockItemId!,
@@ -149,6 +153,7 @@ export class SupplierOrderService {
             pendingOrderNeed: entry.pendingOrderNeed,
             currentInternalStock: entry.currentInternalStock,
             minStockTarget: entry.minStockTarget,
+            purchaseMode,
             recommendedPurchaseQuantity: entry.recommendedPurchaseQuantity,
             alreadyPendingSupplierOrderQuantity: alreadyPending,
             stockItemSupplierSku: entry.supplierSku,
@@ -176,6 +181,7 @@ export class SupplierOrderService {
       orderNumber: this.orderNumber(orderDate),
       requestedAt: new Date().toISOString(),
       source: options.source ?? 'manual',
+      purchaseMode,
       orderNote: this.falkRossOrderNote(),
       lines: lines.map((line) => ({
         supplierSku: line.supplierSku,
@@ -288,12 +294,44 @@ export class SupplierOrderService {
     };
   }
 
-  private withOrderNote<T extends { rawRequestJson: Prisma.JsonValue | null }>(order: T) {
+  private withOrderNote<T extends {
+    rawRequestJson: Prisma.JsonValue | null;
+    lines?: Array<{ quantity: number; purchasePrice?: Prisma.Decimal | string | number | null }>;
+  }>(order: T) {
     const rawRequest = order.rawRequestJson as SupplierPurchaseOrderPayload | null;
+    const lines = order.lines ?? [];
+    const unpricedLines = lines.filter((line) => line.purchasePrice == null).length;
+    const subtotal = this.money(lines.reduce((sum, line) => sum + Number(line.purchasePrice ?? 0) * line.quantity, 0));
+    const configuredShipping = this.config.get<string>('FALKROSS_SHIPPING_COST_EUR');
+    const shippingCost = configuredShipping == null || configuredShipping.trim() === ''
+      ? null
+      : this.money(Number(configuredShipping));
+    const vatRate = this.rate(this.config.get<string>('FALKROSS_VAT_RATE'), 0.21);
+    const taxableBase = subtotal + (shippingCost ?? 0);
+    const vatAmount = this.money(taxableBase * vatRate);
     return {
       ...order,
-      orderNote: rawRequest?.orderNote ?? this.falkRossOrderNote()
+      orderNote: rawRequest?.orderNote ?? this.falkRossOrderNote(),
+      purchaseMode: rawRequest?.purchaseMode ?? 'SAFETY_STOCK',
+      costSummary: {
+        currency: 'EUR',
+        subtotal,
+        shippingCost,
+        vatRate,
+        vatAmount,
+        total: this.money(taxableBase + vatAmount),
+        unpricedLines
+      }
     };
+  }
+
+  private money(value: number) {
+    return Number.isFinite(value) ? +value.toFixed(2) : 0;
+  }
+
+  private rate(value: string | undefined, fallback: number) {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) && parsed >= 0 ? parsed : fallback;
   }
 
   private async pendingSupplierOrderQuantityByStockItemId() {

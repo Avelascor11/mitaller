@@ -1091,25 +1091,26 @@ final class WorkshopStore {
     func refreshSupplierPurchaseRecommendation() async {
         guard let client = apiClient else { return }
         do {
-            _ = try await client.generateDailySupplierPurchaseOrder(submit: false)
             supplierPurchaseOrders = try await client.supplierPurchaseOrders()
         } catch {
             syncError = "No se pudo actualizar compra proveedor: \(error.localizedDescription)"
         }
     }
 
-    func generateSupplierPurchaseOrder() async {
-        guard let client = apiClient else { return }
+    func generateSupplierPurchaseOrder(mode: SupplierPurchaseMode) async -> SupplierPurchaseOrder? {
+        guard let client = apiClient else { return nil }
         isSupplierPurchaseActionRunning = true
         supplierPurchaseOrderMessage = nil
         syncError = nil
         defer { isSupplierPurchaseActionRunning = false }
         do {
-            let response = try await client.generateDailySupplierPurchaseOrder(submit: false)
+            let response = try await client.generateDailySupplierPurchaseOrder(submit: false, purchaseMode: mode)
             supplierPurchaseOrderMessage = supplierPurchaseOrderStatusText(response.status)
             supplierPurchaseOrders = try await client.supplierPurchaseOrders()
+            return response.order ?? supplierPurchaseOrders.first
         } catch {
             syncError = "No se pudo crear compra proveedor: \(error.localizedDescription)"
+            return nil
         }
     }
 
@@ -4762,7 +4763,6 @@ struct SafetyStockAlertCard: View {
 struct SupplierPurchaseOrderCard: View {
     @Environment(WorkshopStore.self) private var store
     @State private var orderPendingSubmit: SupplierPurchaseOrder?
-    @State private var showSubmitConfirmation = false
     @State private var selectedSummaryDate = Date()
 
     private var latestOrder: SupplierPurchaseOrder? {
@@ -4892,29 +4892,31 @@ struct SupplierPurchaseOrderCard: View {
                 EmptyStateCard(title: "Sin borrador proveedor", subtitle: "Crea la recomendacion del dia cuando quieras revisar la compra.")
             }
 
-            HStack(spacing: 10) {
+            VStack(spacing: 10) {
                 Button {
-                    Task { await store.generateSupplierPurchaseOrder() }
+                    createPurchase(.normal)
                 } label: {
-                    Label("Recomendar compra", systemImage: "sparkles")
+                    Label("Comprar normal", systemImage: "cart.fill")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(AppTheme.blue)
+                .disabled(store.isSupplierPurchaseActionRunning)
+
+                Button {
+                    createPurchase(.safetyStock)
+                } label: {
+                    Label("Comprar + stock de seguridad", systemImage: "shield.checkered")
                         .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.borderedProminent)
                 .tint(AppTheme.magenta)
                 .disabled(store.isSupplierPurchaseActionRunning)
 
-                Button {
-                    if let latestOrder {
-                        orderPendingSubmit = latestOrder
-                        showSubmitConfirmation = true
-                    }
-                } label: {
-                    Label(latestOrder?.status.uppercased() == "DRAFT" ? "Enviar a Falk & Ross" : "Hacer compra", systemImage: "paperplane.fill")
-                        .frame(maxWidth: .infinity)
-                }
-                .buttonStyle(.bordered)
-                .tint(AppTheme.blue)
-                .disabled(store.isSupplierPurchaseActionRunning || latestOrder == nil || latestOrder?.status == "SUBMITTED")
+                Text("Ningun boton envia directamente. Primero veras el total con IVA y tendras que confirmar.")
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(AppTheme.muted)
+                    .multilineTextAlignment(.center)
             }
 
             SupplierPurchaseDailySummary(
@@ -4924,16 +4926,158 @@ struct SupplierPurchaseOrderCard: View {
             )
         }
         .glassPanel(padding: 16, accent: AppTheme.blue)
-        .confirmationDialog("Enviar pedido a Falk & Ross", isPresented: $showSubmitConfirmation, titleVisibility: .visible) {
-            Button("Enviar \(orderPendingSubmit?.orderNumber ?? "pedido")", role: .destructive) {
-                if let orderPendingSubmit {
-                    Task { await store.submitSupplierPurchaseOrder(orderPendingSubmit) }
+        .sheet(item: $orderPendingSubmit) { order in
+            SupplierPurchaseReviewSheet(order: order) {
+                orderPendingSubmit = nil
+                Task { await store.submitSupplierPurchaseOrder(order) }
+            }
+        }
+    }
+
+    private func createPurchase(_ mode: SupplierPurchaseMode) {
+        Task {
+            orderPendingSubmit = await store.generateSupplierPurchaseOrder(mode: mode)
+        }
+    }
+}
+
+struct SupplierPurchaseReviewSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    let order: SupplierPurchaseOrder
+    let onConfirm: () -> Void
+
+    private var isSafetyStock: Bool {
+        order.purchaseMode == SupplierPurchaseMode.safetyStock.rawValue
+    }
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 16) {
+                    HStack(spacing: 12) {
+                        Image(systemName: isSafetyStock ? "shield.checkered" : "cart.fill")
+                            .font(.title2.weight(.black))
+                            .foregroundStyle(isSafetyStock ? AppTheme.magenta : AppTheme.blue)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(isSafetyStock ? "PEDIDO + STOCK DE SEGURIDAD" : "PEDIDO NORMAL")
+                                .font(.headline.weight(.black))
+                                .foregroundStyle(AppTheme.ink)
+                            Text("\(order.totalQuantity) prendas · \(order.lines.count) lineas")
+                                .font(.caption.weight(.bold))
+                                .foregroundStyle(AppTheme.muted)
+                        }
+                    }
+
+                    VStack(spacing: 8) {
+                        ForEach(order.lines) { line in
+                            SupplierPurchaseLineRow(line: line)
+                        }
+                    }
+
+                    if let cost = order.costSummary {
+                        SupplierPurchaseCostCard(summary: cost)
+                    } else {
+                        Text("No se ha podido calcular el total de este borrador. No lo envies hasta revisar los precios.")
+                            .font(.caption.weight(.bold))
+                            .foregroundStyle(AppTheme.red)
+                            .glassPanel(padding: 14, accent: AppTheme.red)
+                    }
+
+                    Button {
+                        onConfirm()
+                    } label: {
+                        Label("Confirmar y enviar a Falk & Ross", systemImage: "paperplane.fill")
+                            .font(.headline.weight(.black))
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 8)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(AppTheme.green)
+                    .disabled(
+                        order.status.uppercased() == "SUBMITTED" ||
+                        order.costSummary == nil ||
+                        (order.costSummary?.unpricedLines ?? 0) > 0
+                    )
+
+                    if order.status.uppercased() == "SUBMITTED" {
+                        Text("Este pedido ya fue enviado al proveedor y no se puede volver a confirmar.")
+                            .font(.caption.weight(.bold))
+                            .foregroundStyle(AppTheme.amber)
+                    }
+                }
+                .padding()
+            }
+            .screenBackground()
+            .navigationTitle("Revisar compra")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancelar") { dismiss() }
                 }
             }
-            Button("Cancelar", role: .cancel) {}
-        } message: {
-            Text(orderPendingSubmit?.orderNote ?? "Revisa cantidades y SKUs antes de confirmar. Si Falk & Ross acepta la API, se guardara el ID externo para que el proveedor pueda buscarlo.")
         }
+    }
+}
+
+struct SupplierPurchaseCostCard: View {
+    let summary: SupplierPurchaseCostSummary
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Label("TOTAL DEL PEDIDO", systemImage: "eurosign.circle.fill")
+                .font(.headline.weight(.black))
+                .foregroundStyle(AppTheme.ink)
+            costRow("Base imponible", summary.subtotal)
+            if let shipping = summary.shippingCost {
+                costRow("Transporte", shipping)
+            } else {
+                HStack {
+                    Text("Transporte")
+                    Spacer()
+                    Text("Pendiente del proveedor")
+                        .foregroundStyle(AppTheme.amber)
+                }
+                .font(.caption.weight(.bold))
+            }
+            costRow("IVA \(Int((summary.vatRate * 100).rounded()))%", summary.vatAmount)
+            Divider().background(AppTheme.line)
+            HStack {
+                Text("TOTAL ESTIMADO")
+                    .font(.headline.weight(.black))
+                Spacer()
+                Text(euro(summary.total))
+                    .font(.title2.weight(.black))
+                    .foregroundStyle(AppTheme.green)
+            }
+            .foregroundStyle(AppTheme.ink)
+
+            if summary.shippingCost == nil {
+                Text("El total incluye IVA, pero no el transporte porque Falk & Ross no informa de ese importe antes de enviar.")
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(AppTheme.muted)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            if summary.unpricedLines > 0 {
+                Label("Hay \(summary.unpricedLines) lineas sin precio. El envio queda bloqueado hasta revisarlas.", systemImage: "exclamationmark.triangle.fill")
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(AppTheme.red)
+            }
+        }
+        .glassPanel(padding: 16, accent: summary.unpricedLines > 0 ? AppTheme.red : AppTheme.green)
+    }
+
+    private func costRow(_ label: String, _ value: Double) -> some View {
+        HStack {
+            Text(label)
+            Spacer()
+            Text(euro(value)).fontWeight(.black)
+        }
+        .font(.subheadline)
+        .foregroundStyle(AppTheme.inkSoft)
+    }
+
+    private func euro(_ value: Double) -> String {
+        value.formatted(.currency(code: summary.currency).locale(Locale(identifier: "es_ES")))
     }
 }
 

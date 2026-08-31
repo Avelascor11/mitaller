@@ -45,8 +45,12 @@ export class SupplierController {
   }
 
   @Post('purchase-orders/daily')
-  generateDailyPurchaseOrder(@Body() body: { submit?: boolean }) {
-    return this.supplierOrders.generateDailyFalkRossOrder({ submit: Boolean(body.submit), source: 'manual' });
+  generateDailyPurchaseOrder(@Body() body: { submit?: boolean; purchaseMode?: 'NORMAL' | 'SAFETY_STOCK' }) {
+    return this.supplierOrders.generateDailyFalkRossOrder({
+      submit: Boolean(body.submit),
+      source: 'manual',
+      purchaseMode: body.purchaseMode === 'NORMAL' ? 'NORMAL' : 'SAFETY_STOCK'
+    });
   }
 
   @Post('purchase-orders/:id/submit')
