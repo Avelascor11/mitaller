@@ -1,5 +1,5 @@
 import { Type } from 'class-transformer';
-import { ArrayMinSize, IsArray, IsEmail, IsIn, IsInt, IsNotEmpty, IsNumber, IsOptional, IsString, Min, ValidateNested } from 'class-validator';
+import { ArrayMinSize, IsArray, IsIn, IsInt, IsNotEmpty, IsNumber, IsOptional, IsString, Min, ValidateNested } from 'class-validator';
 
 export class ReturnItemDto {
   @IsString()
@@ -45,7 +45,8 @@ export class CreateReturnDto {
   @IsNotEmpty()
   orderNumber!: string;
 
-  @IsEmail()
+  @IsString()
+  @IsNotEmpty()
   email!: string;
 
   @IsOptional()

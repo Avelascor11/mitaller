@@ -136,7 +136,7 @@ type LangStrings = {
 const TRANSLATIONS: Record<string, LangStrings> = {
   es: {
     step1: 'Paso 1 de 3 — Buscar pedido', step2: 'Paso 2 de 3 — Seleccionar artículos', step3: 'Paso 3 de 3 — Confirmación',
-    orderNumber: 'Número de pedido', email: 'Email', emailPlaceholder: 'tu@email.com',
+    orderNumber: 'Número de pedido', email: 'Email o móvil', emailPlaceholder: 'email o móvil del pedido',
     searchBtn: 'Buscar pedido', searching: 'Buscando...', selectItems: 'Selecciona artículos',
     managementType: 'Tipo de gestión', returnBtn: 'Devolver', exchangeBtn: 'Cambiar',
     exchangeProduct: 'Producto de cambio', changeBtn: 'Cambiar', chooseProduct: '+ Elegir producto de cambio',
@@ -1551,7 +1551,7 @@ export default function DevolucionesPage() {
                   <div className="ios-section-label">{t.email}</div>
                   <input
                     className="ios-input"
-                    type="email"
+                    type="text"
                     placeholder={t.emailPlaceholder}
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}

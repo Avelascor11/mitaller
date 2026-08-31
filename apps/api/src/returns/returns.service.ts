@@ -56,34 +56,27 @@ export class ReturnsService {
       throw new ForbiddenException(exceptions.blockedReason ?? 'Este pedido no puede devolverse.');
     }
 
-    const emailNorm = dto.email.toLowerCase().trim();
-    const loadOrder = () => this.prisma.order.findFirst({
-      where: {
-        orderNumber: { in: [raw, withoutHash, withHash] },
-        customerEmail: { equals: emailNorm, mode: 'insensitive' }
-      },
-      include: {
-        items: true,
-        shipments: { orderBy: { createdAt: 'desc' }, take: 1 },
-        returns: {
-          where: { status: { notIn: ['REJECTED', 'CANCELLED'] } },
-          include: { items: true }
-        }
+    const contactInput = dto.email.trim();
+    const emailNorm = contactInput.toLowerCase();
+    const phoneNorm = this.normalizePhone(contactInput);
+    const contactIsEmail = this.isEmail(contactInput);
+    const orderInclude = {
+      items: true,
+      shipments: { orderBy: { createdAt: 'desc' }, take: 1 },
+      returns: {
+        where: { status: { notIn: ['REJECTED', 'CANCELLED'] } },
+        include: { items: true }
       }
-    });
-    const loadOrderByNumber = () => this.prisma.order.findFirst({
+    } satisfies Prisma.OrderInclude;
+    const loadOrdersByNumber = () => this.prisma.order.findMany({
       where: {
         orderNumber: { in: [raw, withoutHash, withHash] }
       },
-      include: {
-        items: true,
-        shipments: { orderBy: { createdAt: 'desc' }, take: 1 },
-        returns: {
-          where: { status: { notIn: ['REJECTED', 'CANCELLED'] } },
-          include: { items: true }
-        }
-      }
+      include: orderInclude
     });
+    const loadOrder = async () => (await loadOrdersByNumber()).find((candidate) =>
+      this.orderMatchesContact(candidate, emailNorm, phoneNorm)
+    ) ?? null;
 
     let order = await loadOrder();
 
@@ -93,18 +86,30 @@ export class ReturnsService {
           ? await this.shopify.getOrderById(order.shopifyOrderId)
           : null;
         const fetched = fetchedById ?? await this.shopify.fetchOrderByName(withoutHash);
+        const sendcloudCustomer = fetched && phoneNorm
+          ? await this.sendcloud.findIncomingOrderCustomerData(withHash).catch((error) => {
+            console.error('[ReturnsService] Sendcloud order lookup failed during return lookup:', error);
+            return null;
+          })
+          : null;
         const fetchedEmail = (fetched?.customerEmail ?? '').toLowerCase().trim();
-        if (fetched && (fetchedEmail === emailNorm || !fetchedEmail)) {
-          const existingByNumber = await loadOrderByNumber();
-          if (!fetchedEmail && existingByNumber?.customerEmail && existingByNumber.customerEmail.toLowerCase().trim() !== emailNorm) {
+        const sendcloudEmail = (sendcloudCustomer?.customerEmail ?? '').toLowerCase().trim();
+        const fetchedPhone = this.phoneFromShippingAddress(fetched?.shippingAddressJson) ??
+          this.phoneFromShippingAddress(sendcloudCustomer?.shippingAddressJson);
+        const fetchedMatchesContact = fetchedEmail === emailNorm || (!!phoneNorm && fetchedPhone === phoneNorm);
+        const sendcloudMatchesEmail = Boolean(sendcloudEmail && sendcloudEmail === emailNorm);
+        if (fetched && (fetchedMatchesContact || sendcloudMatchesEmail || (!fetchedEmail && !sendcloudEmail && !fetchedPhone && contactIsEmail))) {
+          const existingByNumber = (await loadOrdersByNumber())[0];
+          if (existingByNumber && !this.orderMatchesContact(existingByNumber, emailNorm, phoneNorm) && !fetchedMatchesContact && !sendcloudMatchesEmail) {
             return;
           }
-          const importableOrder = fetchedEmail
-            ? fetched
-            : {
-              ...fetched,
-              customerEmail: emailNorm
-            };
+          const importableOrder = {
+            ...fetched,
+            customerName: sendcloudCustomer?.customerName ?? fetched.customerName,
+            customerEmail: fetched.customerEmail ?? sendcloudCustomer?.customerEmail ?? (contactIsEmail ? emailNorm : undefined),
+            shippingCountry: fetched.shippingCountry ?? sendcloudCustomer?.shippingCountry,
+            shippingAddressJson: sendcloudCustomer?.shippingAddressJson ?? fetched.shippingAddressJson
+          };
           try {
             await this.ordersService.upsertImportedOrder(importableOrder);
           } catch (error) {
@@ -150,7 +155,7 @@ export class ReturnsService {
     }
 
     if (!order) {
-      throw new NotFoundException('No encontramos ningún pedido con ese número y email. Comprueba los datos e inténtalo de nuevo.');
+      throw new NotFoundException('No encontramos ningún pedido con ese número y email o móvil. Comprueba los datos e inténtalo de nuevo.');
     }
 
     if (order.items.length === 0 && withoutHash === '9598' && emailNorm === 'laratendero@hotmail.com') {
@@ -168,7 +173,7 @@ export class ReturnsService {
     }
 
     if (!order) {
-      throw new NotFoundException('No encontramos ningún pedido con ese número y email. Comprueba los datos e inténtalo de nuevo.');
+      throw new NotFoundException('No encontramos ningún pedido con ese número y email o móvil. Comprueba los datos e inténtalo de nuevo.');
     }
 
     // === 15-day check: get actual delivery date ===
@@ -280,6 +285,7 @@ export class ReturnsService {
     }
 
     const order = await this.prisma.order.findFirstOrThrow({ where: { orderNumber: lookup.orderNumber } });
+    const contactEmail = this.isEmail(dto.email) ? dto.email.toLowerCase().trim() : order.customerEmail?.toLowerCase().trim();
 
     // === Calculate amounts ===
     const refundAmount = dto.items.reduce((sum, it) => {
@@ -309,6 +315,9 @@ export class ReturnsService {
     const totalToPay = type === 'EXCHANGE'
       ? Math.max(0, netDiff) + labelFee
       : labelFee;
+    if (!contactEmail) {
+      throw new BadRequestException('Este pedido no tiene email asociado. Usa el email del pedido o contacta con soporte para tramitar el cambio.');
+    }
 
     // === Create Shopify Draft Order (only if there's something to charge) ===
     let draftOrderId: string | null = null;
@@ -340,7 +349,7 @@ export class ReturnsService {
         const exchangeCredit = type === 'EXCHANGE' ? Math.min(refundAmount, chargeAmount) : 0;
 
         const draft = await this.shopify.createDraftOrder({
-          customerEmail: dto.email.toLowerCase().trim(),
+          customerEmail: contactEmail,
           note: `${type === 'EXCHANGE' ? 'CAMBIO' : 'DEVOLUCIÓN'} pedido ${order.orderNumber} — ${dto.items.length} artículo(s)`,
           tags: ['return-portal', type.toLowerCase()],
           shippingAddress: this.shippingAddressFromOrder(order.shippingAddressJson, order.customerName),
@@ -385,7 +394,7 @@ export class ReturnsService {
     if (totalToPay === 0 && type === 'EXCHANGE' && replacementsInfo.length > 0) {
       try {
         const draft = await this.shopify.createDraftOrder({
-          customerEmail: dto.email.toLowerCase().trim(),
+          customerEmail: contactEmail,
           note: `CAMBIO (sin coste) pedido ${order.orderNumber} — ${dto.items.length} artículo(s)`,
           tags: ['return-portal', 'exchange', 'exchange-free'],
           shippingAddress: this.shippingAddressFromOrder(order.shippingAddressJson, order.customerName),
@@ -407,7 +416,7 @@ export class ReturnsService {
         const sc = await this.sendcloud.createReturn({
           orderNumber: order.orderNumber,
           customerName: order.customerName,
-          customerEmail: order.customerEmail ?? dto.email,
+          customerEmail: contactEmail,
           customerAddressJson: order.shippingAddressJson,
           returnType: type
         });
@@ -428,7 +437,7 @@ export class ReturnsService {
       data: {
         orderId: order.id,
         shopifyOrderNumber: order.orderNumber,
-        customerEmail: dto.email.toLowerCase().trim(),
+        customerEmail: contactEmail,
         customerName: order.customerName,
         type: type as never,
         status: initialStatus as never,
@@ -646,6 +655,34 @@ export class ReturnsService {
       checkoutUrl: returnRecord.checkoutUrl ?? null,
       source
     });
+  }
+
+  private orderMatchesContact(
+    order: { customerEmail?: string | null; shippingAddressJson?: unknown },
+    emailNorm: string,
+    phoneNorm?: string
+  ) {
+    const orderEmail = order.customerEmail?.toLowerCase().trim();
+    if (orderEmail && orderEmail === emailNorm) return true;
+    const orderPhone = this.phoneFromShippingAddress(order.shippingAddressJson);
+    return Boolean(phoneNorm && orderPhone && orderPhone === phoneNorm);
+  }
+
+  private phoneFromShippingAddress(shippingAddressJson: unknown) {
+    if (!shippingAddressJson || typeof shippingAddressJson !== 'object') return undefined;
+    const source = shippingAddressJson as Record<string, unknown>;
+    return this.normalizePhone(source.phone ?? source.telephone ?? source.phone_number);
+  }
+
+  private normalizePhone(value: unknown) {
+    if (typeof value !== 'string' && typeof value !== 'number') return undefined;
+    const digits = String(value).replace(/\D/g, '');
+    if (digits.length < 6) return undefined;
+    return digits.slice(-9);
+  }
+
+  private isEmail(value: string) {
+    return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim());
   }
 
   /** Admin: manually create a real Shopify order for the replacement products of an EXCHANGE. */
