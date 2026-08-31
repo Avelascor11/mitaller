@@ -5130,6 +5130,7 @@ struct SupplierPurchaseDailySummary: View {
     @Binding var selectedDate: Date
     let orders: [SupplierPurchaseOrder]
     let submittedOrders: [SupplierPurchaseOrder]
+    @State private var selectedHistoryOrder: SupplierPurchaseOrder?
 
     private var draftCount: Int {
         orders.filter { $0.status.uppercased() != "SUBMITTED" }.count
@@ -5142,7 +5143,7 @@ struct SupplierPurchaseDailySummary: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(alignment: .center, spacing: 10) {
-                Label("Resumen finalizados", systemImage: "calendar.badge.checkmark")
+                Label("Histórico de pedidos", systemImage: "clock.arrow.circlepath")
                     .font(.headline.weight(.black))
                     .foregroundStyle(AppTheme.ink)
                 Spacer()
@@ -5157,8 +5158,8 @@ struct SupplierPurchaseDailySummary: View {
                 SupplierPurchaseSummaryTile(title: "Prendas", value: submittedUnits, color: AppTheme.blue, icon: "shippingbox.fill")
             }
 
-            if submittedOrders.isEmpty {
-                Text("No hay compras finalizadas en este dia.")
+            if orders.isEmpty {
+                Text("No hay pedidos de proveedor en este dia.")
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(AppTheme.muted)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -5167,8 +5168,13 @@ struct SupplierPurchaseDailySummary: View {
                     .clipShape(RoundedRectangle(cornerRadius: 12))
             } else {
                 VStack(spacing: 8) {
-                    ForEach(submittedOrders) { order in
-                        SupplierPurchaseHistoryRow(order: order)
+                    ForEach(orders) { order in
+                        Button {
+                            selectedHistoryOrder = order
+                        } label: {
+                            SupplierPurchaseHistoryRow(order: order)
+                        }
+                        .buttonStyle(.plain)
                     }
                 }
             }
@@ -5176,6 +5182,9 @@ struct SupplierPurchaseDailySummary: View {
         .padding(12)
         .background(AppTheme.surfaceSoft)
         .clipShape(RoundedRectangle(cornerRadius: 14))
+        .sheet(item: $selectedHistoryOrder) { order in
+            SupplierPurchaseHistoryDetailSheet(order: order)
+        }
     }
 }
 
@@ -5224,6 +5233,7 @@ struct SupplierPurchaseHistoryRow: View {
                             .font(.caption2.weight(.bold))
                             .foregroundStyle(AppTheme.green)
                     }
+                    SupplierPurchaseStatusBadge(status: order.status)
                 }
                 Text(historySubtitle)
                     .font(.caption2.weight(.semibold))
@@ -5237,6 +5247,11 @@ struct SupplierPurchaseHistoryRow: View {
                 Text("prendas")
                     .font(.caption2.weight(.bold))
                     .foregroundStyle(AppTheme.muted)
+                if let summary = order.costSummary {
+                    Text(euro(summary.total))
+                        .font(.caption.weight(.black))
+                        .foregroundStyle(AppTheme.green)
+                }
             }
         }
         .padding(10)
@@ -5244,10 +5259,65 @@ struct SupplierPurchaseHistoryRow: View {
         .clipShape(RoundedRectangle(cornerRadius: 12))
     }
 
+    private func euro(_ value: Double) -> String {
+        value.formatted(.currency(code: "EUR").locale(Locale(identifier: "es_ES")))
+    }
+
     private var historySubtitle: String {
         let date = order.submittedAt ?? order.createdAt ?? order.orderDate
         let time = date?.formatted(.dateTime.hour().minute()) ?? "sin hora"
-        return "\(order.lines.count) lineas · enviado \(time)"
+        let event = order.status.uppercased() == "SUBMITTED" ? "enviado" : "creado"
+        return "\(order.lines.count) lineas · \(event) \(time)"
+    }
+}
+
+struct SupplierPurchaseHistoryDetailSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    let order: SupplierPurchaseOrder
+
+    private var modeTitle: String {
+        order.purchaseMode == SupplierPurchaseMode.safetyStock.rawValue
+            ? "Compra + stock de seguridad"
+            : "Compra normal"
+    }
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 14) {
+                    SupplierPurchaseDeliveryNotice(order: order)
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(order.orderNumber)
+                            .font(.title2.weight(.black))
+                            .foregroundStyle(AppTheme.ink)
+                        Text("\(modeTitle) · \(order.lines.count) lineas · \(order.totalQuantity) prendas")
+                            .font(.subheadline.weight(.bold))
+                            .foregroundStyle(AppTheme.muted)
+                    }
+                    ForEach(order.lines) { line in
+                        SupplierPurchaseLineRow(line: line)
+                    }
+                    if let summary = order.costSummary {
+                        SupplierPurchaseCostCard(summary: summary)
+                    }
+                    if let note = order.orderNote, !note.isEmpty {
+                        Text(note)
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(AppTheme.muted)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+                .padding()
+            }
+            .screenBackground()
+            .navigationTitle("Detalle del pedido")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cerrar") { dismiss() }
+                }
+            }
+        }
     }
 }
 
