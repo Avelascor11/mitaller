@@ -130,9 +130,9 @@ describe('PurchaseService', () => {
     expect(navy?.sizes.find((entry) => entry.size === 'M')?.pendingOrderNeed).toBe(1);
     expect(navy?.sizes.find((entry) => entry.size === 'M')).toMatchObject({
       pendingOrderNeed: 1,
-      minStockTarget: 5,
-      isBestSellerSafetyStock: true,
-      recommendedPurchaseQuantity: 6
+      minStockTarget: 0,
+      isBestSellerSafetyStock: false,
+      recommendedPurchaseQuantity: 1
     });
   });
 

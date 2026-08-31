@@ -659,7 +659,11 @@ export class PurchaseService {
     const unitsByKind = new Map<string, Map<string, number>>();
     for (const item of orderItems) {
       const mapped = this.mapOrderItemToBlankGarment(item, mappingIndex);
-      if (!mapped || !['CAMISETA', 'SUDADERA'].includes(mapped.kind)) continue;
+      if (
+        !mapped
+        || !['CAMISETA', 'SUDADERA'].includes(mapped.kind)
+        || !['BLANCA', 'SAND', 'NEGRA'].includes(mapped.color)
+      ) continue;
       const key = this.matrixKey(mapped.kind, mapped.color, mapped.size);
       const unitsByKey = unitsByKind.get(mapped.kind) ?? new Map<string, number>();
       unitsByKey.set(key, (unitsByKey.get(key) ?? 0) + Math.max(0, item.quantity));
