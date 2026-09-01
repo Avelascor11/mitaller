@@ -102,6 +102,7 @@ describe('EconomicsService', () => {
     expect(allocation.fixedReserve).toBe(9.63);
     expect(allocation.operationsReserve).toBe(5);
     expect(recoveryTotal).toBe(100);
+    expect(allocation.taxReserve + allocation.production + allocation.shipping + allocation.adsReserve + allocation.cashFree).toBe(0);
   });
 
   it('solo trata como ahorro las cuentas identificadas para ese fin', () => {

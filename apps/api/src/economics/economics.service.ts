@@ -592,19 +592,19 @@ export class EconomicsService {
     const fixedExpenses = await this.fixedExpenses().catch(() => null);
     const todayPayouts = await Promise.all(paidToday.map(enrichPayout));
     const todayTotal = todayPayouts.reduce((s, p) => s + p.amount, 0);
-    const cashFreeBeforeOperations = +todayPayouts.reduce((s, p) => s + p.allocation.cashFree, 0).toFixed(2);
     const todayAllocation = {
-      taxReserve: +todayPayouts.reduce((s, p) => s + p.allocation.taxReserve, 0).toFixed(2),
-      production: +todayPayouts.reduce((s, p) => s + p.allocation.production, 0).toFixed(2),
-      shipping: +todayPayouts.reduce((s, p) => s + p.allocation.shipping, 0).toFixed(2),
-      adsReserve: +todayPayouts.reduce((s, p) => s + p.allocation.adsReserve, 0).toFixed(2),
-      retroPreorder: +todayPayouts.reduce((s, p) => s + p.allocation.retroPreorder, 0).toFixed(2),
+      // Kept for older app builds. The recovery buckets below already contain these costs.
+      taxReserve: 0,
+      production: 0,
+      shipping: 0,
+      adsReserve: 0,
+      retroPreorder: 0,
       operationsReserve: +todayPayouts.reduce((s, p) => s + p.recoveryAllocation.operationsReserve, 0).toFixed(2),
       variableReserve: +todayPayouts.reduce((s, p) => s + p.recoveryAllocation.variableReserve, 0).toFixed(2),
       debtReserve: +todayPayouts.reduce((s, p) => s + p.recoveryAllocation.debtReserve, 0).toFixed(2),
       savingsReserve: +todayPayouts.reduce((s, p) => s + p.recoveryAllocation.savingsReserve, 0).toFixed(2),
       fixedReserve: +todayPayouts.reduce((s, p) => s + p.recoveryAllocation.fixedReserve, 0).toFixed(2),
-      cashFree: cashFreeBeforeOperations
+      cashFree: 0
     };
 
     return {
