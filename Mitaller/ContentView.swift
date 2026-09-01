@@ -15554,6 +15554,27 @@ struct CashflowAllocationGrid: View {
             }
 
             if usesRecoveryPlan {
+                if let breakdown = allocation.variableBreakdown {
+                    VStack(spacing: 7) {
+                        HStack {
+                            Label("Dentro de Variables", systemImage: "shippingbox.fill")
+                                .font(.caption.weight(.black))
+                                .foregroundStyle(AppTheme.amber)
+                            Spacer()
+                            Text(formatted(allocation.variableReserve ?? 0))
+                                .font(.caption.weight(.black))
+                                .foregroundStyle(AppTheme.ink)
+                        }
+                        variableRow("Producción", breakdown.production)
+                        variableRow("Envíos", breakdown.shipping)
+                        variableRow("Impuestos", breakdown.taxes)
+                    }
+                    .padding(12)
+                    .background(AppTheme.amber.opacity(0.08))
+                    .overlay(RoundedRectangle(cornerRadius: 8).stroke(AppTheme.amber.opacity(0.25)))
+                    .clipShape(RoundedRectangle(cornerRadius: 8))
+                }
+
                 HStack {
                     Text("TOTAL A REPARTIR")
                         .font(.caption.weight(.black))
@@ -15574,6 +15595,18 @@ struct CashflowAllocationGrid: View {
         f.currencyCode = currency
         f.maximumFractionDigits = 2
         return f.string(from: NSNumber(value: value)) ?? "\(value)"
+    }
+
+    private func variableRow(_ label: String, _ amount: Double) -> some View {
+        HStack {
+            Text(label)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(AppTheme.muted)
+            Spacer()
+            Text(formatted(amount))
+                .font(.caption.weight(.bold))
+                .foregroundStyle(AppTheme.inkSoft)
+        }
     }
 }
 

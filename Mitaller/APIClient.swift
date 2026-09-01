@@ -2551,7 +2551,14 @@ struct CashflowAllocation: Decodable {
     let debtReserve: Double?
     let savingsReserve: Double?
     let fixedReserve: Double?
+    let variableBreakdown: CashflowVariableBreakdown?
     let cashFree: Double
+}
+
+struct CashflowVariableBreakdown: Decodable {
+    let production: Double
+    let shipping: Double
+    let taxes: Double
 }
 
 struct SalesCashflowSummary: Decodable {
