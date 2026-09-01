@@ -15520,32 +15520,60 @@ struct CashflowAllocationGrid: View {
     let allocation: CashflowAllocation
     let currency: String
 
+    private var usesRecoveryPlan: Bool {
+        allocation.variableReserve != nil || allocation.debtReserve != nil || allocation.savingsReserve != nil || allocation.fixedReserve != nil
+    }
+
+    private var recoveryTotal: Double {
+        (allocation.variableReserve ?? 0)
+            + (allocation.debtReserve ?? 0)
+            + (allocation.savingsReserve ?? 0)
+            + (allocation.fixedReserve ?? 0)
+            + (allocation.operationsReserve ?? 0)
+    }
+
     var body: some View {
-        LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 10) {
-            if let variable = allocation.variableReserve, variable > 0 {
-                CashflowAllocationTile(label: "Variables", amount: variable, currency: currency, color: AppTheme.amber, icon: "shippingbox.fill")
+        VStack(alignment: .leading, spacing: 10) {
+            LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 10) {
+                if usesRecoveryPlan {
+                    CashflowAllocationTile(label: "Variables · 46,8%", amount: allocation.variableReserve ?? 0, currency: currency, color: AppTheme.amber, icon: "shippingbox.fill")
+                    CashflowAllocationTile(label: "Deuda · 20%", amount: allocation.debtReserve ?? 0, currency: currency, color: AppTheme.red, icon: "creditcard.fill")
+                    CashflowAllocationTile(label: "Ahorro · 18,57%", amount: allocation.savingsReserve ?? 0, currency: currency, color: AppTheme.green, icon: "lock.fill")
+                    CashflowAllocationTile(label: "Gastos fijos · 9,63%", amount: allocation.fixedReserve ?? 0, currency: currency, color: AppTheme.blue, icon: "calendar.badge.exclamationmark")
+                    CashflowAllocationTile(label: "Colchón · 5%", amount: allocation.operationsReserve ?? 0, currency: currency, color: AppTheme.teal, icon: "lifepreserver.fill")
+                } else {
+                    CashflowAllocationTile(label: "Hacienda / IVA", amount: allocation.taxReserve, currency: currency, color: AppTheme.red, icon: "building.columns.fill")
+                    CashflowAllocationTile(label: "Producción", amount: allocation.production, currency: currency, color: AppTheme.amber, icon: "tshirt.fill")
+                    CashflowAllocationTile(label: "Envíos", amount: allocation.shipping, currency: currency, color: AppTheme.blue, icon: "shippingbox.fill")
+                    CashflowAllocationTile(label: "Meta Ads", amount: allocation.adsReserve, currency: currency, color: AppTheme.purple, icon: "megaphone.fill")
+                    if let retro = allocation.retroPreorder, retro > 0 {
+                        CashflowAllocationTile(label: "Preventa Retro", amount: retro, currency: currency, color: AppTheme.magenta, icon: "flag.checkered")
+                    }
+                    CashflowAllocationTile(label: "Beneficio libre", amount: allocation.cashFree, currency: currency, color: AppTheme.green, icon: "banknote.fill")
+                }
             }
-            if let debt = allocation.debtReserve, debt > 0 {
-                CashflowAllocationTile(label: "Deuda", amount: debt, currency: currency, color: AppTheme.red, icon: "creditcard.fill")
+
+            if usesRecoveryPlan {
+                HStack {
+                    Text("TOTAL A REPARTIR")
+                        .font(.caption.weight(.black))
+                        .foregroundStyle(AppTheme.muted)
+                    Spacer()
+                    Text(formatted(recoveryTotal))
+                        .font(.headline.weight(.black))
+                        .foregroundStyle(AppTheme.ink)
+                }
+                .padding(.horizontal, 4)
             }
-            if let savings = allocation.savingsReserve, savings > 0 {
-                CashflowAllocationTile(label: "Ahorro", amount: savings, currency: currency, color: AppTheme.green, icon: "lock.fill")
-            }
-            if let fixed = allocation.fixedReserve, fixed > 0 {
-                CashflowAllocationTile(label: "Gastos fijos", amount: fixed, currency: currency, color: AppTheme.blue, icon: "calendar.badge.exclamationmark")
-            }
-            CashflowAllocationTile(label: "Hacienda / IVA", amount: allocation.taxReserve, currency: currency, color: AppTheme.red, icon: "building.columns.fill")
-            CashflowAllocationTile(label: "Producción", amount: allocation.production, currency: currency, color: AppTheme.amber, icon: "tshirt.fill")
-            CashflowAllocationTile(label: "Envíos", amount: allocation.shipping, currency: currency, color: AppTheme.blue, icon: "shippingbox.fill")
-            CashflowAllocationTile(label: "Meta Ads", amount: allocation.adsReserve, currency: currency, color: AppTheme.purple, icon: "megaphone.fill")
-            if let retro = allocation.retroPreorder, retro > 0 {
-                CashflowAllocationTile(label: "Preventa Retro", amount: retro, currency: currency, color: AppTheme.magenta, icon: "flag.checkered")
-            }
-            if let operations = allocation.operationsReserve, operations > 0 {
-                CashflowAllocationTile(label: "Operaciones", amount: operations, currency: currency, color: AppTheme.teal, icon: "calendar.badge.exclamationmark")
-            }
-            CashflowAllocationTile(label: "Beneficio libre", amount: allocation.cashFree, currency: currency, color: AppTheme.green, icon: "banknote.fill")
         }
+    }
+
+    private func formatted(_ value: Double) -> String {
+        let f = NumberFormatter()
+        f.numberStyle = .currency
+        f.currencyCode = currency
+        f.maximumFractionDigits = 2
+        return f.string(from: NSNumber(value: value)) ?? "\(value)"
     }
 }
 

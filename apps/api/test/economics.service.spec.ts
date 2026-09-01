@@ -64,6 +64,46 @@ function fixedExpenseService(expenses: unknown[], transactions: unknown[] = []) 
 }
 
 describe('EconomicsService', () => {
+  it('reparte el cobro de caja una sola vez y suma exactamente el importe recibido', async () => {
+    const today = new Date().toISOString().slice(0, 10);
+    const economics = new EconomicsService(
+      {
+        payoutMark: { findMany: async () => [] },
+        order: { findMany: async () => [] }
+      } as never,
+      { get: () => undefined } as never,
+      {
+        listPayouts: async () => [{ id: 'payout-1', status: 'paid', date: today, amount: 100, currency: 'EUR' }],
+        listPayoutTransactions: async () => [{
+          type: 'charge',
+          amount: 100,
+          fee: -2.4,
+          processed_at: `${today}T09:00:00Z`,
+          source_order_id: null
+        }]
+      } as never,
+      { spendForRange: async () => 0 } as never,
+      {} as never,
+      {} as never
+    );
+
+    const result = await economics.cashflow();
+    const allocation = result.allocation;
+    const recoveryTotal = (allocation.variableReserve ?? 0)
+      + (allocation.debtReserve ?? 0)
+      + (allocation.savingsReserve ?? 0)
+      + (allocation.fixedReserve ?? 0)
+      + (allocation.operationsReserve ?? 0);
+
+    expect(result.receivedToday).toBe(100);
+    expect(allocation.variableReserve).toBe(46.8);
+    expect(allocation.debtReserve).toBe(20);
+    expect(allocation.savingsReserve).toBe(18.57);
+    expect(allocation.fixedReserve).toBe(9.63);
+    expect(allocation.operationsReserve).toBe(5);
+    expect(recoveryTotal).toBe(100);
+  });
+
   it('solo trata como ahorro las cuentas identificadas para ese fin', () => {
     const economics = service();
 

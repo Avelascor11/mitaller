@@ -12,7 +12,6 @@ const RECOVERY_VARIABLE_RATE = 0.468;
 const RECOVERY_DEBT_RATE = 0.20;
 const RECOVERY_SAVINGS_RATE = 0.1857;
 const RECOVERY_FIXED_RATE = 0.0963;
-const RECOVERY_OPERATIONS_RATE = 0.05;
 const EXTREME_SAVINGS_PLAN_ID = 'speedwear-extreme';
 const EXTREME_SAVINGS_SEED_VERSION = 2;
 
@@ -547,12 +546,17 @@ export class EconomicsService {
       const adsReserve = await this.adsReserveForSalesDays(salesDays.map(day => day.date));
       const retroPreorder = +orders.reduce((sum, order) => sum + order.retroReserve, 0).toFixed(2);
       const retroUnits = orders.reduce((sum, order) => sum + order.retroUnits, 0);
+      const variableReserve = +(amount * RECOVERY_VARIABLE_RATE).toFixed(2);
+      const debtReserve = +(amount * RECOVERY_DEBT_RATE).toFixed(2);
+      const savingsReserve = +(amount * RECOVERY_SAVINGS_RATE).toFixed(2);
+      const fixedReserve = +(amount * RECOVERY_FIXED_RATE).toFixed(2);
+      // Use the final bucket as the rounding balance so every payout adds up exactly.
       const recoveryAllocation = {
-        variableReserve: +(amount * RECOVERY_VARIABLE_RATE).toFixed(2),
-        debtReserve: +(amount * RECOVERY_DEBT_RATE).toFixed(2),
-        savingsReserve: +(amount * RECOVERY_SAVINGS_RATE).toFixed(2),
-        fixedReserve: +(amount * RECOVERY_FIXED_RATE).toFixed(2),
-        operationsReserve: +(amount * RECOVERY_OPERATIONS_RATE).toFixed(2)
+        variableReserve,
+        debtReserve,
+        savingsReserve,
+        fixedReserve,
+        operationsReserve: +(amount - variableReserve - debtReserve - savingsReserve - fixedReserve).toFixed(2)
       };
 
       const gross = amount / (1 - shopifyFeeRate);
@@ -589,19 +593,18 @@ export class EconomicsService {
     const todayPayouts = await Promise.all(paidToday.map(enrichPayout));
     const todayTotal = todayPayouts.reduce((s, p) => s + p.amount, 0);
     const cashFreeBeforeOperations = +todayPayouts.reduce((s, p) => s + p.allocation.cashFree, 0).toFixed(2);
-    const operationsReserve = +Math.min(Math.max(cashFreeBeforeOperations, 0), Number((fixedExpenses as any)?.pending ?? 0)).toFixed(2);
     const todayAllocation = {
       taxReserve: +todayPayouts.reduce((s, p) => s + p.allocation.taxReserve, 0).toFixed(2),
       production: +todayPayouts.reduce((s, p) => s + p.allocation.production, 0).toFixed(2),
       shipping: +todayPayouts.reduce((s, p) => s + p.allocation.shipping, 0).toFixed(2),
       adsReserve: +todayPayouts.reduce((s, p) => s + p.allocation.adsReserve, 0).toFixed(2),
       retroPreorder: +todayPayouts.reduce((s, p) => s + p.allocation.retroPreorder, 0).toFixed(2),
-      operationsReserve,
+      operationsReserve: +todayPayouts.reduce((s, p) => s + p.recoveryAllocation.operationsReserve, 0).toFixed(2),
       variableReserve: +todayPayouts.reduce((s, p) => s + p.recoveryAllocation.variableReserve, 0).toFixed(2),
       debtReserve: +todayPayouts.reduce((s, p) => s + p.recoveryAllocation.debtReserve, 0).toFixed(2),
       savingsReserve: +todayPayouts.reduce((s, p) => s + p.recoveryAllocation.savingsReserve, 0).toFixed(2),
       fixedReserve: +todayPayouts.reduce((s, p) => s + p.recoveryAllocation.fixedReserve, 0).toFixed(2),
-      cashFree: +(cashFreeBeforeOperations - operationsReserve).toFixed(2)
+      cashFree: cashFreeBeforeOperations
     };
 
     return {
