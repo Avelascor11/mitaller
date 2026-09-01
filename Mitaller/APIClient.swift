@@ -277,6 +277,19 @@ struct APIClient {
         try await get("/supplier/purchase-orders")
     }
 
+    func extraPurchaseCatalog() async throws -> ExtraPurchaseCatalog {
+        try await get("/supplier/extra-purchase/catalog")
+    }
+
+    func generateExtraSupplierPurchaseOrder(lines: [ExtraPurchaseLineRequest], comment: String?) async throws -> SupplierPurchaseOrderActionResponse {
+        let request = try jsonRequest(
+            path: "/supplier/purchase-orders/extra",
+            method: "POST",
+            body: ExtraPurchaseOrderRequest(lines: lines, comment: comment)
+        )
+        return try await perform(request)
+    }
+
     func generateDailySupplierPurchaseOrder(submit: Bool = false, purchaseMode: SupplierPurchaseMode = .safetyStock) async throws -> SupplierPurchaseOrderActionResponse {
         let request = try jsonRequest(
             path: "/supplier/purchase-orders/daily",
@@ -1714,6 +1727,16 @@ private struct SupplierPurchaseOrderGenerateRequest: Encodable {
     let purchaseMode: String
 }
 
+struct ExtraPurchaseLineRequest: Encodable {
+    let stockItemId: String
+    let quantity: Int
+}
+
+private struct ExtraPurchaseOrderRequest: Encodable {
+    let lines: [ExtraPurchaseLineRequest]
+    let comment: String?
+}
+
 enum SupplierPurchaseMode: String, CaseIterable, Identifiable {
     case normal = "NORMAL"
     case safetyStock = "SAFETY_STOCK"
@@ -1724,7 +1747,6 @@ enum SupplierPurchaseMode: String, CaseIterable, Identifiable {
 struct SupplierPurchaseOrderActionResponse: Decodable {
     let status: String
     let order: SupplierPurchaseOrder?
-    let lines: [SupplierPurchaseOrderLine]?
 }
 
 struct SupplierPurchaseOrder: Decodable, Identifiable {
@@ -1765,10 +1787,40 @@ struct SupplierPurchaseOrderLine: Decodable, Identifiable {
     let color: String?
     let size: String?
     let quantity: Int
+    let purchasePrice: Double?
     let supplierAvailableQuantity: Int?
     let supplierStockSpain24h: Int?
     let supplierStockCentral3To5Days: Int?
     let supplierStockSupplier5To20Days: Int?
+}
+
+struct ExtraPurchaseCatalog: Decodable {
+    let supplier: String
+    let currency: String
+    let vatRate: Double
+    let orderNote: String
+    let groups: [ExtraPurchaseCatalogGroup]
+}
+
+struct ExtraPurchaseCatalogGroup: Decodable, Identifiable {
+    let id: String
+    let garmentType: String
+    let modelCode: String
+    let modelName: String
+    let color: String
+    let items: [ExtraPurchaseCatalogItem]
+}
+
+struct ExtraPurchaseCatalogItem: Decodable, Identifiable {
+    var id: String { stockItemId }
+    let stockItemId: String
+    let supplierSku: String
+    let name: String
+    let size: String
+    let unitPrice: Double
+    let availableQuantity: Int?
+    let stockSpain24h: Int?
+    let stockCentral3To5Days: Int?
 }
 
 struct ManualPrintResponse: Decodable {

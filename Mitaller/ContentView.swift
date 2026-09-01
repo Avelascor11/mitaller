@@ -1114,6 +1114,23 @@ final class WorkshopStore {
         }
     }
 
+    func generateExtraSupplierPurchaseOrder(lines: [ExtraPurchaseLineRequest], comment: String?) async -> SupplierPurchaseOrder? {
+        guard let client = apiClient else { return nil }
+        isSupplierPurchaseActionRunning = true
+        supplierPurchaseOrderMessage = nil
+        syncError = nil
+        defer { isSupplierPurchaseActionRunning = false }
+        do {
+            let response = try await client.generateExtraSupplierPurchaseOrder(lines: lines, comment: comment)
+            supplierPurchaseOrderMessage = "Borrador extra Falk & Ross creado"
+            supplierPurchaseOrders = try await client.supplierPurchaseOrders()
+            return response.order ?? supplierPurchaseOrders.first
+        } catch {
+            syncError = "No se pudo crear la compra extra: \(error.localizedDescription)"
+            return nil
+        }
+    }
+
     func submitSupplierPurchaseOrder(_ order: SupplierPurchaseOrder) async {
         guard let client = apiClient else { return }
         isSupplierPurchaseActionRunning = true
@@ -1588,6 +1605,8 @@ struct MainTabView: View {
             PurchaseMatrixView()
                 .badge(store.safetyStockAlerts.count)
                 .tabItem { Label("Compras", systemImage: "cart.badge.plus") }
+            ExtraPurchaseView()
+                .tabItem { Label("Extras", systemImage: "basket.fill") }
             FinalizedView()
                 .tabItem { Label("Finalizados", systemImage: "checkmark.seal.fill") }
             ManualPrintView()
@@ -4726,6 +4745,300 @@ struct PurchaseMatrixView: View {
     }
 }
 
+struct ExtraPurchaseView: View {
+    @Environment(WorkshopStore.self) private var store
+    @State private var catalog: ExtraPurchaseCatalog?
+    @State private var selectedType = "CAMISETA"
+    @State private var quantities: [String: Int] = [:]
+    @State private var comment = ""
+    @State private var isLoading = false
+    @State private var errorMessage: String?
+    @State private var orderPendingSubmit: SupplierPurchaseOrder?
+
+    private var visibleGroups: [ExtraPurchaseCatalogGroup] {
+        (catalog?.groups ?? []).filter { $0.garmentType == selectedType }
+    }
+
+    private var allItems: [ExtraPurchaseCatalogItem] {
+        catalog?.groups.flatMap(\.items) ?? []
+    }
+
+    private var selectedUnits: Int {
+        quantities.values.reduce(0, +)
+    }
+
+    private var subtotal: Double {
+        allItems.reduce(0) { total, item in
+            total + Double(quantities[item.stockItemId] ?? 0) * item.unitPrice
+        }
+    }
+
+    private var vat: Double {
+        subtotal * (catalog?.vatRate ?? 0.21)
+    }
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 16) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Compra extra")
+                            .font(.system(size: 38, weight: .black))
+                            .foregroundStyle(AppTheme.ink)
+                        Text("Prepara un pedido manual con tus modelos y precios acordados.")
+                            .font(.subheadline.weight(.medium))
+                            .foregroundStyle(AppTheme.muted)
+                    }
+
+                    Picker("Tipo de prenda", selection: $selectedType) {
+                        Text("Camisetas").tag("CAMISETA")
+                        Text("Sudaderas").tag("SUDADERA")
+                    }
+                    .pickerStyle(.segmented)
+
+                    if isLoading && catalog == nil {
+                        ProgressView("Cargando catálogo Falk & Ross...")
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 40)
+                    } else if let errorMessage {
+                        Label(errorMessage, systemImage: "exclamationmark.triangle.fill")
+                            .font(.caption.weight(.bold))
+                            .foregroundStyle(AppTheme.red)
+                            .glassPanel(padding: 14, accent: AppTheme.red)
+                    } else if visibleGroups.isEmpty {
+                        ContentUnavailableView(
+                            "Sin modelos disponibles",
+                            systemImage: "shippingbox",
+                            description: Text("No hay artículos reales mapeados para este tipo de prenda.")
+                        )
+                    } else {
+                        ForEach(visibleGroups) { group in
+                            ExtraPurchaseGroupCard(
+                                group: group,
+                                quantities: $quantities
+                            )
+                        }
+                    }
+
+                    if let catalog {
+                        VStack(alignment: .leading, spacing: 10) {
+                            Label("Comentario para el proveedor", systemImage: "text.quote")
+                                .font(.headline.weight(.black))
+                                .foregroundStyle(AppTheme.ink)
+                            TextField("Ej.: incluir todo en el mismo envío", text: $comment, axis: .vertical)
+                                .lineLimit(2...5)
+                                .padding(12)
+                                .background(AppTheme.surface)
+                                .overlay(RoundedRectangle(cornerRadius: 8).stroke(AppTheme.line))
+                            Text(catalog.orderNote)
+                                .font(.caption2.weight(.semibold))
+                                .foregroundStyle(AppTheme.muted)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                        .glassPanel(padding: 14, accent: AppTheme.amber)
+
+                        ExtraPurchaseSummary(
+                            units: selectedUnits,
+                            subtotal: subtotal,
+                            vat: vat,
+                            total: subtotal + vat
+                        )
+
+                        Button {
+                            createDraft()
+                        } label: {
+                            Label("Revisar pedido extra", systemImage: "doc.text.magnifyingglass")
+                                .font(.headline.weight(.black))
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 8)
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .tint(AppTheme.blue)
+                        .disabled(selectedUnits == 0 || store.isSupplierPurchaseActionRunning)
+
+                        Text("Este botón solo crea el borrador. El pedido no se envía hasta que confirmes en la siguiente pantalla.")
+                            .font(.caption2.weight(.semibold))
+                            .foregroundStyle(AppTheme.muted)
+                            .multilineTextAlignment(.center)
+                            .frame(maxWidth: .infinity)
+                    }
+                }
+                .padding()
+            }
+            .screenBackground()
+            .navigationTitle("Extras")
+            .toolbar {
+                Button {
+                    Task { await loadCatalog() }
+                } label: {
+                    Image(systemName: "arrow.clockwise")
+                }
+                .disabled(isLoading)
+            }
+            .refreshable { await loadCatalog() }
+            .task { await loadCatalog() }
+            .sheet(item: $orderPendingSubmit) { order in
+                SupplierPurchaseReviewSheet(order: order) {
+                    orderPendingSubmit = nil
+                    Task { await store.submitSupplierPurchaseOrder(order) }
+                }
+            }
+        }
+    }
+
+    private func loadCatalog() async {
+        guard let client = store.apiClient, !isLoading else { return }
+        isLoading = true
+        errorMessage = nil
+        defer { isLoading = false }
+        do {
+            catalog = try await client.extraPurchaseCatalog()
+        } catch {
+            errorMessage = "No se pudo cargar el catálogo: \(error.localizedDescription)"
+        }
+    }
+
+    private func createDraft() {
+        let lines = quantities
+            .filter { $0.value > 0 }
+            .map { ExtraPurchaseLineRequest(stockItemId: $0.key, quantity: $0.value) }
+        Task {
+            orderPendingSubmit = await store.generateExtraSupplierPurchaseOrder(
+                lines: lines,
+                comment: comment.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : comment
+            )
+        }
+    }
+}
+
+struct ExtraPurchaseGroupCard: View {
+    let group: ExtraPurchaseCatalogGroup
+    @Binding var quantities: [String: Int]
+
+    private var accent: Color {
+        switch group.color.uppercased() {
+        case let value where value.contains("BLANC"): .white
+        case let value where value.contains("NEGR"): .gray
+        case let value where value.contains("ROSA"): .pink
+        case let value where value.contains("AZUL"): .blue
+        case let value where value.contains("SAND"): Color(red: 0.76, green: 0.68, blue: 0.50)
+        default: AppTheme.teal
+        }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 10) {
+                RoundedRectangle(cornerRadius: 6)
+                    .fill(accent)
+                    .frame(width: 36, height: 36)
+                    .overlay(RoundedRectangle(cornerRadius: 6).stroke(AppTheme.line))
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(group.modelName)
+                        .font(.subheadline.weight(.black))
+                        .foregroundStyle(AppTheme.ink)
+                    Text(group.color.uppercased())
+                        .font(.caption2.weight(.black))
+                        .foregroundStyle(AppTheme.muted)
+                }
+                Spacer()
+                if let price = group.items.first?.unitPrice {
+                    Text(euro(price))
+                        .font(.subheadline.weight(.black))
+                        .foregroundStyle(AppTheme.green)
+                }
+            }
+
+            ForEach(group.items) { item in
+                HStack(spacing: 10) {
+                    Text(item.size)
+                        .font(.headline.weight(.black))
+                        .foregroundStyle(AppTheme.ink)
+                        .frame(width: 42, alignment: .leading)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(item.supplierSku)
+                            .font(.caption2.weight(.bold))
+                            .foregroundStyle(AppTheme.muted)
+                        Text(stockText(item))
+                            .font(.caption2.weight(.bold))
+                            .foregroundStyle((item.availableQuantity ?? 1) > 0 ? AppTheme.green : AppTheme.red)
+                    }
+                    Spacer()
+                    HStack(spacing: 4) {
+                        Button {
+                            quantities[item.stockItemId] = max(0, (quantities[item.stockItemId] ?? 0) - 1)
+                        } label: {
+                            Image(systemName: "minus")
+                                .frame(width: 32, height: 32)
+                        }
+                        .buttonStyle(.bordered)
+                        .disabled((quantities[item.stockItemId] ?? 0) == 0)
+
+                        Text("\(quantities[item.stockItemId] ?? 0)")
+                            .font(.headline.weight(.black))
+                            .foregroundStyle(AppTheme.ink)
+                            .frame(width: 34)
+
+                        Button {
+                            quantities[item.stockItemId] = (quantities[item.stockItemId] ?? 0) + 1
+                        } label: {
+                            Image(systemName: "plus")
+                                .frame(width: 32, height: 32)
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .tint(AppTheme.blue)
+                    }
+                }
+                .padding(.vertical, 3)
+            }
+        }
+        .glassPanel(padding: 14, accent: accent)
+    }
+
+    private func stockText(_ item: ExtraPurchaseCatalogItem) -> String {
+        guard let available = item.availableQuantity else { return "Stock sin confirmar" }
+        return "Disponible: \(available)"
+    }
+
+    private func euro(_ value: Double) -> String {
+        value.formatted(.currency(code: "EUR").locale(Locale(identifier: "es_ES")))
+    }
+}
+
+struct ExtraPurchaseSummary: View {
+    let units: Int
+    let subtotal: Double
+    let vat: Double
+    let total: Double
+
+    var body: some View {
+        VStack(spacing: 9) {
+            summaryRow("Prendas", "\(units)", emphasized: false)
+            summaryRow("Subtotal", euro(subtotal), emphasized: false)
+            summaryRow("IVA 21%", euro(vat), emphasized: false)
+            Divider().background(AppTheme.line)
+            summaryRow("TOTAL ESTIMADO", euro(total), emphasized: true)
+        }
+        .glassPanel(padding: 14, accent: AppTheme.green)
+    }
+
+    private func summaryRow(_ title: String, _ value: String, emphasized: Bool) -> some View {
+        HStack {
+            Text(title)
+                .font(emphasized ? .headline.weight(.black) : .subheadline.weight(.semibold))
+                .foregroundStyle(emphasized ? AppTheme.ink : AppTheme.muted)
+            Spacer()
+            Text(value)
+                .font(emphasized ? .title3.weight(.black) : .subheadline.weight(.bold))
+                .foregroundStyle(emphasized ? AppTheme.green : AppTheme.ink)
+        }
+    }
+
+    private func euro(_ value: Double) -> String {
+        value.formatted(.currency(code: "EUR").locale(Locale(identifier: "es_ES")))
+    }
+}
+
 struct SafetyStockAlertCard: View {
     let entries: [PurchaseMatrixEntry]
 
@@ -4956,16 +5269,25 @@ struct SupplierPurchaseReviewSheet: View {
         order.purchaseMode == SupplierPurchaseMode.safetyStock.rawValue
     }
 
+    private var isExtra: Bool {
+        order.purchaseMode == "EXTRA"
+    }
+
+    private var title: String {
+        if isExtra { return "PEDIDO EXTRA" }
+        return isSafetyStock ? "PEDIDO + STOCK DE SEGURIDAD" : "PEDIDO NORMAL"
+    }
+
     var body: some View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
                     HStack(spacing: 12) {
-                        Image(systemName: isSafetyStock ? "shield.checkered" : "cart.fill")
+                        Image(systemName: isExtra ? "basket.fill" : (isSafetyStock ? "shield.checkered" : "cart.fill"))
                             .font(.title2.weight(.black))
-                            .foregroundStyle(isSafetyStock ? AppTheme.magenta : AppTheme.blue)
+                            .foregroundStyle(isExtra ? AppTheme.green : (isSafetyStock ? AppTheme.magenta : AppTheme.blue))
                         VStack(alignment: .leading, spacing: 2) {
-                            Text(isSafetyStock ? "PEDIDO + STOCK DE SEGURIDAD" : "PEDIDO NORMAL")
+                            Text(title)
                                 .font(.headline.weight(.black))
                                 .foregroundStyle(AppTheme.ink)
                             Text("\(order.totalQuantity) prendas · \(order.lines.count) lineas")
@@ -5282,7 +5604,8 @@ struct SupplierPurchaseHistoryDetailSheet: View {
     let order: SupplierPurchaseOrder
 
     private var modeTitle: String {
-        order.purchaseMode == SupplierPurchaseMode.safetyStock.rawValue
+        if order.purchaseMode == "EXTRA" { return "Compra extra" }
+        return order.purchaseMode == SupplierPurchaseMode.safetyStock.rawValue
             ? "Compra + stock de seguridad"
             : "Compra normal"
     }
@@ -5390,6 +5713,11 @@ struct SupplierPurchaseLineRow: View {
                     .font(.headline.weight(.black))
                     .foregroundStyle(AppTheme.magenta)
                     .frame(minWidth: 42, alignment: .trailing)
+                if let price = line.purchasePrice {
+                    Text("\(euro(price)) · \(euro(price * Double(line.quantity)))")
+                        .font(.caption2.weight(.black))
+                        .foregroundStyle(AppTheme.inkSoft)
+                }
                 supplierStockText
                     .font(.caption2.weight(.bold))
                     .foregroundStyle((line.supplierAvailableQuantity ?? 0) >= line.quantity ? AppTheme.green : AppTheme.red)
@@ -5409,6 +5737,10 @@ struct SupplierPurchaseLineRow: View {
             return Text("prov \(available)")
         }
         return Text("prov -")
+    }
+
+    private func euro(_ value: Double) -> String {
+        value.formatted(.currency(code: "EUR").locale(Locale(identifier: "es_ES")))
     }
 }
 

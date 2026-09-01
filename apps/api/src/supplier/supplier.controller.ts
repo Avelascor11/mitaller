@@ -34,6 +34,25 @@ export class SupplierController {
     return this.supplierOrders.listPurchaseOrders();
   }
 
+  @Get('extra-purchase/catalog')
+  extraPurchaseCatalog() {
+    return this.supplierOrders.getExtraPurchaseCatalog();
+  }
+
+  @Post('purchase-orders/extra')
+  generateExtraPurchaseOrder(@Body() body: {
+    lines?: Array<{ stockItemId?: string; quantity?: number }>;
+    comment?: string;
+  }) {
+    return this.supplierOrders.generateExtraFalkRossOrder({
+      lines: (body.lines ?? []).map((line) => ({
+        stockItemId: String(line.stockItemId ?? ''),
+        quantity: Number(line.quantity ?? 0)
+      })),
+      comment: body.comment
+    });
+  }
+
   @Get('purchase-orders/:id')
   purchaseOrder(@Param('id') id: string) {
     return this.supplierOrders.getPurchaseOrder(id);

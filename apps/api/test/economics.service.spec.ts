@@ -104,10 +104,10 @@ describe('EconomicsService', () => {
     expect(breakdown.shippingCost).toBe(3.81);
     expect(breakdown.shippingCostSource).toBe('INVOICE_ESTIMATE');
     expect(breakdown.shipmentCostKnown).toBe(false);
-    expect(breakdown.productCost).toBe(3.23);
-    expect(breakdown.wasteCost).toBeCloseTo(0.0646);
+    expect(breakdown.productCost).toBe(3.20);
+    expect(breakdown.wasteCost).toBeCloseTo(0.064);
     expect(breakdown.taxReserve).toBe(8.25);
-    expect(breakdown.cashFree).toBeCloseTo(38.3254);
+    expect(breakdown.cashFree).toBeCloseTo(38.356);
   });
 
   it('usa el coste real de Sendcloud si la etiqueta lo trae', () => {

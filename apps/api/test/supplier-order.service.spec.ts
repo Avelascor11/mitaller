@@ -576,7 +576,7 @@ describe('SupplierOrderService', () => {
     expect(prisma.supplierPurchaseOrder.create).toHaveBeenCalledWith(expect.objectContaining({
       data: expect.objectContaining({
         rawRequestJson: expect.objectContaining({
-          orderNote: expect.stringContaining('Camiseta 032.42 -> 2.73 EUR'),
+          orderNote: expect.stringContaining('Camiseta 032.42 -> 2.70 EUR'),
           lines: [expect.objectContaining({
             supplierSku: '180094454',
             name: 'Camiseta Dark Chocolate - M',
@@ -732,6 +732,62 @@ describe('SupplierOrderService', () => {
               resolvedStyleCode: '032.42',
               expectedProductNumber: '032.42'
             })
+          })]
+        })
+      })
+    }));
+  });
+
+  it('crea una compra extra separada con comentario y el precio acordado de 2,70', async () => {
+    const { service, prisma } = buildService({
+      matrix: {
+        groups: [{
+          garmentType: 'CAMISETA',
+          color: 'BLANCA',
+          sizes: [{
+            stockItemId: 'stock-white-m',
+            supplierSku: 'FR-TS-WHT-M',
+            subproductName: 'Camiseta Blanca - M',
+            size: 'M',
+            recommendedPurchaseQuantity: 0,
+            supplierAvailableQuantity: null,
+            pendingOrderNeed: 0,
+            currentInternalStock: 0,
+            minStockTarget: 0,
+            demandOrders: []
+          }]
+        }]
+      },
+      supplierArticles: [{
+        supplierSku: '032420002',
+        styleCode: '032.42',
+        productName: 'TG002 - #E220 T-Shirt',
+        color: 'White',
+        size: 'M',
+        purchasePrice: '4.24'
+      }],
+      supplierStocks: [{ supplierSku: '032420002', availableQuantity: 50 }]
+    });
+
+    const result = await service.generateExtraFalkRossOrder({
+      lines: [{ stockItemId: 'stock-white-m', quantity: 6 }],
+      comment: 'Mandar junto al pedido diario'
+    });
+
+    expect(result.status).toBe('created');
+    expect(prisma.supplierPurchaseOrder.create).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        orderNumber: expect.stringMatching(/^FRX-/),
+        rawRequestJson: expect.objectContaining({
+          purchaseMode: 'EXTRA',
+          orderNote: expect.stringContaining('Mandar junto al pedido diario'),
+          lines: [expect.objectContaining({ supplierSku: '032420002', quantity: 6 })]
+        }),
+        lines: expect.objectContaining({
+          create: [expect.objectContaining({
+            stockItemId: 'stock-white-m',
+            purchasePrice: '2.70',
+            quantity: 6
           })]
         })
       })

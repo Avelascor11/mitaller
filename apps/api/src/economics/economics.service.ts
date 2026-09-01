@@ -631,7 +631,7 @@ export class EconomicsService {
         description: 'Prenda lenta a mitad de precio. Útil para liberar stock, no para escalar anuncios.',
         units: 15,
         grossRevenue: 15 * 14.98,
-        productCost: 15 * (2.73 + 0.50),
+        productCost: 15 * (2.70 + 0.50),
         shippingCost: 5 * this.moneyConfig('ECONOMICS_SHIPPING_COST_STANDARD_ES', 3.81)
       }),
       this.saleScenario({
@@ -640,7 +640,7 @@ export class EconomicsService {
         description: '2 camisetas + bañador. Mejor AOV, margen correcto si no metemos envío gratis agresivo.',
         units: 3,
         grossRevenue: 3 * 50,
-        productCost: 3 * ((2.73 + 0.50) * 2 + (4.725 + 2.70)),
+        productCost: 3 * ((2.70 + 0.50) * 2 + (4.725 + 2.70)),
         shippingCost: 3 * this.moneyConfig('ECONOMICS_SHIPPING_COST_STANDARD_ES_1_2KG', 3.98)
       }),
       this.saleScenario({
@@ -649,7 +649,7 @@ export class EconomicsService {
         description: 'Sube unidades por pedido. Solo merece la pena para mover tallas/parados.',
         units: 3,
         grossRevenue: 3 * (29.95 + 29.95 + 5),
-        productCost: 3 * ((2.73 + 0.50) * 3),
+        productCost: 3 * ((2.70 + 0.50) * 3),
         shippingCost: 3 * this.moneyConfig('ECONOMICS_SHIPPING_COST_STANDARD_ES', 3.81)
       })
     ];
@@ -1381,7 +1381,7 @@ export class EconomicsService {
 
   private extremeSavingsVariableCosts() {
     return [
-      { id: 'tee-white', name: 'Camiseta blanca normal', amount: 3.23, unit: 'POR_UNIDAD', notes: 'Prenda 2,73 € + impresión 0,50 €.' },
+      { id: 'tee-white', name: 'Camiseta blanca normal', amount: 3.20, unit: 'POR_UNIDAD', notes: 'Prenda 2,70 € + impresión 0,50 €.' },
       { id: 'tee-black', name: 'Camiseta negra normal', amount: 5.43, unit: 'POR_UNIDAD', notes: 'Prenda 2,73 € + DTF 2,70 €.' },
       { id: 'tee-boxy', name: 'Camiseta blanca BOXY', amount: 5.40, unit: 'POR_UNIDAD', notes: 'Prenda 4,90 € + impresión 0,50 €. Costes trabajados sin IVA recuperable.' },
       { id: 'sweatshirt-white', name: 'Sudadera blanca', amount: 11.25, unit: 'POR_UNIDAD', notes: 'Prenda 10,75 € + impresión estimada 0,50 €.' },
@@ -1982,15 +1982,15 @@ export class EconomicsService {
         print = 0.50;
         description = 'Camiseta blanca BOXY (DTG)';
       } else if (isBlack) {
-        blank = 2.73;
+        blank = 2.70;
         print = 2.25 + 0.45;
         description = 'Camiseta negra (DTF espalda+frontal)';
       } else if (isWhite) {
-        blank = 2.73;
+        blank = 2.70;
         print = 0.50;
         description = 'Camiseta blanca (DTG)';
       } else {
-        blank = 2.73;
+        blank = 2.70;
         print = 0.50;
         description = 'Camiseta (DTG estimado)';
       }

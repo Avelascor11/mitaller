@@ -9,13 +9,13 @@ import { SupplierAdapter, SupplierPurchaseOrderPayload } from './supplier.adapte
 
 const OPEN_SUPPLIER_ORDER_STATUSES = ['SUBMITTED'];
 const FALKROSS_PRICE_NOTE = [
-  'Camiseta 032.42 -> 2.73 EUR',
+  'Camiseta 032.42 -> 2.70 EUR',
   'Camiseta Gildan 180.09 -> 2.84 EUR',
   'Sudadera 208.42 / WG002 -> 10.75 EUR'
 ].join(' | ');
 
 const FALKROSS_STYLE_PRICES: Record<string, string> = {
-  '03242': '2.73',
+  '03242': '2.70',
   '18009': '2.84',
   '20842': '10.75',
   '23742': '6.60',
@@ -149,7 +149,7 @@ export class SupplierOrderService {
           supplierStockSpain24h: supplierStock?.stockSpain24h ?? null,
           supplierStockCentral3To5Days: supplierStock?.stockCentral3To5Days ?? null,
           supplierStockSupplier5To20Days: supplierStock?.stockSupplier5To20Days ?? null,
-          purchasePrice: article?.purchasePrice ?? FALKROSS_STYLE_PRICES[resolvedStyleKey] ?? null,
+          purchasePrice: FALKROSS_STYLE_PRICES[resolvedStyleKey] ?? article?.purchasePrice ?? null,
           rawDataJson: {
             pendingOrderNeed: entry.pendingOrderNeed,
             currentInternalStock: entry.currentInternalStock,
@@ -236,6 +236,199 @@ export class SupplierOrderService {
     return { status: 'created', order: this.withOrderNote(created), lines: created.lines };
   }
 
+  async getExtraPurchaseCatalog() {
+    await this.syncSupplierStockBeforeOrdering();
+    const { matrix, supplierArticles, supplierStocks, articleBySku, stockBySku } = await this.extraPurchaseContext();
+    const groups = matrix.groups
+      .filter((group) => ['CAMISETA', 'SUDADERA'].includes(group.garmentType))
+      .map((group) => {
+        const items = group.sizes.flatMap((entry) => {
+          if (!entry.stockItemId || !entry.supplierSku) return [];
+          const article = this.resolveFalkRossArticle(
+            group.garmentType,
+            group.color,
+            entry.size,
+            entry.supplierSku,
+            supplierArticles,
+            articleBySku
+          ) ?? this.resolveFalkRossStockOnlyFallback(group.garmentType, group.color, entry.size, supplierStocks);
+          if (!article) return [];
+          const styleKey = this.falkRossStyleKey(article.styleCode ?? article.productName);
+          const unitPrice = FALKROSS_STYLE_PRICES[styleKey] ?? article.purchasePrice?.toString();
+          if (!unitPrice) return [];
+          const supplierStock = stockBySku.get(article.supplierSku);
+          return [{
+            stockItemId: entry.stockItemId,
+            supplierSku: article.supplierSku,
+            name: this.falkRossLineName(group.garmentType, group.color, entry.size, entry.subproductName),
+            size: entry.size,
+            unitPrice: Number(unitPrice),
+            availableQuantity: supplierStock?.availableQuantity ?? null,
+            stockSpain24h: supplierStock?.stockSpain24h ?? null,
+            stockCentral3To5Days: supplierStock?.stockCentral3To5Days ?? null
+          }];
+        });
+        const expectedStyles = this.expectedFalkRossStyles(group.garmentType, group.color);
+        return {
+          id: `${group.garmentType}-${this.falkRossStyleKey(expectedStyles[0])}-${this.normalizedColor(group.color)}`,
+          garmentType: group.garmentType,
+          modelCode: expectedStyles[0],
+          modelName: this.falkRossModelName(group.garmentType, group.color),
+          color: group.color,
+          items
+        };
+      })
+      .filter((group) => group.items.length > 0)
+      .sort((left, right) => `${left.garmentType}-${left.modelName}-${left.color}`.localeCompare(`${right.garmentType}-${right.modelName}-${right.color}`));
+
+    return {
+      supplier: 'FALK_ROSS',
+      currency: 'EUR',
+      vatRate: this.rate(this.config.get<string>('FALKROSS_VAT_RATE'), 0.21),
+      orderNote: this.falkRossOrderNote(),
+      groups
+    };
+  }
+
+  async generateExtraFalkRossOrder(input: {
+    lines: Array<{ stockItemId: string; quantity: number }>;
+    comment?: string;
+  }) {
+    const quantities = new Map<string, number>();
+    for (const line of input.lines) {
+      const stockItemId = line.stockItemId.trim();
+      const quantity = Math.floor(line.quantity);
+      if (!stockItemId || !Number.isFinite(quantity) || quantity <= 0) continue;
+      quantities.set(stockItemId, (quantities.get(stockItemId) ?? 0) + quantity);
+    }
+    if (!quantities.size) throw new BadRequestException('Selecciona al menos una camiseta o sudadera');
+
+    await this.syncSupplierStockBeforeOrdering();
+    const { matrix, supplierArticles, supplierStocks, articleBySku, stockBySku } = await this.extraPurchaseContext();
+    const entriesByStockItemId = new Map(
+      matrix.groups
+        .filter((group) => ['CAMISETA', 'SUDADERA'].includes(group.garmentType))
+        .flatMap((group) => group.sizes
+          .filter((entry) => entry.stockItemId)
+          .map((entry) => [entry.stockItemId!, { group, entry }] as const))
+    );
+
+    const unresolved: string[] = [];
+    const lines = Array.from(quantities.entries()).flatMap(([stockItemId, requestedQuantity]) => {
+      const mapped = entriesByStockItemId.get(stockItemId);
+      if (!mapped || !mapped.entry.supplierSku) {
+        unresolved.push(stockItemId);
+        return [];
+      }
+      const { group, entry } = mapped;
+      const article = this.resolveFalkRossArticle(
+        group.garmentType,
+        group.color,
+        entry.size,
+        entry.supplierSku,
+        supplierArticles,
+        articleBySku
+      ) ?? this.resolveFalkRossStockOnlyFallback(group.garmentType, group.color, entry.size, supplierStocks);
+      if (!article) {
+        unresolved.push(`${entry.subproductName} ${entry.size}`);
+        return [];
+      }
+      const styleKey = this.falkRossStyleKey(article.styleCode ?? article.productName);
+      const purchasePrice = FALKROSS_STYLE_PRICES[styleKey] ?? article.purchasePrice?.toString();
+      if (!purchasePrice) {
+        unresolved.push(`${entry.subproductName} ${entry.size} (sin precio)`);
+        return [];
+      }
+      const supplierStock = stockBySku.get(article.supplierSku);
+      const quantity = this.orderableQuantity(requestedQuantity, supplierStock?.availableQuantity ?? null);
+      if (quantity <= 0) {
+        unresolved.push(`${entry.subproductName} ${entry.size} (sin stock)`);
+        return [];
+      }
+      return [{
+        stockItemId,
+        supplierSku: article.supplierSku,
+        name: this.falkRossLineName(group.garmentType, group.color, entry.size, entry.subproductName),
+        color: group.color,
+        size: entry.size,
+        quantity,
+        supplierAvailableQuantity: supplierStock?.availableQuantity ?? null,
+        supplierStockSpain24h: supplierStock?.stockSpain24h ?? null,
+        supplierStockCentral3To5Days: supplierStock?.stockCentral3To5Days ?? null,
+        supplierStockSupplier5To20Days: supplierStock?.stockSupplier5To20Days ?? null,
+        purchasePrice,
+        rawDataJson: {
+          purchaseMode: 'EXTRA',
+          requestedQuantity,
+          resolvedSupplierSku: article.supplierSku,
+          resolvedStyleCode: article.styleCode ?? this.expectedFalkRossStyles(group.garmentType, group.color)[0],
+          supplierStockSpain24h: supplierStock?.stockSpain24h ?? null,
+          supplierStockCentral3To5Days: supplierStock?.stockCentral3To5Days ?? null,
+          supplierStockSupplier5To20Days: supplierStock?.stockSupplier5To20Days ?? null
+        }
+      }];
+    });
+
+    if (unresolved.length) {
+      throw new BadRequestException(`No se puede preparar el pedido extra: ${unresolved.join(', ')}`);
+    }
+
+    const orderDate = new Date();
+    const payload: SupplierPurchaseOrderPayload = {
+      supplier: 'FALK_ROSS',
+      orderNumber: this.extraOrderNumber(orderDate),
+      requestedAt: orderDate.toISOString(),
+      source: 'manual-extra',
+      purchaseMode: 'EXTRA',
+      orderNote: this.falkRossOrderNote(input.comment),
+      lines: lines.map((line) => ({
+        supplierSku: line.supplierSku,
+        name: line.name,
+        quantity: line.quantity,
+        color: line.color,
+        size: line.size
+      }))
+    };
+
+    const created = await this.prisma.supplierPurchaseOrder.create({
+      data: {
+        supplier: 'FALK_ROSS',
+        orderNumber: payload.orderNumber,
+        orderDate,
+        status: 'DRAFT',
+        mode: this.supplier.orderMode(),
+        rawRequestJson: payload as unknown as Prisma.InputJsonValue,
+        lines: {
+          create: lines.map((line) => ({
+            stockItemId: line.stockItemId,
+            supplierSku: line.supplierSku,
+            name: line.name,
+            color: line.color,
+            size: line.size,
+            quantity: line.quantity,
+            supplierAvailableQuantity: line.supplierAvailableQuantity,
+            supplierStockSpain24h: line.supplierStockSpain24h,
+            supplierStockCentral3To5Days: line.supplierStockCentral3To5Days,
+            supplierStockSupplier5To20Days: line.supplierStockSupplier5To20Days,
+            purchasePrice: line.purchasePrice,
+            rawDataJson: line.rawDataJson as Prisma.InputJsonValue
+          }))
+        }
+      },
+      include: { lines: true }
+    });
+
+    await this.activity.log({
+      entityType: 'SupplierPurchaseOrder',
+      entityId: created.id,
+      action: 'SUPPLIER_EXTRA_PURCHASE_ORDER_CREATED',
+      message: `Pedido extra Falk & Ross ${created.orderNumber} creado con ${created.lines.length} lineas`,
+      metadataJson: { comment: input.comment?.trim() || null }
+    });
+
+    return { status: 'created', order: this.withOrderNote(created), lines: created.lines };
+  }
+
   async submitPurchaseOrder(id: string) {
     const order = await this.prisma.supplierPurchaseOrder.findUnique({
       where: { id },
@@ -313,6 +506,10 @@ export class SupplierOrderService {
     const vatAmount = this.money(taxableBase * vatRate);
     return {
       ...order,
+      lines: lines.map((line) => ({
+        ...line,
+        purchasePrice: line.purchasePrice == null ? null : Number(line.purchasePrice)
+      })),
       orderNote: rawRequest?.orderNote ?? this.falkRossOrderNote(),
       purchaseMode: rawRequest?.purchaseMode ?? 'SAFETY_STOCK',
       costSummary: {
@@ -493,8 +690,31 @@ export class SupplierOrderService {
     return normalized;
   }
 
-  private falkRossOrderNote() {
-    return `Mitaller: revisar precios antes de confirmar. ${FALKROSS_PRICE_NOTE}`;
+  private async extraPurchaseContext() {
+    const [matrix, supplierArticles, supplierStocks] = await Promise.all([
+      this.purchases.getPurchaseMatrix(),
+      this.prisma.supplierArticle.findMany({ where: { supplier: 'FALK_ROSS' } }),
+      this.prisma.supplierStock.findMany({ where: { supplier: 'FALK_ROSS' } })
+    ]);
+    return {
+      matrix,
+      supplierArticles,
+      supplierStocks,
+      articleBySku: new Map(supplierArticles.map((article) => [article.supplierSku, article])),
+      stockBySku: new Map(supplierStocks.map((stock) => [stock.supplierSku, stock]))
+    };
+  }
+
+  private falkRossModelName(garmentType: string, color: string) {
+    if (garmentType === 'SUDADERA') return 'Sudadera 208.42 / WG002';
+    if (['MARRON', 'ROSA', 'TANGERINE'].includes(this.normalizedColor(color))) return 'Camiseta Gildan 180.09 / 5000';
+    return 'Camiseta B&C 032.42 / TG002';
+  }
+
+  private falkRossOrderNote(comment?: string) {
+    const base = `Mitaller: aplicar precios acordados. ${FALKROSS_PRICE_NOTE}`;
+    const cleanComment = comment?.trim().replace(/\s+/g, ' ').slice(0, 500);
+    return cleanComment ? `${base} | Comentario: ${cleanComment}` : base;
   }
 
   private normalizedColor(value: string) {
@@ -541,5 +761,10 @@ export class SupplierOrderService {
     const mm = String(orderDate.getMonth() + 1).padStart(2, '0');
     const dd = String(orderDate.getDate()).padStart(2, '0');
     return `FR-${yyyy}${mm}${dd}`;
+  }
+
+  private extraOrderNumber(date: Date) {
+    const pad = (value: number, length = 2) => String(value).padStart(length, '0');
+    return `FRX-${date.getFullYear()}${pad(date.getMonth() + 1)}${pad(date.getDate())}-${pad(date.getHours())}${pad(date.getMinutes())}${pad(date.getSeconds())}${pad(date.getMilliseconds(), 3)}`;
   }
 }
