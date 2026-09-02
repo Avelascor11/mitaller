@@ -202,7 +202,7 @@ export class StockReceiptsService {
   }
 
   private parsePackzettelLine(line: string, stockItems: StockItem[]) {
-    const match = line.match(/^\d{4,}\s+(TG002|WG002|WG005)\s+(.+?)\s+(2XL|XXL|XL|L|M|S)\s+([1-9]\d{0,2})$/i);
+    const match = line.match(/^\d{4,}\s+(TG002|WG002|WG005)\s+(.+?)\s+(3XL|XXXL|2XL|XXL|XL|L|M|S)\s+([1-9]\d{0,2})$/i);
     if (!match) return null;
 
     const [, code, colorText, sizeText, quantityText] = match;
@@ -317,13 +317,15 @@ export class StockReceiptsService {
   }
 
   private detectSize(value: string) {
-    const match = value.match(/(?:^|\s|[-_/])(?:talla\s*)?(2xl|xxl|xl|l|m|s)(?:\s|$|[-_/])/i);
+    const match = value.match(/(?:^|\s|[-_/])(?:talla\s*)?(3xl|xxxl|2xl|xxl|xl|l|m|s)(?:\s|$|[-_/])/i);
     if (!match) return undefined;
     return this.normalizeSize(match[1]);
   }
 
   private normalizeSize(value: string) {
-    return value.toLowerCase() === '2xl' ? 'xxl' : value.toLowerCase();
+    const normalized = value.toLowerCase();
+    if (normalized === 'xxxl') return '3xl';
+    return normalized === '2xl' ? 'xxl' : normalized;
   }
 
   private normalize(value: string) {

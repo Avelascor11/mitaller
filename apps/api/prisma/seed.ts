@@ -22,8 +22,11 @@ function normalizeText(value: string) {
 }
 
 function normalizeSize(value: string) {
-  const match = normalizeText(value).toUpperCase().match(/(^|[^A-Z])(XXL|XL|L|M|S)([^A-Z]|$)/);
-  return match?.[2] ?? null;
+  const match = normalizeText(value).toUpperCase().match(/(^|[^A-Z])(3XL|XXXL|2XL|XXL|XL|L|M|S)([^A-Z]|$)/);
+  const size = match?.[2] ?? null;
+  if (size === 'XXXL') return '3XL';
+  if (size === '2XL') return 'XXL';
+  return size;
 }
 
 function normalizeColor(value: string) {

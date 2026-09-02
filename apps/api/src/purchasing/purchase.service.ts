@@ -245,7 +245,7 @@ export class PurchaseService {
   }
 
   async getPurchaseMatrix() {
-    const sizes = ['S', 'M', 'L', 'XL', 'XXL'];
+    const sizes = ['S', 'M', 'L', 'XL', 'XXL', '3XL'];
     const pendingStatuses: OperationalStatus[] = [
       OperationalStatus.NEW,
       OperationalStatus.WAITING_STOCK,
@@ -852,7 +852,7 @@ export class PurchaseService {
       .replace(/^(camiseta|t-?shirt|sudadera(?:\s+con\s+capucha)?|hoodie|bañador|banador|swimsuit)\s*/i, '')
       .trim();
     const colors = '(blanco|blanca|negro|negra|black|white|navy|azul|blue|royal\\s*blue|charcoal|sand|arena|mastic|marron|marrón|brown|dark\\s*chocolate|rosa|azalea|tangerine|orange)';
-    const sizes = '(xs|xxl|2xl|xl|l|m|s)';
+    const sizes = '(xs|xxxl|3xl|xxl|2xl|xl|l|m|s)';
     for (let index = 0; index < 4; index += 1) {
       cleaned = cleaned
         .replace(new RegExp(`\\s*[-/,|]\\s*${sizes}\\s*$`, 'i'), '')
@@ -1071,8 +1071,11 @@ export class PurchaseService {
 
   private normalizeSize(value: string) {
     const normalized = this.normalizeText(value).toUpperCase();
-    const match = normalized.match(/(^|[^A-Z])(XXL|XL|L|M|S)([^A-Z]|$)/);
-    return match?.[2] ?? null;
+    const match = normalized.match(/(^|[^A-Z])(3XL|XXXL|2XL|XXL|XL|L|M|S)([^A-Z]|$)/);
+    const size = match?.[2] ?? null;
+    if (size === 'XXXL') return '3XL';
+    if (size === '2XL') return 'XXL';
+    return size;
   }
 
   private normalizeColor(value: string) {

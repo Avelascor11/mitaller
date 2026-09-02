@@ -238,7 +238,11 @@ export class SupplierOrderService {
 
   async getExtraPurchaseCatalog() {
     await this.syncSupplierStockBeforeOrdering();
-    const { matrix, supplierArticles, supplierStocks, articleBySku, stockBySku } = await this.extraPurchaseContext();
+    let context = await this.extraPurchaseContext();
+    if (await this.ensureExtraPurchaseThreeXLStockItems(context.matrix, context.supplierArticles, context.supplierStocks)) {
+      context = await this.extraPurchaseContext();
+    }
+    const { matrix, supplierArticles, supplierStocks, articleBySku, stockBySku } = context;
     const groups = matrix.groups
       .filter((group) => ['CAMISETA', 'SUDADERA'].includes(group.garmentType))
       .map((group) => {
@@ -613,15 +617,21 @@ export class SupplierOrderService {
     stocks: Array<{ supplierSku: string }>
   ) {
     // Falk & Ross sometimes publishes a valid SKU in stock before its article master.
-    if (garmentType !== 'CAMISETA' || this.normalizedColor(color) !== 'AZUL' || this.normalizedSize(size) !== 'XXL') return null;
-    const supplierSku = '032424256';
+    if (garmentType !== 'CAMISETA' || this.normalizedColor(color) !== 'AZUL') return null;
+    const normalizedSize = this.normalizedSize(size);
+    const supplierSku = normalizedSize === 'XXL'
+      ? '032424256'
+      : normalizedSize === '3XL'
+        ? '032424257'
+        : null;
+    if (!supplierSku) return null;
     if (!stocks.some((stock) => stock.supplierSku === supplierSku)) return null;
     return {
       supplierSku,
       styleCode: '032.42',
       productName: 'TG002 - #E220 T-Shirt',
       color: 'Royal',
-      size: '2XL',
+      size: normalizedSize === 'XXL' ? '2XL' : '3XL',
       purchasePrice: null
     };
   }
@@ -717,6 +727,73 @@ export class SupplierOrderService {
     return cleanComment ? `${base} | Comentario: ${cleanComment}` : base;
   }
 
+  private async ensureExtraPurchaseThreeXLStockItems(
+    matrix: Awaited<ReturnType<PurchaseService['getPurchaseMatrix']>>,
+    supplierArticles: Array<{
+      supplierSku: string;
+      styleCode: string | null;
+      productName: string;
+      color: string | null;
+      size: string | null;
+      purchasePrice: Prisma.Decimal | null;
+    }>,
+    supplierStocks: Array<{ supplierSku: string }>
+  ) {
+    const articleBySku = new Map(supplierArticles.map((article) => [article.supplierSku, article]));
+    let createdAny = false;
+
+    for (const group of matrix.groups.filter((entry) => ['CAMISETA', 'SUDADERA'].includes(entry.garmentType))) {
+      const currentThreeXL = group.sizes.find((entry) => entry.size === '3XL');
+      if (currentThreeXL?.stockItemId) continue;
+
+      const template = group.sizes.find((entry) => entry.stockItemId && entry.sku && entry.supplierSku);
+      if (!template?.sku) continue;
+
+      const article = this.resolveFalkRossArticle(
+        group.garmentType,
+        group.color,
+        '3XL',
+        null,
+        supplierArticles,
+        articleBySku
+      ) ?? this.resolveFalkRossStockOnlyFallback(group.garmentType, group.color, '3XL', supplierStocks);
+      if (!article) continue;
+
+      const existing = await this.prisma.stockItem.findFirst({
+        where: {
+          type: 'BLANK_GARMENT',
+          OR: [
+            { supplierSku: article.supplierSku },
+            { sku: template.sku.replace(/-(?:3XL|XXXL|2XL|XXL|XL|L|M|S)$/i, '-3XL') }
+          ]
+        }
+      });
+      if (existing) continue;
+
+      const sku = template.sku.replace(/-(?:3XL|XXXL|2XL|XXL|XL|L|M|S)$/i, '-3XL');
+      const fallbackName = `${group.garmentType === 'SUDADERA' ? 'Sudadera' : 'Camiseta'} ${group.color} - 3XL`;
+      const stockItemData = {
+        name: this.falkRossLineName(group.garmentType, group.color, '3XL', fallbackName),
+        type: 'BLANK_GARMENT' as const,
+        color: group.color,
+        size: '3XL',
+        supplierSku: article.supplierSku,
+        minStock: 0
+      };
+      await this.prisma.stockItem.upsert({
+        where: { sku },
+        update: stockItemData,
+        create: {
+          sku,
+          ...stockItemData
+        }
+      });
+      createdAny = true;
+    }
+
+    return createdAny;
+  }
+
   private normalizedColor(value: string) {
     const normalized = this.normalizedToken(value);
     const rules: Array<[string, RegExp]> = [
@@ -735,8 +812,9 @@ export class SupplierOrderService {
 
   private normalizedSize(value: string) {
     const normalized = this.normalizedToken(value).toUpperCase();
-    const match = normalized.match(/(^|[^A-Z])(2XL|XXL|XL|L|M|S)([^A-Z]|$)/);
+    const match = normalized.match(/(^|[^A-Z])(3XL|XXXL|2XL|XXL|XL|L|M|S)([^A-Z]|$)/);
     const size = match?.[2] ?? normalized;
+    if (size === 'XXXL') return '3XL';
     return size === '2XL' ? 'XXL' : size;
   }
 

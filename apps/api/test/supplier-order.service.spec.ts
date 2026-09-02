@@ -3,6 +3,7 @@ import { SupplierOrderService } from '../src/supplier/supplier-order.service';
 
 function buildService(options: {
   matrix: unknown;
+  matrixAfterEnsure?: unknown;
   supplierArticles?: unknown[];
   supplierStocks?: unknown[];
   createdOrder?: unknown;
@@ -27,12 +28,18 @@ function buildService(options: {
       create: vi.fn().mockResolvedValue(createdOrder)
     },
     supplierArticle: { findMany: vi.fn().mockResolvedValue(options.supplierArticles ?? []) },
-    supplierStock: { findMany: vi.fn().mockResolvedValue(options.supplierStocks ?? []) }
+    supplierStock: { findMany: vi.fn().mockResolvedValue(options.supplierStocks ?? []) },
+    stockItem: {
+      findFirst: vi.fn().mockResolvedValue(null),
+      upsert: vi.fn().mockResolvedValue({ id: 'stock-created' })
+    }
   };
+  const getPurchaseMatrix = vi.fn().mockResolvedValueOnce(options.matrix);
+  getPurchaseMatrix.mockResolvedValue(options.matrixAfterEnsure ?? options.matrix);
   const service = new SupplierOrderService(
     prisma as never,
     { get: vi.fn((key: string) => ({ FALKROSS_ALLOW_AUTO_SUBMIT: 'false', FALKROSS_SYNC_STOCK_BEFORE_ORDER: 'false' })[key]) } as never,
-    { getPurchaseMatrix: vi.fn().mockResolvedValue(options.matrix) } as never,
+    { getPurchaseMatrix } as never,
     { syncStock: vi.fn(), submitPurchaseOrder: vi.fn(), orderMode: vi.fn(() => 'falkross-xml') } as never,
     { log: vi.fn() } as never
   );
@@ -220,6 +227,25 @@ describe('SupplierOrderService', () => {
         })
       })
     }));
+  });
+
+  it('usa el SKU real de la camiseta Royal 3XL cuando Falk & Ross solo publica su stock', () => {
+    const { service } = buildService({ matrix: { groups: [] } });
+    const resolver = service as unknown as {
+      resolveFalkRossStockOnlyFallback: (
+        garmentType: string,
+        color: string,
+        size: string,
+        stocks: Array<{ supplierSku: string }>
+      ) => { supplierSku: string; size: string } | null;
+    };
+
+    expect(resolver.resolveFalkRossStockOnlyFallback(
+      'CAMISETA',
+      'AZUL',
+      '3XL',
+      [{ supplierSku: '032424257' }]
+    )).toEqual(expect.objectContaining({ supplierSku: '032424257', size: '3XL' }));
   });
 
   it('no descuenta borradores antiguos al recomendar una nueva compra proveedor', async () => {
@@ -791,6 +817,99 @@ describe('SupplierOrderService', () => {
           })]
         })
       })
+    }));
+  });
+
+  it('añade la talla 3XL real al catálogo de compras extra sin stock de seguridad', async () => {
+    const sizeEntry = (size: string, stockItemId: string | null, supplierSku: string | null, sku: string | null) => ({
+      stockItemId,
+      supplierSku,
+      sku,
+      subproductName: `Camiseta Blanca - ${size}`,
+      size,
+      recommendedPurchaseQuantity: 0,
+      supplierAvailableQuantity: null,
+      pendingOrderNeed: 0,
+      currentInternalStock: 0,
+      minStockTarget: 0,
+      alreadyOrderedQuantity: 0,
+      demandOrders: []
+    });
+    const baseGroup = {
+      key: 'CAMISETA:BLANCA:',
+      garmentType: 'CAMISETA',
+      color: 'BLANCA',
+      title: 'Camiseta Blanca',
+      theme: { background: '#fff', foreground: '#000' }
+    };
+    const matrix = {
+      sizes: ['S', '3XL'],
+      generatedAt: new Date(),
+      groups: [{
+        ...baseGroup,
+        sizes: [
+          sizeEntry('S', 'stock-white-s', 'FR-TS-WHT-S', 'BLANK-TS-WHT-S'),
+          sizeEntry('3XL', null, null, null)
+        ]
+      }]
+    };
+    const matrixAfterEnsure = {
+      ...matrix,
+      groups: [{
+        ...baseGroup,
+        sizes: [
+          sizeEntry('S', 'stock-white-s', 'FR-TS-WHT-S', 'BLANK-TS-WHT-S'),
+          sizeEntry('3XL', 'stock-white-3xl', '032420007', 'BLANK-TS-WHT-3XL')
+        ]
+      }]
+    };
+    const supplierArticles = [
+      {
+        supplierSku: '032420002',
+        styleCode: '032.42',
+        productName: 'TG002 - #E220 T-Shirt',
+        color: 'White',
+        size: 'S',
+        purchasePrice: '4.24'
+      },
+      {
+        supplierSku: '032420007',
+        styleCode: '032.42',
+        productName: 'TG002 - #E220 T-Shirt',
+        color: 'White',
+        size: '3XL',
+        purchasePrice: '5.30'
+      }
+    ];
+    const { service, prisma } = buildService({
+      matrix,
+      matrixAfterEnsure,
+      supplierArticles,
+      supplierStocks: [{ supplierSku: '032420007', availableQuantity: 619 }]
+    });
+
+    const result = await service.getExtraPurchaseCatalog();
+
+    expect(prisma.stockItem.upsert).toHaveBeenCalledWith({
+      where: { sku: 'BLANK-TS-WHT-3XL' },
+      create: expect.objectContaining({
+        sku: 'BLANK-TS-WHT-3XL',
+        size: '3XL',
+        supplierSku: '032420007',
+        minStock: 0
+      }),
+      update: expect.objectContaining({
+        size: '3XL',
+        supplierSku: '032420007',
+        minStock: 0
+      })
+    });
+    expect(result.groups[0]?.items).toContainEqual(expect.objectContaining({
+      stockItemId: 'stock-white-3xl',
+      supplierSku: '032420007',
+      size: '3XL',
+      unitPrice: 2.7,
+      availableQuantity: 619
     }));
   });
 });

@@ -561,8 +561,11 @@ export class OrdersService {
 
   private normalizeSize(value: string) {
     const normalized = this.normalizeText(value).toUpperCase();
-    const match = normalized.match(/(^|[^A-Z])(XXL|XL|L|M|S)([^A-Z]|$)/);
-    return match?.[2] ?? null;
+    const match = normalized.match(/(^|[^A-Z])(3XL|XXXL|2XL|XXL|XL|L|M|S)([^A-Z]|$)/);
+    const size = match?.[2] ?? null;
+    if (size === 'XXXL') return '3XL';
+    if (size === '2XL') return 'XXL';
+    return size;
   }
 
   private normalizeColor(value: string) {
