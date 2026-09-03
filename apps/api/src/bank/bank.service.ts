@@ -138,7 +138,7 @@ export class BankService {
       } catch (e) {
         this.logger.warn(`Tx fetch failed ${account.name}: ${e instanceof Error ? e.message : String(e)}`);
       }
-      await this.refreshAccountBalance(account);
+      await this.refreshAccountBalance(account, true);
       await this.prisma.bankConnection.update({
         where: { id: account.connectionId },
         data: { lastSyncedAt: new Date() }
@@ -399,10 +399,10 @@ export class BankService {
     }
   }
 
-  private async refreshAccountBalance<T extends { id: string; providerAccountId: string; name?: string | null; balanceUpdatedAt?: Date | string | null; currentBalance?: number | null; availableBalance?: number | null }>(account: T): Promise<T & { balanceError?: string | null; balanceTypes?: string[] }> {
+  private async refreshAccountBalance<T extends { id: string; providerAccountId: string; name?: string | null; balanceUpdatedAt?: Date | string | null; currentBalance?: number | null; availableBalance?: number | null }>(account: T, force = false): Promise<T & { balanceError?: string | null; balanceTypes?: string[] }> {
     const balanceStale = !account.balanceUpdatedAt
       || (Date.now() - new Date(account.balanceUpdatedAt).getTime()) > 6 * 60 * 60 * 1000;
-    if (!balanceStale) return { ...account, balanceError: null, balanceTypes: [] };
+    if (!force && !balanceStale) return { ...account, balanceError: null, balanceTypes: [] };
 
     try {
       const balResponse = await this.accountBalancesWithRetry(account.providerAccountId);

@@ -10,6 +10,47 @@ function serviceWith(prisma: Record<string, any>, gocardless: Record<string, any
 }
 
 describe('BankService', () => {
+  it('fuerza un saldo nuevo al sincronizar aunque el saldo guardado sea reciente', async () => {
+    const recentBalance = new Date();
+    const account = {
+      id: 'bank-account-1',
+      connectionId: 'connection-1',
+      providerAccountId: 'n26-account',
+      name: 'N26 Business',
+      currentBalance: 100,
+      availableBalance: 100,
+      balanceUpdatedAt: recentBalance,
+      connection: { institutionName: 'N26' }
+    };
+    const prisma = {
+      bankAccount: {
+        findMany: vi.fn().mockResolvedValue([account]),
+        update: vi.fn().mockResolvedValue({
+          ...account,
+          currentBalance: 250,
+          availableBalance: 250,
+          balanceUpdatedAt: new Date()
+        })
+      },
+      bankConnection: {
+        update: vi.fn().mockResolvedValue({})
+      }
+    };
+    const gocardless = {
+      accountTransactions: vi.fn().mockResolvedValue({ transactions: { booked: [], pending: [] } }),
+      accountBalances: vi.fn().mockResolvedValue({
+        balances: [{ balanceType: 'interimBooked', balanceAmount: { amount: '250.00', currency: 'EUR' } }]
+      })
+    };
+
+    await serviceWith(prisma, gocardless).sync();
+
+    expect(gocardless.accountBalances).toHaveBeenCalledWith('n26-account');
+    expect(prisma.bankAccount.update).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ currentBalance: 250, availableBalance: 250 })
+    }));
+  });
+
   it('lee y guarda el saldo si la cuenta bancaria no lo tenia cargado', async () => {
     const account = {
       id: 'bank-account-1',
