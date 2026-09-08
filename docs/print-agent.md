@@ -48,6 +48,9 @@ DTF_HOT_FOLDER=
 DTF_PRINTER_NAME=
 DTF_PRINT_SETTINGS=fit
 
+# Piezas únicas: 8 códigos por etiqueta Honeywell de 100x150 mm
+SHELF_BARCODE_PRINT_ENABLED=true
+
 # Sendcloud (necesario para descargar etiquetas privadas)
 SENDCLOUD_PUBLIC_KEY=
 SENDCLOUD_SECRET_KEY=
@@ -58,6 +61,8 @@ Si `LABEL_PRINTER_NAME` no esta definido, usa `Honeywell_PC42d`.
 Para imprimir una carta de pedido junto a cada etiqueta, activa `PACKING_LETTER_ENABLED=true` y pon en `PACKING_LETTER_PRINTER_NAME` el nombre exacto de la impresora normal. La carta se genera como PDF A4 en blanco y negro, con el nombre del cliente destacado y el numero de pedido. Por defecto usa la plantilla incluida en `assets/packing-letter-template.png`; si quieres cambiarla, define `PACKING_LETTER_TEMPLATE_PATH` con la ruta absoluta de otro PNG. Si imprimes sin plantilla, puedes incluir un logo con `PACKING_LETTER_LOGO_PATH`.
 
 Para DTF, lo recomendado es usar `DTF_HOT_FOLDER` si el software/RIP de la impresora tiene una carpeta de entrada automatica. El agente copia un archivo por unidad pendiente, por ejemplo si faltan 3 transfers del mismo diseno deja 3 archivos en esa carpeta. Si no hay hot folder, define `DTF_PRINTER_NAME` para imprimir mediante el sistema operativo.
+
+Los códigos de Estantería se acumulan hasta que pulses **Imprimir lote** en la app. El agente compone hasta 8 códigos en cada etiqueta adhesiva de 100x150 mm (2 columnas por 4 filas), la imprime en la Honeywell configurada en `LABEL_PRINTER_NAME` y después marca esas piezas como impresas. Si hay más de 8, genera otra etiqueta en el siguiente ciclo.
 
 Para ver el nombre exacto de la impresora:
 

@@ -10,6 +10,7 @@ import UIKit
 import PDFKit
 import UniformTypeIdentifiers
 import UserNotifications
+import CoreImage
 @preconcurrency import Vision
 
 enum AppTheme {
@@ -9298,6 +9299,13 @@ struct EstanteriaView: View {
     @State private var loading = false
     @State private var error: String?
     @State private var showAdd = false
+    @State private var showScanner = false
+    @State private var requestingBarcodePrint = false
+    @State private var barcodePrintMessage: String?
+
+    private var pendingBarcodeItems: [ShelfItem] {
+        items.filter { $0.barcode != nil && $0.barcodePrintedAt == nil }
+    }
 
     var body: some View {
         NavigationStack {
@@ -9305,13 +9313,34 @@ struct EstanteriaView: View {
                 VStack(alignment: .leading, spacing: 16) {
                     VStack(alignment: .leading, spacing: 4) {
                         Text("Estantería").font(.system(size: 30, weight: .heavy, design: .rounded)).foregroundStyle(AppTheme.ink)
-                        Text("Camisetas de cambios/devoluciones. Qué pedidos puedes sacar sin fabricar.")
+                        Text("Stock de cambios y piezas únicas. Fotografía una prenda para reconocerla y subirla a Shopify.")
                             .font(.subheadline.weight(.medium)).foregroundStyle(AppTheme.muted)
                     }
                     LazyVGrid(columns: [GridItem(.adaptive(minimum: 104), spacing: 10)], spacing: 10) {
                         MetricTile(title: "Unidades", value: items.reduce(0) { $0 + $1.quantity }, color: AppTheme.green, icon: "tray.2.fill")
                         MetricTile(title: "Referencias", value: items.count, color: AppTheme.blue, icon: "tshirt.fill")
                         MetricTile(title: "Pedidos posibles", value: fulfillable?.orders.count ?? 0, color: AppTheme.magenta, icon: "checkmark.circle.fill")
+                    }
+
+                    if !pendingBarcodeItems.isEmpty {
+                        VStack(alignment: .leading, spacing: 10) {
+                            HStack {
+                                Image(systemName: "barcode").font(.title2).foregroundStyle(AppTheme.teal)
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text("ETIQUETAS ACUMULADAS").font(.caption.weight(.black)).foregroundStyle(AppTheme.ink)
+                                    Text("\(pendingBarcodeItems.count) piezas · 8 códigos por cada 10×15 cm")
+                                        .font(.caption).foregroundStyle(AppTheme.muted)
+                                }
+                            }
+                            Button { Task { await requestBarcodeBatch() } } label: {
+                                if requestingBarcodePrint { ProgressView().frame(maxWidth: .infinity) }
+                                else { Label("Imprimir lote en Honeywell", systemImage: "printer.fill").frame(maxWidth: .infinity) }
+                            }
+                            .buttonStyle(.borderedProminent).tint(AppTheme.teal).disabled(requestingBarcodePrint)
+                            if let barcodePrintMessage {
+                                Text(barcodePrintMessage).font(.caption.weight(.bold)).foregroundStyle(AppTheme.green)
+                            }
+                        }.padding().glassPanel(padding: 14, accent: AppTheme.teal)
                     }
 
                     if let f = fulfillable, !f.orders.isEmpty {
@@ -9337,9 +9366,11 @@ struct EstanteriaView: View {
             .navigationTitle("Estantería")
             .toolbar {
                 ToolbarItem(placement: .primaryAction) { Button { showAdd = true } label: { Image(systemName: "plus.circle.fill") } }
+                ToolbarItem(placement: .primaryAction) { Button { showScanner = true } label: { Image(systemName: "camera.viewfinder") } }
                 ToolbarItem(placement: .topBarLeading) { Button { Task { await reload() } } label: { Image(systemName: "arrow.clockwise") }.disabled(loading) }
             }
             .sheet(isPresented: $showAdd) { ShelfAddSheet(onAdded: { Task { await reload() } }).environment(store) }
+            .sheet(isPresented: $showScanner) { ShelfScanFlow(onCreated: { Task { await reload() } }).environment(store) }
             .task { await reload() }
             .refreshable { await reload() }
         }
@@ -9353,6 +9384,17 @@ struct EstanteriaView: View {
             async let f = client.shelfFulfillable()
             items = try await i
             fulfillable = try? await f
+        } catch { self.error = error.localizedDescription }
+    }
+
+    private func requestBarcodeBatch() async {
+        guard let client = store.apiClient else { return }
+        requestingBarcodePrint = true; barcodePrintMessage = nil; defer { requestingBarcodePrint = false }
+        do {
+            let response = try await client.requestShelfBarcodePrint()
+            barcodePrintMessage = response.requested == 0
+                ? "No hay códigos pendientes."
+                : "Lote enviado: \(response.requested) códigos. La Honeywell los imprimirá de 8 en 8."
         } catch { self.error = error.localizedDescription }
     }
 }
@@ -9395,6 +9437,10 @@ struct ShelfItemRow: View {
                 HStack(spacing: 6) {
                     Text("Talla \(item.size)").font(.caption2.weight(.bold)).foregroundStyle(AppTheme.blue)
                     if let c = item.color { Text("· \(c)").font(.caption2).foregroundStyle(AppTheme.muted) }
+                }
+                if let barcode = item.barcode {
+                    Text("\(barcode)\(item.salePrice.map { " · \(shelfEuro($0))" } ?? "")")
+                        .font(.caption2.monospacedDigit()).foregroundStyle(AppTheme.muted)
                 }
             }
             Spacer()
@@ -9515,6 +9561,422 @@ struct ShelfAddSheet: View {
             onAdded(); dismiss()
         } catch { self.error = error.localizedDescription }
     }
+}
+
+// MARK: - Estantería: pieza única por cámara
+
+struct ShelfScanFlow: View {
+    @Environment(WorkshopStore.self) private var store
+    @Environment(\.dismiss) private var dismiss
+    let onCreated: () -> Void
+
+    @State private var catalog: [ShelfCatalogProduct] = []
+    @State private var photoData: Data?
+    @State private var showCamera = false
+    @State private var analyzing = false
+    @State private var candidates: [ShelfVisualCandidate] = []
+    @State private var selected: ShelfCatalogProduct?
+    @State private var search = ""
+    @State private var size = "M"
+    @State private var priceText = "15,00"
+    @State private var condition = "Como nueva"
+    @State private var notes = ""
+    @State private var saving = false
+    @State private var error: String?
+    @State private var result: ShelfUniqueProductResponse?
+
+    private let conditions = ["Como nueva", "Muestra", "Pequeño defecto"]
+    private var filteredCatalog: [ShelfCatalogProduct] {
+        let query = search.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !query.isEmpty else { return [] }
+        return catalog.filter { $0.title.lowercased().contains(query) }.prefix(20).map { $0 }
+    }
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 18) {
+                    if let result {
+                        successView(result)
+                    } else if let selected {
+                        confirmationView(selected)
+                    } else {
+                        captureAndMatchesView
+                    }
+                    if let error {
+                        Label(error, systemImage: "exclamationmark.triangle.fill")
+                            .font(.footnote.weight(.bold)).foregroundStyle(AppTheme.red)
+                    }
+                }
+                .padding()
+            }
+            .screenBackground()
+            .navigationTitle("Pieza única")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Cerrar") { dismiss() } } }
+            .sheet(isPresented: $showCamera) {
+                ShelfPhotoCaptureView { data in
+                    showCamera = false
+                    guard let data else { return }
+                    photoData = data
+                    Task { await analyze(data) }
+                }.ignoresSafeArea()
+            }
+            .task { await loadCatalog() }
+        }
+    }
+
+    @ViewBuilder private var captureAndMatchesView: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("FOTOGRAFÍA LA PRENDA").font(.caption.weight(.black)).foregroundStyle(AppTheme.teal)
+            Text("La cámara propone diseños parecidos. Tú confirmas el modelo antes de crear nada.")
+                .font(.subheadline).foregroundStyle(AppTheme.muted)
+        }
+        if let photoData, let image = UIImage(data: photoData) {
+            Image(uiImage: image).resizable().scaledToFit().frame(maxHeight: 280)
+                .clipShape(RoundedRectangle(cornerRadius: 8))
+        }
+        Button { showCamera = true } label: {
+            Label(photoData == nil ? "Hacer foto" : "Repetir foto", systemImage: "camera.fill")
+                .font(.headline.weight(.heavy)).frame(maxWidth: .infinity)
+        }
+        .buttonStyle(.borderedProminent).tint(AppTheme.blue).controlSize(.large)
+
+        if analyzing {
+            HStack(spacing: 12) { ProgressView(); Text("Comparando con el catálogo...") }
+                .frame(maxWidth: .infinity).padding().glassPanel(padding: 14, accent: AppTheme.teal)
+        }
+        if !candidates.isEmpty {
+            SectionHeader(title: "Coincidencias", subtitle: "Elige la correcta")
+            ForEach(candidates.prefix(6)) { candidate in
+                shelfCandidateButton(candidate.product, confidence: candidate.confidence)
+            }
+        }
+        SectionHeader(title: "Buscar manualmente", subtitle: "Por si la cámara no acierta")
+        TextField("Nombre del diseño", text: $search)
+            .textInputAutocapitalization(.never).padding(13)
+            .background(AppTheme.surfaceSoft).overlay(RoundedRectangle(cornerRadius: 8).stroke(AppTheme.line))
+        ForEach(filteredCatalog) { product in shelfCandidateButton(product, confidence: nil) }
+    }
+
+    private func shelfCandidateButton(_ product: ShelfCatalogProduct, confidence: Int?) -> some View {
+        Button { select(product) } label: {
+            HStack(spacing: 12) {
+                shelfScanImage(product.imageUrl, size: 58)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(product.title).font(.subheadline.weight(.bold)).foregroundStyle(AppTheme.ink).lineLimit(2)
+                    HStack {
+                        if let confidence { Text("Coincidencia \(confidence)%") }
+                        if let status = product.status { Text(status == "ACTIVE" ? "Activo" : "Archivo") }
+                    }.font(.caption2.weight(.bold)).foregroundStyle(AppTheme.muted)
+                }
+                Spacer()
+                Image(systemName: "chevron.right").foregroundStyle(AppTheme.muted)
+            }.padding(10).glassPanel(padding: 10, accent: AppTheme.blue)
+        }.buttonStyle(.plain)
+    }
+
+    @ViewBuilder private func confirmationView(_ product: ShelfCatalogProduct) -> some View {
+        HStack(spacing: 14) {
+            shelfScanImage(product.imageUrl, size: 76)
+            VStack(alignment: .leading, spacing: 4) {
+                Text("DISEÑO CONFIRMADO").font(.caption2.weight(.black)).foregroundStyle(AppTheme.green)
+                Text(product.title).font(.headline.weight(.heavy)).foregroundStyle(AppTheme.ink)
+            }
+        }.frame(maxWidth: .infinity, alignment: .leading).padding().glassPanel(padding: 14, accent: AppTheme.green)
+
+        VStack(alignment: .leading, spacing: 10) {
+            Text("TALLA").font(.caption.weight(.black)).foregroundStyle(AppTheme.muted)
+            Picker("Talla", selection: $size) {
+                ForEach(product.sizes.isEmpty ? ["S", "M", "L", "XL", "XXL", "3XL"] : product.sizes, id: \.self) { Text($0).tag($0) }
+            }.pickerStyle(.segmented)
+
+            Text("PRECIO DE VENTA").font(.caption.weight(.black)).foregroundStyle(AppTheme.muted).padding(.top, 4)
+            HStack {
+                TextField("15,00", text: $priceText).keyboardType(.decimalPad).font(.title3.monospacedDigit().weight(.bold))
+                Text("EUR").font(.caption.weight(.black)).foregroundStyle(AppTheme.muted)
+            }.padding(13).background(AppTheme.surfaceSoft).overlay(RoundedRectangle(cornerRadius: 8).stroke(AppTheme.line))
+
+            Text("ESTADO").font(.caption.weight(.black)).foregroundStyle(AppTheme.muted).padding(.top, 4)
+            Picker("Estado", selection: $condition) { ForEach(conditions, id: \.self) { Text($0).tag($0) } }
+                .pickerStyle(.segmented)
+            TextField("Nota opcional: marca, pequeño defecto...", text: $notes, axis: .vertical)
+                .lineLimit(2...4).padding(13).background(AppTheme.surfaceSoft)
+                .overlay(RoundedRectangle(cornerRadius: 8).stroke(AppTheme.line))
+        }.padding().glassPanel(padding: 14, accent: AppTheme.blue)
+
+        Label("Se creará un producto individual en Shopify, activo, con stock 1 y código de barras propio.", systemImage: "checkmark.shield.fill")
+            .font(.footnote.weight(.medium)).foregroundStyle(AppTheme.muted)
+        Button { Task { await create(product) } } label: {
+            if saving { ProgressView().frame(maxWidth: .infinity) }
+            else { Label("Crear pieza única en Shopify", systemImage: "barcode").font(.headline.weight(.heavy)).frame(maxWidth: .infinity) }
+        }.buttonStyle(.borderedProminent).tint(AppTheme.green).controlSize(.large).disabled(saving)
+        Button("Cambiar diseño") { selected = nil }.frame(maxWidth: .infinity)
+    }
+
+    @ViewBuilder private func successView(_ response: ShelfUniqueProductResponse) -> some View {
+        VStack(spacing: 12) {
+            Image(systemName: "checkmark.circle.fill").font(.system(size: 58)).foregroundStyle(AppTheme.green)
+            Text("PIEZA CREADA EN SHOPIFY").font(.title2.weight(.black)).foregroundStyle(AppTheme.ink)
+            Text(response.shopify.sourceTitle).font(.headline).foregroundStyle(AppTheme.ink).multilineTextAlignment(.center)
+            Text("Talla \(response.shelfItem.size) · \(shelfEuro(response.shopify.price))")
+                .font(.subheadline.weight(.bold)).foregroundStyle(AppTheme.muted)
+        }.frame(maxWidth: .infinity).padding(.vertical, 8)
+
+        ShelfBarcodeCard(product: response.shopify)
+
+        Label("Código guardado. Se acumulará con los demás y podrás imprimirlos de 8 en 8 desde Estantería.", systemImage: "tray.and.arrow.down.fill")
+            .font(.footnote.weight(.bold)).foregroundStyle(AppTheme.green)
+            .padding().glassPanel(padding: 12, accent: AppTheme.green)
+
+        if let link = response.shopify.adminUrl, let url = URL(string: link) {
+            Link(destination: url) { Label("Abrir producto en Shopify", systemImage: "arrow.up.right.square").frame(maxWidth: .infinity) }
+                .buttonStyle(.bordered).controlSize(.large)
+        }
+        Button("Crear otra pieza") {
+            result = nil; selected = nil; photoData = nil; candidates = []; search = ""; error = nil
+        }.frame(maxWidth: .infinity)
+    }
+
+    @ViewBuilder private func shelfScanImage(_ url: String?, size: CGFloat) -> some View {
+        if let url, let remote = URL(string: url) {
+            AsyncImage(url: remote) { image in image.resizable().scaledToFill() } placeholder: { Color.white.opacity(0.06) }
+                .frame(width: size, height: size).clipShape(RoundedRectangle(cornerRadius: 6))
+        } else {
+            Image(systemName: "tshirt.fill").frame(width: size, height: size).foregroundStyle(AppTheme.muted)
+        }
+    }
+
+    private func loadCatalog() async {
+        guard catalog.isEmpty, let client = store.apiClient else { return }
+        do { catalog = try await client.shelfCatalog() }
+        catch { self.error = "No se pudo cargar el catálogo: \(error.localizedDescription)" }
+    }
+
+    private func analyze(_ data: Data) async {
+        analyzing = true; error = nil; candidates = []; selected = nil
+        if catalog.isEmpty { await loadCatalog() }
+        guard !catalog.isEmpty else { analyzing = false; return }
+        candidates = await recognizeShelfProducts(photoData: data, catalog: catalog)
+        analyzing = false
+        if candidates.isEmpty { error = "No encontré una coincidencia clara. Busca el diseño por nombre." }
+    }
+
+    private func select(_ product: ShelfCatalogProduct) {
+        selected = product
+        size = product.sizes.first ?? "M"
+        let reference = product.variant(for: size)?.price ?? product.variants.first?.price ?? 15
+        priceText = String(format: "%.2f", reference > 0 ? reference : 15).replacingOccurrences(of: ".", with: ",")
+        error = nil
+    }
+
+    private func create(_ product: ShelfCatalogProduct) async {
+        guard let client = store.apiClient else { return }
+        let normalized = priceText.replacingOccurrences(of: ",", with: ".")
+        guard let price = Double(normalized), price > 0 else { error = "Introduce un precio válido."; return }
+        saving = true; error = nil; defer { saving = false }
+        let variant = product.variant(for: size) ?? product.variants.first
+        do {
+            result = try await client.createUniqueShelfProduct(CreateShelfUniqueProductRequest(
+                sourceProductId: product.id,
+                size: size,
+                price: price,
+                compareAtPrice: variant?.compareAtPrice ?? variant?.price,
+                condition: condition,
+                notes: notes.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : notes
+            ))
+            onCreated()
+        } catch { self.error = error.localizedDescription }
+    }
+}
+
+struct ShelfVisualCandidate: Identifiable {
+    let product: ShelfCatalogProduct
+    let confidence: Int
+    var id: String { product.id }
+}
+
+private struct ShelfReferenceImage: Sendable {
+    let productId: String
+    let data: Data
+}
+
+func recognizeShelfProducts(photoData: Data, catalog: [ShelfCatalogProduct]) async -> [ShelfVisualCandidate] {
+    let recognized = (try? await recognizeReceiptText(from: photoData)) ?? ""
+    let words = shelfTokens(recognized)
+    var scores: [String: Double] = [:]
+    if !words.isEmpty {
+        for product in catalog {
+            let titleWords = shelfTokens(product.title)
+            let overlap = words.intersection(titleWords).count
+            if overlap > 0 { scores[product.id, default: 0] += Double(overlap) * 2.5 / Double(max(titleWords.count, 1)) }
+        }
+    }
+
+    let references = catalog.flatMap { product in
+        (product.imageUrls ?? [product.imageUrl].compactMap { $0 }).prefix(2).compactMap { url in
+            shelfRecognitionURL(url).map { (product.id, $0) }
+        }
+    }
+    var downloaded: [ShelfReferenceImage] = []
+    for start in stride(from: 0, to: references.count, by: 12) {
+        let batch = Array(references[start..<min(start + 12, references.count)])
+        let images = await withTaskGroup(of: ShelfReferenceImage?.self) { group in
+            for (productId, url) in batch {
+                group.addTask {
+                    guard let (data, response) = try? await URLSession.shared.data(from: url),
+                          (response as? HTTPURLResponse)?.statusCode == 200 else { return nil }
+                    return ShelfReferenceImage(productId: productId, data: data)
+                }
+            }
+            var result: [ShelfReferenceImage] = []
+            for await image in group { if let image { result.append(image) } }
+            return result
+        }
+        downloaded.append(contentsOf: images)
+    }
+    let distances = await shelfFeatureDistances(target: photoData, references: downloaded)
+    for (productId, distance) in distances {
+        let visualScore = max(0, 1 - Double(distance) / 35)
+        scores[productId, default: 0] += visualScore
+    }
+    return catalog.compactMap { product -> ShelfVisualCandidate? in
+        guard let score = scores[product.id], score > 0.02 else { return nil }
+        return ShelfVisualCandidate(product: product, confidence: min(99, max(20, Int(score * 92))))
+    }.sorted { lhs, rhs in
+        let left = scores[lhs.product.id] ?? 0
+        let right = scores[rhs.product.id] ?? 0
+        return left == right ? lhs.product.title < rhs.product.title : left > right
+    }
+}
+
+private func shelfTokens(_ text: String) -> Set<String> {
+    Set(text.folding(options: [.diacriticInsensitive, .caseInsensitive], locale: .current)
+        .lowercased().components(separatedBy: CharacterSet.alphanumerics.inverted)
+        .filter { $0.count > 2 })
+}
+
+private func shelfRecognitionURL(_ value: String) -> URL? {
+    guard var components = URLComponents(string: value) else { return nil }
+    var items = components.queryItems ?? []
+    items.removeAll { $0.name == "width" }
+    items.append(URLQueryItem(name: "width", value: "360"))
+    components.queryItems = items
+    return components.url
+}
+
+private func shelfFeatureDistances(target: Data, references: [ShelfReferenceImage]) async -> [String: Float] {
+    await withCheckedContinuation { continuation in
+        DispatchQueue.global(qos: .userInitiated).async {
+            guard let targetObservation = shelfFeaturePrint(target) else { continuation.resume(returning: [:]); return }
+            var result: [String: Float] = [:]
+            for reference in references {
+                guard let observation = shelfFeaturePrint(reference.data) else { continue }
+                var distance: Float = 0
+                do {
+                    try targetObservation.computeDistance(&distance, to: observation)
+                    result[reference.productId] = min(result[reference.productId] ?? .greatestFiniteMagnitude, distance)
+                } catch { continue }
+            }
+            continuation.resume(returning: result)
+        }
+    }
+}
+
+private func shelfFeaturePrint(_ data: Data) -> VNFeaturePrintObservation? {
+    guard let image = UIImage(data: data)?.cgImage else { return nil }
+    let request = VNGenerateImageFeaturePrintRequest()
+    do {
+        try VNImageRequestHandler(cgImage: image).perform([request])
+        return request.results?.first as? VNFeaturePrintObservation
+    } catch { return nil }
+}
+
+struct ShelfPhotoCaptureView: UIViewControllerRepresentable {
+    let onPhoto: (Data?) -> Void
+    func makeCoordinator() -> Coordinator { Coordinator(onPhoto: onPhoto) }
+    func makeUIViewController(context: Context) -> UIImagePickerController {
+        let picker = UIImagePickerController()
+        if UIImagePickerController.isSourceTypeAvailable(.camera) {
+            picker.sourceType = .camera
+            picker.cameraCaptureMode = .photo
+        } else {
+            picker.sourceType = .photoLibrary
+        }
+        picker.delegate = context.coordinator
+        return picker
+    }
+    func updateUIViewController(_ uiViewController: UIImagePickerController, context: Context) {}
+    final class Coordinator: NSObject, UIImagePickerControllerDelegate, UINavigationControllerDelegate {
+        let onPhoto: (Data?) -> Void
+        init(onPhoto: @escaping (Data?) -> Void) { self.onPhoto = onPhoto }
+        func imagePickerController(_ picker: UIImagePickerController, didFinishPickingMediaWithInfo info: [UIImagePickerController.InfoKey: Any]) {
+            let data = (info[.originalImage] as? UIImage)?.jpegData(compressionQuality: 0.7)
+            picker.dismiss(animated: true) { self.onPhoto(data) }
+        }
+        func imagePickerControllerDidCancel(_ picker: UIImagePickerController) {
+            picker.dismiss(animated: true) { self.onPhoto(nil) }
+        }
+    }
+}
+
+struct ShelfBarcodeCard: View {
+    let product: ShelfUniqueShopifyProduct
+    var body: some View {
+        VStack(spacing: 10) {
+            if let barcode = shelfBarcodeImage(product.barcode) {
+                Image(uiImage: barcode).interpolation(.none).resizable().scaledToFit().frame(height: 94)
+                    .padding(10).background(.white)
+            }
+            Text(product.barcode).font(.title3.monospacedDigit().weight(.black)).foregroundStyle(AppTheme.ink)
+            Text(product.sku).font(.caption.monospaced()).foregroundStyle(AppTheme.muted)
+        }.padding().glassPanel(padding: 14, accent: AppTheme.teal)
+    }
+}
+
+private func shelfBarcodeImage(_ value: String) -> UIImage? {
+    guard let filter = CIFilter(name: "CICode128BarcodeGenerator") else { return nil }
+    filter.setValue(Data(value.utf8), forKey: "inputMessage")
+    filter.setValue(0, forKey: "inputQuietSpace")
+    guard let output = filter.outputImage?.transformed(by: CGAffineTransform(scaleX: 4, y: 4)) else { return nil }
+    let context = CIContext(options: [.useSoftwareRenderer: false])
+    guard let cgImage = context.createCGImage(output, from: output.extent) else { return nil }
+    return UIImage(cgImage: cgImage)
+}
+
+private func shelfEuro(_ value: Double) -> String {
+    value.formatted(.currency(code: "EUR").locale(Locale(identifier: "es_ES")))
+}
+
+private func printShelfBarcode(_ product: ShelfUniqueShopifyProduct) {
+    let size = CGSize(width: 720, height: 430)
+    let renderer = UIGraphicsImageRenderer(size: size)
+    let sheet = renderer.image { context in
+        UIColor.white.setFill(); context.fill(CGRect(origin: .zero, size: size))
+        let centered = NSMutableParagraphStyle(); centered.alignment = .center
+        (product.sourceTitle as NSString).draw(in: CGRect(x: 40, y: 28, width: 640, height: 72), withAttributes: [
+            .font: UIFont.systemFont(ofSize: 28, weight: .black), .foregroundColor: UIColor.black, .paragraphStyle: centered
+        ])
+        ("TALLA \(product.title.components(separatedBy: " | ").dropFirst(2).first ?? "") · \(String(format: "%.2f EUR", product.price))" as NSString)
+            .draw(in: CGRect(x: 40, y: 102, width: 640, height: 42), withAttributes: [
+                .font: UIFont.systemFont(ofSize: 23, weight: .bold), .foregroundColor: UIColor.black, .paragraphStyle: centered
+            ])
+        if let barcode = shelfBarcodeImage(product.barcode) {
+            barcode.draw(in: CGRect(x: 85, y: 155, width: 550, height: 150))
+        }
+        (product.barcode as NSString).draw(in: CGRect(x: 40, y: 320, width: 640, height: 36), withAttributes: [
+            .font: UIFont.monospacedDigitSystemFont(ofSize: 24, weight: .bold), .foregroundColor: UIColor.black, .paragraphStyle: centered
+        ])
+        (product.sku as NSString).draw(in: CGRect(x: 40, y: 365, width: 640, height: 28), withAttributes: [
+            .font: UIFont.monospacedSystemFont(ofSize: 17, weight: .regular), .foregroundColor: UIColor.black, .paragraphStyle: centered
+        ])
+    }
+    let controller = UIPrintInteractionController.shared
+    controller.printInfo = UIPrintInfo(dictionary: nil)
+    controller.printInfo?.outputType = .grayscale
+    controller.printInfo?.jobName = "Etiqueta \(product.barcode)"
+    controller.printingItem = sheet
+    controller.present(animated: true)
 }
 
 enum CarrierReason: String, CaseIterable, Identifiable {

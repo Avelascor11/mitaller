@@ -28,16 +28,70 @@ export class ShelfService {
   /** All brand garments (camisetas + sudaderas + bañadores) to pick from when stocking the shelf. */
   async catalog() {
     if (!this.shopify.hasCredentials()) return [];
-    const products = await this.shopify.crewCatalog();
-    return products
-      .filter((p: any) => p.category === 'PRENDA')
-      .map((p: any) => ({
-        id: p.id,
-        title: p.title,
-        imageUrl: p.imageUrl,
-        sizes: p.sizes,
-        variants: p.variants
-      }));
+    return this.shopify.shelfRecognitionCatalog();
+  }
+
+  /** Publish one physical archive garment as an individual Shopify product with stock one. */
+  async createUniqueListing(input: {
+    sourceProductId: string;
+    size: string;
+    price: number;
+    compareAtPrice?: number | null;
+    condition?: string;
+    notes?: string;
+  }) {
+    const sourceProductId = input.sourceProductId?.trim();
+    const size = normSize(input.size);
+    const price = Number(input.price);
+    if (!sourceProductId) throw new BadRequestException('Producto original requerido');
+    if (!size) throw new BadRequestException('Talla requerida');
+    if (!Number.isFinite(price) || price <= 0) throw new BadRequestException('El precio debe ser mayor que cero');
+
+    const barcode = await this.createUniqueBarcode();
+    const sku = `SW-ARCH-${barcode}`;
+    const condition = input.condition?.trim() || 'Como nueva';
+    const shopify = await this.shopify.createUniqueShelfProduct({
+      sourceProductId,
+      size,
+      price,
+      compareAtPrice: input.compareAtPrice,
+      condition,
+      notes: input.notes?.trim() || null,
+      sku,
+      barcode
+    });
+
+    const shelfItem = await this.prisma.returnShelfItem.create({
+      data: {
+        productTitle: shopify.sourceTitle,
+        sourceShopifyProductId: sourceProductId,
+        shopifyProductId: shopify.productId,
+        shopifyVariantId: shopify.variantId,
+        sku,
+        barcode,
+        size,
+        imageUrl: shopify.imageUrl,
+        salePrice: price,
+        quantity: 1,
+        source: 'SHOPIFY_UNIQUE',
+        notes: [condition, input.notes?.trim()].filter(Boolean).join(' · '),
+        listedAt: new Date()
+      }
+    });
+    return { shelfItem, shopify };
+  }
+
+  private async createUniqueBarcode(): Promise<string> {
+    for (let attempt = 0; attempt < 20; attempt += 1) {
+      const time = Date.now().toString().slice(-8);
+      const random = Math.floor(Math.random() * 100).toString().padStart(2, '0');
+      const body = `29${time}${random}`;
+      const weighted = body.split('').reduce((sum, digit, index) => sum + Number(digit) * (index % 2 === 0 ? 1 : 3), 0);
+      const barcode = `${body}${(10 - weighted % 10) % 10}`;
+      const existing = await this.prisma.returnShelfItem.findUnique({ where: { barcode } });
+      if (!existing) return barcode;
+    }
+    throw new BadRequestException('No se pudo generar un código único. Inténtalo de nuevo.');
   }
 
   list() {
@@ -45,8 +99,48 @@ export class ShelfService {
   }
 
   async stats() {
-    const items = await this.prisma.returnShelfItem.findMany({ select: { quantity: true } });
-    return { units: items.reduce((s, i) => s + i.quantity, 0), references: items.length };
+    const items = await this.prisma.returnShelfItem.findMany({ select: { quantity: true, barcode: true, barcodePrintedAt: true } });
+    return {
+      units: items.reduce((s, i) => s + i.quantity, 0),
+      references: items.length,
+      pendingBarcodes: items.filter((item) => item.barcode && !item.barcodePrintedAt).length
+    };
+  }
+
+  async requestBarcodePrint() {
+    const pending = await this.prisma.returnShelfItem.findMany({
+      where: { barcode: { not: null }, barcodePrintedAt: null },
+      select: { id: true }
+    });
+    if (!pending.length) return { requested: 0 };
+    await this.prisma.returnShelfItem.updateMany({
+      where: { id: { in: pending.map((item) => item.id) } },
+      data: { barcodePrintRequestedAt: new Date() }
+    });
+    return { requested: pending.length };
+  }
+
+  barcodePrintQueue() {
+    return this.prisma.returnShelfItem.findMany({
+      where: {
+        barcode: { not: null },
+        barcodePrintRequestedAt: { not: null },
+        barcodePrintedAt: null
+      },
+      select: { id: true, productTitle: true, size: true, salePrice: true, sku: true, barcode: true },
+      orderBy: { barcodePrintRequestedAt: 'asc' },
+      take: 8
+    });
+  }
+
+  async markBarcodesPrinted(ids: string[]) {
+    const cleanIds = [...new Set((ids ?? []).filter(Boolean))];
+    if (!cleanIds.length) throw new BadRequestException('No hay etiquetas para marcar');
+    const result = await this.prisma.returnShelfItem.updateMany({
+      where: { id: { in: cleanIds }, barcodePrintRequestedAt: { not: null } },
+      data: { barcodePrintedAt: new Date() }
+    });
+    return { ok: true, printed: result.count };
   }
 
   /** Manual add: a printed garment on the returns shelf. */

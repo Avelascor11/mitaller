@@ -28,7 +28,7 @@
 		<true/>
 	</dict>
 	<key>NSCameraUsageDescription</key>
-	<string>Mitaller usa la camara para escanear codigos QR y codigos de barras de stock y pedidos.</string>
+	<string>Mitaller usa la camara para reconocer prendas y escanear codigos QR y codigos de barras de stock y pedidos.</string>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>Mitaller necesita conectar con la API local del taller en este Mac.</string>
 	<key>UIApplicationSceneManifest</key>

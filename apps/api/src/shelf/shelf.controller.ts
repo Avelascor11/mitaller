@@ -25,6 +25,21 @@ export class ShelfController {
     return this.shelf.fulfillable();
   }
 
+  @Get('barcode-print-queue')
+  barcodePrintQueue() {
+    return this.shelf.barcodePrintQueue();
+  }
+
+  @Post('barcodes/request-print')
+  requestBarcodePrint() {
+    return this.shelf.requestBarcodePrint();
+  }
+
+  @Post('barcodes/mark-printed')
+  markBarcodesPrinted(@Body() body: { ids?: string[] }) {
+    return this.shelf.markBarcodesPrinted(body.ids ?? []);
+  }
+
   @Post()
   add(@Body() body: any) {
     return this.shelf.addManual(body);
@@ -33,6 +48,18 @@ export class ShelfController {
   @Post('from-order-item')
   addFromOrderItem(@Body() body: { orderItemId: string; quantity?: number }) {
     return this.shelf.addFromOrderItem(body.orderItemId, body.quantity);
+  }
+
+  @Post('unique-product')
+  createUniqueProduct(@Body() body: {
+    sourceProductId: string;
+    size: string;
+    price: number;
+    compareAtPrice?: number | null;
+    condition?: string;
+    notes?: string;
+  }) {
+    return this.shelf.createUniqueListing(body);
   }
 
   @Patch(':id')

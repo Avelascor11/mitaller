@@ -218,6 +218,14 @@ struct APIClient {
         let request = try jsonRequest(path: "/shelf", method: "POST", body: body)
         return try await perform(request)
     }
+    func createUniqueShelfProduct(_ body: CreateShelfUniqueProductRequest) async throws -> ShelfUniqueProductResponse {
+        let request = try jsonRequest(path: "/shelf/unique-product", method: "POST", body: body)
+        return try await perform(request)
+    }
+    func requestShelfBarcodePrint() async throws -> ShelfBarcodePrintRequestResponse {
+        let request = try jsonRequest(path: "/shelf/barcodes/request-print", method: "POST", body: EmptyBody())
+        return try await perform(request)
+    }
     func adjustShelfItem(_ id: String, quantity: Int) async throws {
         let request = try jsonRequest(path: "/shelf/\(Self.pathSegment(id))", method: "PATCH", body: ShelfQtyRequest(quantity: quantity))
         let _: EmptyResponse = try await perform(request)
@@ -1446,6 +1454,10 @@ struct ShelfItem: Decodable, Identifiable {
     let size: String
     let imageUrl: String?
     let quantity: Int
+    let barcode: String?
+    let salePrice: Double?
+    let source: String?
+    let barcodePrintedAt: String?
 }
 struct CreateShelfItemRequest: Encodable {
     let productTitle: String
@@ -1461,11 +1473,17 @@ struct ShelfCatalogVariant: Decodable, Identifiable {
     let id: String
     let title: String
     let sku: String?
+    let price: Double?
+    let compareAtPrice: Double?
+    let available: Bool?
 }
 struct ShelfCatalogProduct: Decodable, Identifiable {
     let id: String
     let title: String
     let imageUrl: String?
+    let imageUrls: [String]?
+    let productType: String?
+    let status: String?
     let sizes: [String]
     let variants: [ShelfCatalogVariant]
     func variant(for size: String) -> ShelfCatalogVariant? {
@@ -1476,6 +1494,32 @@ struct ShelfCatalogProduct: Decodable, Identifiable {
         }
     }
 }
+struct CreateShelfUniqueProductRequest: Encodable {
+    let sourceProductId: String
+    let size: String
+    let price: Double
+    let compareAtPrice: Double?
+    let condition: String
+    let notes: String?
+}
+struct ShelfUniqueShopifyProduct: Decodable {
+    let productId: String
+    let variantId: String
+    let sourceTitle: String
+    let title: String
+    let handle: String
+    let sku: String
+    let barcode: String
+    let price: Double
+    let compareAtPrice: Double?
+    let imageUrl: String?
+    let adminUrl: String?
+}
+struct ShelfUniqueProductResponse: Decodable {
+    let shelfItem: ShelfItem
+    let shopify: ShelfUniqueShopifyProduct
+}
+struct ShelfBarcodePrintRequestResponse: Decodable { let requested: Int }
 private struct ShelfQtyRequest: Encodable { let quantity: Int }
 struct ShelfFulfillLine: Decodable, Identifiable {
     let orderItemId: String

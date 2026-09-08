@@ -1084,14 +1084,20 @@ model ReturnShelfItem {
   id               String   @id @default(cuid())
   productTitle     String
   shopifyProductId String?
+  sourceShopifyProductId String?
   shopifyVariantId String?
   sku              String?
+  barcode          String?  @unique
   color            String?
   size             String
   imageUrl         String?
+  salePrice        Float?
   quantity         Int      @default(1)
-  source           String   @default("MANUAL") // MANUAL | RETURN | SCAN
+  source           String   @default("MANUAL") // MANUAL | RETURN | SCAN | SHOPIFY_UNIQUE
   notes            String?
+  listedAt         DateTime?
+  barcodePrintRequestedAt DateTime?
+  barcodePrintedAt DateTime?
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt
 

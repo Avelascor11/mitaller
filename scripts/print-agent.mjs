@@ -25,6 +25,7 @@ const DTF_PRINT_ENABLED = String(process.env.DTF_PRINT_ENABLED ?? 'false').toLow
 const DTF_PRINTER_NAME = process.env.DTF_PRINTER_NAME ?? '';
 const DTF_HOT_FOLDER = process.env.DTF_HOT_FOLDER ?? '';
 const DTF_PRINT_SETTINGS = process.env.DTF_PRINT_SETTINGS ?? 'fit';
+const SHELF_BARCODE_PRINT_ENABLED = String(process.env.SHELF_BARCODE_PRINT_ENABLED ?? 'true').toLowerCase() === 'true';
 
 function headers(extra = {}) {
   return {
@@ -49,6 +50,23 @@ async function getDtfQueue() {
   if (!DTF_PRINT_ENABLED) return [];
   const response = await fetch(`${API_BASE_URL}/dtf-print/queue`, { headers: headers() });
   if (!response.ok) throw new Error(`dtf-print/queue HTTP ${response.status}: ${await response.text()}`);
+  return response.json();
+}
+
+async function getShelfBarcodeQueue() {
+  if (!SHELF_BARCODE_PRINT_ENABLED) return [];
+  const response = await fetch(`${API_BASE_URL}/shelf/barcode-print-queue`, { headers: headers() });
+  if (!response.ok) throw new Error(`shelf barcode queue HTTP ${response.status}: ${await response.text()}`);
+  return response.json();
+}
+
+async function markShelfBarcodesPrinted(ids) {
+  const response = await fetch(`${API_BASE_URL}/shelf/barcodes/mark-printed`, {
+    method: 'POST',
+    headers: headers({ 'Content-Type': 'application/json' }),
+    body: JSON.stringify({ ids })
+  });
+  if (!response.ok) throw new Error(`shelf barcodes mark-printed HTTP ${response.status}: ${await response.text()}`);
   return response.json();
 }
 
@@ -283,6 +301,71 @@ function buildPackingLetterPdf(shipment, logoImage = null, templateImage = null)
   drawCenteredText(page, 'GRACIAS POR APOYAR UNA MARCA PEQUEÑA.', width / 2, 34, 8.6, 'F2', [0.85, 0.85, 0.85]);
 
   return writePdfDocument(page);
+}
+
+async function createShelfBarcodeSheet(items) {
+  const dir = join(tmpdir(), 'mitaller-print-agent');
+  await mkdir(dir, { recursive: true });
+  const file = join(dir, `speedwear-codigos-${Date.now()}.pdf`);
+  await writeFile(file, buildShelfBarcodeSheet(items));
+  return file;
+}
+
+function buildShelfBarcodeSheet(items) {
+  const width = 283.46;
+  const height = 425.20;
+  const margin = 6;
+  const columns = 2;
+  const rows = 4;
+  const cellWidth = (width - margin * 2) / columns;
+  const cellHeight = (height - margin * 2) / rows;
+  const page = {
+    width,
+    height,
+    stream: [],
+    images: [],
+    fonts: [['/F1', 'Helvetica'], ['/F2', 'Helvetica-Bold']]
+  };
+  drawRect(page, 0, 0, width, height, [1, 1, 1]);
+
+  items.slice(0, 8).forEach((item, index) => {
+    const column = index % columns;
+    const row = Math.floor(index / columns);
+    const x = margin + column * cellWidth;
+    const y = height - margin - (row + 1) * cellHeight;
+    drawRect(page, x, y, cellWidth, cellHeight, null, [0.68, 0.68, 0.68], 0.35);
+    const title = String(item.productTitle || 'PIEZA SPEEDWEAR').toUpperCase();
+    const titleLines = wrapText(title, cellWidth - 12, 7.2).slice(0, 2);
+    titleLines.forEach((line, lineIndex) => drawText(page, line, x + 6, y + cellHeight - 12 - lineIndex * 8.5, 7.2, 'F2'));
+    const price = Number.isFinite(Number(item.salePrice)) ? ` · ${Number(item.salePrice).toFixed(2)} EUR` : '';
+    drawText(page, `TALLA ${item.size || '-'}${price}`, x + 6, y + cellHeight - 32, 7, 'F2');
+    drawEan13(page, String(item.barcode || ''), x + 7, y + 20, cellWidth - 14, 34);
+    drawCenteredText(page, String(item.barcode || ''), x + cellWidth / 2, y + 10, 6.8, 'F2');
+  });
+  return writePdfDocument(page);
+}
+
+function drawEan13(page, value, x, y, width, height) {
+  const bits = ean13Bits(value);
+  if (!bits) return;
+  const quietModules = 9;
+  const moduleWidth = width / (bits.length + quietModules * 2);
+  const startX = x + quietModules * moduleWidth;
+  for (let index = 0; index < bits.length; index += 1) {
+    if (bits[index] === '1') drawRect(page, startX + index * moduleWidth, y, Math.max(moduleWidth, 0.7), height, [0, 0, 0]);
+  }
+}
+
+function ean13Bits(value) {
+  if (!/^\d{13}$/.test(value)) return null;
+  const l = ['0001101','0011001','0010011','0111101','0100011','0110001','0101111','0111011','0110111','0001011'];
+  const g = ['0100111','0110011','0011011','0100001','0011101','0111001','0000101','0010001','0001001','0010111'];
+  const r = ['1110010','1100110','1101100','1000010','1011100','1001110','1010000','1000100','1001000','1110100'];
+  const parity = ['LLLLLL','LLGLGG','LLGGLG','LLGGGL','LGLLGG','LGGLLG','LGGGLL','LGLGLG','LGLGGL','LGGLGL'];
+  const digits = value.split('').map(Number);
+  const left = digits.slice(1, 7).map((digit, index) => parity[digits[0]][index] === 'L' ? l[digit] : g[digit]).join('');
+  const right = digits.slice(7).map((digit) => r[digit]).join('');
+  return `101${left}01010${right}101`;
 }
 
 function firstCustomerName(name) {
@@ -788,8 +871,17 @@ async function processDtf(job) {
   await beep();
 }
 
+async function processShelfBarcodes(items) {
+  console.log(`Printing shelf barcode sheet (${items.length} labels)`);
+  const file = await createShelfBarcodeSheet(items);
+  const printResult = await printFile(file, `shelf-barcodes-${items.length}`);
+  await markShelfBarcodesPrinted(items.map((item) => item.id));
+  console.log(`Printed shelf barcode sheet (${items.length} labels)`, printResult.dryRun ? '(dry-run)' : '');
+  await beep();
+}
+
 async function pollOnce() {
-  const [queue, manualQueue, dtfQueue] = await Promise.all([
+  const [queue, manualQueue, dtfQueue, shelfBarcodeQueue] = await Promise.all([
     getPrintQueue().catch((error) => {
       console.error('print-queue error:', error instanceof Error ? error.message : error);
       return [];
@@ -801,9 +893,13 @@ async function pollOnce() {
     getDtfQueue().catch((error) => {
       console.error('dtf-print/queue error:', error instanceof Error ? error.message : error);
       return [];
+    }),
+    getShelfBarcodeQueue().catch((error) => {
+      console.error('shelf barcode queue error:', error instanceof Error ? error.message : error);
+      return [];
     })
   ]);
-  if (!queue.length && !manualQueue.length && !dtfQueue.length) {
+  if (!queue.length && !manualQueue.length && !dtfQueue.length && !shelfBarcodeQueue.length) {
     console.log(`No pending labels. Next check in ${POLL_SECONDS}s.`);
     return;
   }
@@ -832,9 +928,16 @@ async function pollOnce() {
       });
     }
   }
+  if (shelfBarcodeQueue.length) {
+    try {
+      await processShelfBarcodes(shelfBarcodeQueue);
+    } catch (error) {
+      console.error('Could not print shelf barcode sheet:', error instanceof Error ? error.message : error);
+    }
+  }
 }
 
-console.log(`Mitaller print agent started. API=${API_BASE_URL} printer=${PRINTER_NAME} dryRun=${DRY_RUN} dtf=${DTF_PRINT_ENABLED ? 'on' : 'off'}`);
+console.log(`Mitaller print agent started. API=${API_BASE_URL} printer=${PRINTER_NAME} dryRun=${DRY_RUN} dtf=${DTF_PRINT_ENABLED ? 'on' : 'off'} shelfBarcodes=${SHELF_BARCODE_PRINT_ENABLED ? 'on' : 'off'}`);
 
 while (true) {
   try {

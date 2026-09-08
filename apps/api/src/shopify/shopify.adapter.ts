@@ -158,7 +158,7 @@ export class ShopifyAdapter {
             title
             productType
             handle
-            featuredImage { url }
+            featuredMedia { ... on MediaImage { image { url } } }
             options { name values }
             variants(first: 50) { nodes { id title sku availableForSale } }
           }
@@ -193,6 +193,276 @@ export class ShopifyAdapter {
         variants
       };
     });
+  }
+
+  /** Full garment catalog used by the shelf camera, including old and draft designs. */
+  async shelfRecognitionCatalog() {
+    this.assertConfigured();
+    const data = await this.graphql<any>(`
+      query ShelfRecognitionCatalog($first: Int!) {
+        products(first: $first, sortKey: TITLE) {
+          nodes {
+            id
+            title
+            productType
+            handle
+            status
+            featuredImage { url }
+            media(first: 4) {
+              nodes {
+                ... on MediaImage { image { url } }
+              }
+            }
+            options { name values }
+            variants(first: 50) {
+              nodes { id title sku price compareAtPrice availableForSale }
+            }
+          }
+        }
+      }
+    `, { first: 250 });
+
+    return (data.products?.nodes ?? [])
+      .filter((product: any) => {
+        const text = `${product.productType ?? ''} ${product.title ?? ''}`.toLowerCase();
+        return /camiseta|sudadera|parka|bañador|polo|tshirt|hoodie/.test(text);
+      })
+      .map((product: any) => {
+        const sizeOption = (product.options ?? []).find((option: any) => /talla|size|tama/i.test(option.name));
+        const variants = (product.variants?.nodes ?? []).map((variant: any) => ({
+          id: variant.id,
+          title: variant.title,
+          sku: variant.sku,
+          price: Number(variant.price ?? 0),
+          compareAtPrice: variant.compareAtPrice == null ? null : Number(variant.compareAtPrice),
+          available: Boolean(variant.availableForSale)
+        }));
+        const imageUrls = [
+          product.featuredMedia?.image?.url,
+          ...(product.media?.nodes ?? []).map((media: any) => media.image?.url)
+        ].filter((url: unknown, index: number, all: unknown[]) => typeof url === 'string' && all.indexOf(url) === index);
+        let sizes: string[] = sizeOption?.values ?? [];
+        if (!sizes.length) {
+          const known = ['XS', 'S', 'M', 'L', 'XL', 'XXL', '2XL', '3XL'];
+          sizes = [...new Set(variants.flatMap((variant: any) => `${variant.title}`
+            .split(/[\/|,-]/)
+            .map((part: string) => part.trim().toUpperCase())
+            .filter((part: string) => known.includes(part))
+            .map((part: string) => part === '2XL' ? 'XXL' : part)))] as string[];
+        }
+        return {
+          id: product.id,
+          title: product.title,
+          productType: product.productType,
+          handle: product.handle,
+          status: product.status,
+          imageUrl: imageUrls[0] ?? null,
+          imageUrls,
+          sizes,
+          variants
+        };
+      });
+  }
+
+  /** Creates one sellable archive garment. Every call creates one product with stock one. */
+  async createUniqueShelfProduct(input: ShopifyUniqueShelfProductInput): Promise<ShopifyUniqueShelfProductResult> {
+    this.assertConfigured();
+    const outletCollectionId = await this.outletCollectionId();
+    const sourceData = await this.graphql<any>(`
+      query ShelfSourceProduct($id: ID!) {
+        product(id: $id) {
+          id
+          title
+          productType
+          vendor
+          featuredMedia { ... on MediaImage { image { url } } }
+          media(first: 4) {
+            nodes { ... on MediaImage { image { url } } }
+          }
+          variants(first: 50) {
+            nodes { id title price compareAtPrice selectedOptions { name value } }
+          }
+        }
+      }
+    `, { id: input.sourceProductId });
+    const source = sourceData.product;
+    if (!source) throw new BadRequestException('El producto original ya no existe en Shopify.');
+
+    const size = input.size.trim().toUpperCase().replace('2XL', 'XXL');
+    const sourceVariant = (source.variants?.nodes ?? []).find((variant: any) => {
+      const option = variant.selectedOptions?.find((entry: any) => /talla|size|tama/i.test(entry.name));
+      return `${option?.value ?? variant.title ?? ''}`.toUpperCase().split(/[\/|,-]/).map((part: string) => part.trim()).includes(size);
+    }) ?? source.variants?.nodes?.[0];
+    const sourcePrice = Number(sourceVariant?.price ?? 0);
+    const compareAtPrice = Number(input.compareAtPrice ?? sourcePrice);
+    const uniqueTitle = `ARCHIVO | ${source.title} | ${size} | ${input.barcode.slice(-6)}`;
+    const mediaUrl = source.featuredMedia?.image?.url
+      ?? source.media?.nodes?.map((media: any) => media.image?.url).find(Boolean)
+      ?? null;
+    const descriptionHtml = [
+      '<p><strong>Pieza única del archivo de Speedwear.</strong></p>',
+      `<p>Modelo: ${this.escapeHtml(source.title)}<br>Talla: ${this.escapeHtml(size)}<br>Estado: ${this.escapeHtml(input.condition || 'Archivo')}</p>`,
+      '<p>Stock exclusivo de una unidad. La fotografía principal corresponde al diseño original.</p>',
+      input.notes ? `<p>${this.escapeHtml(input.notes)}</p>` : ''
+    ].join('');
+
+    const createData = await this.graphql<any>(`
+      mutation CreateShelfUniqueProduct($product: ProductCreateInput!, $media: [CreateMediaInput!]) {
+        productCreate(product: $product, media: $media) {
+          product {
+            id
+            title
+            handle
+            variants(first: 1) { nodes { id inventoryItem { id } } }
+          }
+          userErrors { field message }
+        }
+      }
+    `, {
+      product: {
+        title: uniqueTitle,
+        descriptionHtml,
+        productType: source.productType || 'Camiseta',
+        vendor: source.vendor || 'SpeedWear',
+        status: 'DRAFT',
+        tags: ['ARCHIVO', 'PIEZA_UNICA', 'ESTANTERIA'],
+        productOptions: [{ name: 'Talla', values: [{ name: size }] }]
+      },
+      media: mediaUrl ? [{ originalSource: mediaUrl, mediaContentType: 'IMAGE', alt: `${source.title} - ${size}` }] : []
+    });
+    const createErrors = createData.productCreate?.userErrors ?? [];
+    if (createErrors.length) throw new BadGatewayException(`Shopify productCreate: ${createErrors.map((error: any) => error.message).join('; ')}`);
+
+    const product = createData.productCreate?.product;
+    const variant = product?.variants?.nodes?.[0];
+    if (!product?.id || !variant?.id) throw new BadGatewayException('Shopify no devolvió el producto o su variante.');
+
+    const variantData = await this.graphql<any>(`
+      mutation ConfigureShelfUniqueVariant($productId: ID!, $variants: [ProductVariantsBulkInput!]!) {
+        productVariantsBulkUpdate(productId: $productId, variants: $variants) {
+          productVariants { id sku barcode price inventoryItem { id tracked } }
+          userErrors { field message }
+        }
+      }
+    `, {
+      productId: product.id,
+      variants: [{
+        id: variant.id,
+        price: input.price.toFixed(2),
+        ...(compareAtPrice > input.price ? { compareAtPrice: compareAtPrice.toFixed(2) } : {}),
+        barcode: input.barcode,
+        inventoryPolicy: 'DENY',
+        inventoryItem: { sku: input.sku, tracked: true, requiresShipping: true }
+      }]
+    });
+    const variantErrors = variantData.productVariantsBulkUpdate?.userErrors ?? [];
+    if (variantErrors.length) throw new BadGatewayException(`Shopify productVariantsBulkUpdate: ${variantErrors.map((error: any) => error.message).join('; ')}`);
+    const configuredVariant = variantData.productVariantsBulkUpdate?.productVariants?.[0];
+    const inventoryItemId = configuredVariant?.inventoryItem?.id ?? variant.inventoryItem?.id;
+    if (!inventoryItemId) throw new BadGatewayException('Shopify no devolvió el inventario de la pieza.');
+
+    const locationId = this.config.get<string>('SHOPIFY_LOCATION_ID') || await this.firstShopifyLocationId();
+    const idempotencyKey = `shelf-${input.barcode}`;
+    const inventoryData = await this.graphql<any>(`
+      mutation ActivateShelfUniqueInventory($inventoryItemId: ID!, $locationId: ID!, $idempotencyKey: String!) {
+        inventoryActivate(inventoryItemId: $inventoryItemId, locationId: $locationId, available: 1)
+          @idempotent(key: $idempotencyKey) {
+          inventoryLevel { id }
+          userErrors { field message }
+        }
+      }
+    `, { inventoryItemId, locationId, idempotencyKey });
+    const inventoryErrors = inventoryData.inventoryActivate?.userErrors ?? [];
+    if (inventoryErrors.length) {
+      // A newly-created inventory item can already be active at the primary location.
+      // Setting the absolute quantity is the reliable fallback in that case.
+      const setData = await this.graphql<any>(`
+        mutation SetShelfUniqueInventory($input: InventorySetQuantitiesInput!) {
+          inventorySetQuantities(input: $input) {
+            inventoryAdjustmentGroup { createdAt reason changes { name delta } }
+            userErrors { field message }
+          }
+        }
+      `, {
+        input: {
+          name: 'available',
+          reason: 'correction',
+          ignoreCompareQuantity: true,
+          referenceDocumentUri: `mitaller://shelf/${input.barcode}`,
+          quantities: [{ inventoryItemId, locationId, quantity: 1 }]
+        }
+      });
+      const setErrors = setData.inventorySetQuantities?.userErrors ?? [];
+      if (setErrors.length) throw new BadGatewayException(`Shopify inventorySetQuantities: ${setErrors.map((error: any) => error.message).join('; ')}`);
+    }
+
+    const collectionData = await this.graphql<any>(`
+      mutation AddShelfProductToOutlet($id: ID!, $productIds: [ID!]!) {
+        collectionAddProducts(id: $id, productIds: $productIds) {
+          collection { id title }
+          userErrors { field message }
+        }
+      }
+    `, { id: outletCollectionId, productIds: [product.id] });
+    const collectionErrors = collectionData.collectionAddProducts?.userErrors ?? [];
+    if (collectionErrors.length) throw new BadGatewayException(`Shopify collectionAddProducts: ${collectionErrors.map((error: any) => error.message).join('; ')}`);
+
+    const activateData = await this.graphql<any>(`
+      mutation ActivateShelfUniqueProduct($product: ProductUpdateInput!) {
+        productUpdate(product: $product) {
+          product { id status }
+          userErrors { field message }
+        }
+      }
+    `, { product: { id: product.id, status: 'ACTIVE' } });
+    const activateErrors = activateData.productUpdate?.userErrors ?? [];
+    if (activateErrors.length) throw new BadGatewayException(`Shopify productUpdate: ${activateErrors.map((error: any) => error.message).join('; ')}`);
+
+    const numericId = product.id.split('/').pop();
+    return {
+      productId: product.id,
+      variantId: configuredVariant?.id ?? variant.id,
+      sourceTitle: source.title,
+      title: product.title,
+      handle: product.handle,
+      sku: input.sku,
+      barcode: input.barcode,
+      price: input.price,
+      compareAtPrice: compareAtPrice > input.price ? compareAtPrice : null,
+      imageUrl: mediaUrl,
+      adminUrl: numericId ? `https://${this.shopDomain}/admin/products/${numericId}` : null
+    };
+  }
+
+  private async outletCollectionId(): Promise<string> {
+    const data = await this.graphql<any>(`
+      query ShelfOutletCollection {
+        collections(first: 100, query: "title:OUTLET") {
+          nodes { id title ruleSet { appliedDisjunctively } }
+        }
+      }
+    `, {});
+    const collection = (data.collections?.nodes ?? []).find((entry: any) => `${entry.title}`.trim().toUpperCase() === 'OUTLET');
+    if (!collection?.id) throw new BadRequestException('No encuentro la colección OUTLET en Shopify.');
+    if (collection.ruleSet) throw new BadRequestException('La colección OUTLET debe ser manual para añadir piezas únicas.');
+    return collection.id;
+  }
+
+  private async firstShopifyLocationId(): Promise<string> {
+    const data = await this.graphql<any>(`
+      query ShelfInventoryLocations {
+        locations(first: 20) { nodes { id name isActive } }
+      }
+    `, {});
+    const location = (data.locations?.nodes ?? []).find((entry: any) => entry.isActive) ?? data.locations?.nodes?.[0];
+    if (!location?.id) throw new BadRequestException('Shopify no tiene una ubicación activa para asignar stock.');
+    return location.id;
+  }
+
+  private escapeHtml(value: string) {
+    return value.replace(/[&<>"']/g, (character) => ({
+      '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+    })[character] ?? character);
   }
 
   async importProducts() {
@@ -966,6 +1236,31 @@ export interface ShopifyCatalogProduct {
     size: string | null;
     color: string | null;
   }>;
+}
+
+export interface ShopifyUniqueShelfProductInput {
+  sourceProductId: string;
+  size: string;
+  price: number;
+  compareAtPrice?: number | null;
+  condition?: string;
+  notes?: string | null;
+  sku: string;
+  barcode: string;
+}
+
+export interface ShopifyUniqueShelfProductResult {
+  productId: string;
+  variantId: string;
+  sourceTitle: string;
+  title: string;
+  handle: string;
+  sku: string;
+  barcode: string;
+  price: number;
+  compareAtPrice: number | null;
+  imageUrl: string | null;
+  adminUrl: string | null;
 }
 
 interface ShopifyCatalogProductRaw {
