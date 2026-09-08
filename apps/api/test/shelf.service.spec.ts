@@ -5,7 +5,7 @@ describe('ShelfService unique Shopify products', () => {
   it('creates an individual listing with a valid barcode and stock record', async () => {
     const prisma = {
       returnShelfItem: {
-        findUnique: vi.fn().mockResolvedValue(null),
+        findFirst: vi.fn().mockResolvedValue(null),
         create: vi.fn().mockImplementation(({ data }) => Promise.resolve({ id: 'shelf-1', ...data }))
       }
     };

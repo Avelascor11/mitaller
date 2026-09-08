@@ -1087,7 +1087,7 @@ model ReturnShelfItem {
   sourceShopifyProductId String?
   shopifyVariantId String?
   sku              String?
-  barcode          String?  @unique
+  barcode          String?
   color            String?
   size             String
   imageUrl         String?
@@ -1103,6 +1103,7 @@ model ReturnShelfItem {
 
   @@index([shopifyVariantId])
   @@index([shopifyProductId, size])
+  @@index([barcode])
 }
 
 model AutopilotConfig {

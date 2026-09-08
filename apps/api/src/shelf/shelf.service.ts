@@ -88,7 +88,7 @@ export class ShelfService {
       const body = `29${time}${random}`;
       const weighted = body.split('').reduce((sum, digit, index) => sum + Number(digit) * (index % 2 === 0 ? 1 : 3), 0);
       const barcode = `${body}${(10 - weighted % 10) % 10}`;
-      const existing = await this.prisma.returnShelfItem.findUnique({ where: { barcode } });
+      const existing = await this.prisma.returnShelfItem.findFirst({ where: { barcode } });
       if (!existing) return barcode;
     }
     throw new BadRequestException('No se pudo generar un código único. Inténtalo de nuevo.');
