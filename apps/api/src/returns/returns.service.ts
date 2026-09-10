@@ -186,10 +186,15 @@ export class ReturnsService {
     if (deliveredAt && deliveredAt.getTime() > Date.now()) {
       deliveredAt = null;
     }
+    const orderedAt = validDateOrNull(order.orderedAt);
+    if (deliveredAt && orderedAt && deliveredAt.getTime() < orderedAt.getTime()) {
+      console.warn(`[ReturnsService] Ignoring invalid delivery date for ${order.orderNumber}: ${deliveredAt.toISOString()} before orderedAt ${orderedAt.toISOString()}`);
+      deliveredAt = null;
+    }
     // fallback: use preparedAt or orderedAt
     const referenceDate = deliveredAt
       ?? validDateOrNull(order.preparedAt)
-      ?? validDateOrNull(order.orderedAt)
+      ?? orderedAt
       ?? new Date();
     const daysSince = (Date.now() - referenceDate.getTime()) / (1000 * 60 * 60 * 24);
     const effectiveWindow = config.windowDays + exceptions.extendDays;
