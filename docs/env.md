@@ -130,7 +130,31 @@ IA Speedwear lee contexto operativo de pedidos, compras, stock, envíos, caja, i
 
 ## Klaviyo
 
-- `KLAVIYO_API_KEY`: clave privada de Klaviyo para enviar eventos de devoluciones. No subir a GitHub. Si no está configurada, la API ignora esos eventos y no bloquea el flujo.
+- `KLAVIYO_API_KEY`: clave privada de Klaviyo para enviar eventos de devoluciones. No subir a GitHub. Si no está configurada, la API ignora esos eventos y no bloquea el flujo. Speedwear Mail también la usa para importar perfiles (botón «Importar de Klaviyo»).
+
+## Speedwear Mail (email marketing propio)
+
+Portal en `/marketing` del admin web (solo usuarios `ADMIN`): contactos, segmentos, plantillas, campañas, automatizaciones, formularios y estadísticas con ingresos atribuidos. Los envíos salen por SMTP (pensado para Amazon SES, ~0,10 USD por cada 1.000 emails) desde una cola en Postgres que procesa la API cada 30 segundos.
+
+- `MARKETING_SMTP_HOST`, `MARKETING_SMTP_PORT` (por defecto `587`; `465` usa TLS directo), `MARKETING_SMTP_USER`, `MARKETING_SMTP_PASSWORD`: credenciales SMTP. Con SES son las credenciales SMTP de IAM, no las claves de acceso.
+- `MARKETING_FROM_EMAIL`, `MARKETING_FROM_NAME`: remitente. El dominio debe tener SPF, DKIM y DMARC configurados en el proveedor.
+- `MARKETING_POSTAL_ADDRESS`: dirección postal del pie de los emails (obligatoria por ley).
+- `MARKETING_PUBLIC_API_URL`: URL pública `https` de la API, sin `/` final. Se usa en enlaces de baja, confirmación, tracking y formularios.
+- `MARKETING_SEND_ENABLED`: `true` para permitir envíos. Sin esto no se lanzan campañas, no se activan automatizaciones ni formularios y la cola no envía.
+- `MARKETING_EVENT_SECRET`: secreto de al menos 32 caracteres para `POST /marketing/integrations/events` y `/feedback` (cabecera `x-marketing-secret`) y para la URL de SES.
+- `MARKETING_CAPTURE_EVENTS`: `true` para copiar a Speedwear Mail los eventos que Mitaller ya manda a Klaviyo (devoluciones, reembolsos, Crew…). Si Klaviyo y Speedwear Mail tienen la misma automatización activa a la vez, el cliente recibe dos emails.
+- `MARKETING_SITE_DOMAINS`: dominios de la tienda separados por comas (por defecto `speedwear.es`). Los clics hacia ellos añaden `?swm=` para identificar al visitante en la navegación abandonada.
+- `MARKETING_ATTRIBUTION_DAYS`: días tras un clic (o apertura) en los que un pedido se atribuye a ese email. Por defecto `5`, como Klaviyo.
+- `MARKETING_BATCH_SIZE`: emails por ciclo de 30 s. Por defecto `100` (~12.000/hora). Ajustar al límite de envío del proveedor.
+
+Integraciones:
+
+- Shopify → Configuración → Notificaciones → Webhooks, formato JSON, URL `https://<api>/marketing/integrations/shopify` para: creación y actualización de pantalla de pago, creación de pedido, preparación de pedido, creación y actualización de cliente. Se firman con `SHOPIFY_WEBHOOK_SECRET` (obligatorio aquí). Generan los eventos `Started Checkout`, `Placed Order`, `Fulfilled Order` y sincronizan el consentimiento de marketing de Shopify. Un alta nueva genera `Subscribed` (dispara la bienvenida).
+- Amazon SES → configuration set → destino SNS → suscripción HTTPS a `https://<api>/marketing/integrations/ses/<MARKETING_EVENT_SECRET>`. La API confirma la suscripción sola. Rebotes permanentes y quejas suprimen el contacto para siempre.
+- Navegación abandonada: pegar en `theme.liquid` el fragmento que muestra la pestaña Ajustes (define `window.SWM_PRODUCT` en fichas de producto y carga `/marketing/public/onsite.js`). Solo identifica a quien llegó desde un clic en un email.
+
+Migración desde Klaviyo: configurar SES y variables, desplegar, pulsar «Importar de Klaviyo» (copia consentimiento y supresiones sin enviar nada ni disparar bienvenidas), recrear plantillas y automatizaciones en borrador, enviar pruebas, y activar cada automatización a la vez que se apaga la equivalente en Klaviyo.
+
 - `ECONOMICS_PAYOUT_LIMIT`: numero maximo de pagos Shopify recientes que se muestran en Economia. Por defecto `8`.
 
 Estos importes salen de la factura Sendcloud `1-26-ES0024751` del 06-05-2026, sumando tarifa base y recargo de combustible aproximado. Si Sendcloud devuelve coste real al crear la etiqueta, la app usa el coste real; si no, usa esta tabla para que un pedido con envio gratis para el cliente siga teniendo coste de transporte en el margen.

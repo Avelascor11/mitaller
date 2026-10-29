@@ -9,6 +9,7 @@ import { DtfPrintModule } from './dtf-print/dtf-print.module';
 import { EmployeesModule } from './employees/employees.module';
 import { EconomicsModule } from './economics/economics.module';
 import { ManualPrintModule } from './manual-print/manual-print.module';
+import { MarketingModule } from './marketing/marketing.module';
 import { MetaModule } from './meta/meta.module';
 import { CarrierReturnsModule } from './carrier-returns/carrier-returns.module';
 import { ShelfModule } from './shelf/shelf.module';
@@ -56,7 +57,8 @@ import { SupplierModule } from './supplier/supplier.module';
     CarrierReturnsModule,
     ShelfModule,
     PortalConfigModule,
-    SpeedwearAiModule
+    SpeedwearAiModule,
+    MarketingModule
   ],
   controllers: [AppController]
 })

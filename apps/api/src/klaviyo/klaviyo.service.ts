@@ -1,18 +1,21 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Optional } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { MarketingService } from '../marketing/marketing.service';
 
 @Injectable()
 export class KlaviyoService {
   private readonly logger = new Logger(KlaviyoService.name);
   private readonly baseUrl = 'https://a.klaviyo.com/api';
 
-  constructor(private readonly config: ConfigService) {}
+  constructor(private readonly config: ConfigService, @Optional() private readonly marketing?: MarketingService) {}
 
   private get apiKey(): string {
     return this.config.get<string>('KLAVIYO_API_KEY') ?? '';
   }
 
   private async track(metricName: string, email: string, properties: Record<string, unknown>) {
+    // Speedwear Mail receives the same events so its flows can replace the Klaviyo ones.
+    await this.marketing?.captureInternal(metricName, email, properties);
     const key = this.apiKey;
     if (!key) {
       this.logger.warn(`KLAVIYO_API_KEY not set — skipping event "${metricName}"`);

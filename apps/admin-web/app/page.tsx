@@ -7,6 +7,8 @@ import {
   Clock,
   Factory,
   Lock,
+  Mail,
+  Megaphone,
   PackageCheck,
   RotateCcw,
   Search,
@@ -92,6 +94,8 @@ const sections: ReadonlyArray<readonly [string, IconType, string?]> = [
   ['Falk & Ross', Wand2],
   ['Recetas/BOM', ClipboardList],
   ['Sendcloud', Truck],
+  ['Email marketing', Mail, '/marketing'],
+  ['Campañas', Megaphone, '/campanas'],
   ['Devoluciones', RotateCcw, '/admin/devoluciones'],
   ['Configuración', Settings]
 ];

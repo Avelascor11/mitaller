@@ -1124,3 +1124,134 @@ model PortalConfig {
   policyUrl      String?
   updatedAt      DateTime @updatedAt
 }
+
+// Speedwear Mail: independently stored audiences, content and durable delivery queue.
+model MarketingContact {
+  id               String   @id @default(cuid())
+  email            String   @unique
+  firstName        String   @default("")
+  lastName         String   @default("")
+  country          String   @default("")
+  tags             String[] @default([])
+  status           String   @default("PENDING")
+  consentAt        DateTime?
+  consentSource    String?
+  unsubscribeToken String   @unique @default(uuid())
+  confirmToken     String?  @unique
+  confirmExpiresAt DateTime?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+  messages         MarketingMessage[]
+  events           MarketingEvent[]
+  @@index([status, createdAt])
+}
+
+model MarketingSegment {
+  id        String   @id @default(cuid())
+  name      String
+  rules     Json
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model MarketingTemplate {
+  id        String   @id @default(cuid())
+  name      String
+  subject   String
+  preheader String   @default("")
+  blocks    Json
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model MarketingCampaign {
+  id          String   @id @default(cuid())
+  name        String
+  subject     String
+  preheader   String   @default("")
+  blocks      Json
+  segmentId   String?
+  status      String   @default("DRAFT")
+  scheduledAt DateTime?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  messages    MarketingMessage[]
+  @@index([status, scheduledAt])
+}
+
+model MarketingFlow {
+  id          String   @id @default(cuid())
+  name        String
+  trigger     String
+  stopOnEvent String?
+  // Transactional flows (returns, refunds…) also reach contacts without marketing consent.
+  transactional Boolean @default(false)
+  reentryDays Int      @default(0)
+  status      String   @default("DRAFT")
+  steps       Json
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  messages    MarketingMessage[]
+  @@index([trigger, status])
+}
+
+model MarketingEvent {
+  id         String   @id @default(cuid())
+  externalId String   @unique
+  contactId  String
+  name       String
+  properties Json
+  value      Float?
+  // Last email clicked/opened within the attribution window when the event arrived.
+  messageId  String?
+  createdAt  DateTime @default(now())
+  contact    MarketingContact @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  message    MarketingMessage? @relation(fields: [messageId], references: [id], onDelete: SetNull)
+  @@index([contactId, name, createdAt])
+  @@index([name, createdAt])
+  @@index([messageId])
+}
+
+model MarketingMessage {
+  id                String   @id @default(cuid())
+  dedupeKey         String   @unique
+  trackingToken     String   @unique @default(uuid())
+  contactId         String
+  campaignId        String?
+  flowId            String?
+  payload           Json
+  kind              String   @default("MARKETING")
+  status            String   @default("QUEUED")
+  dueAt             DateTime @default(now())
+  claimedAt         DateTime?
+  sentAt            DateTime?
+  openedAt          DateTime?
+  clickedAt         DateTime?
+  unsubscribedAt    DateTime?
+  deliveredAt       DateTime?
+  providerMessageId String?  @unique
+  error             String?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+  contact           MarketingContact @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  campaign          MarketingCampaign? @relation(fields: [campaignId], references: [id], onDelete: Restrict)
+  flow              MarketingFlow? @relation(fields: [flowId], references: [id], onDelete: Restrict)
+  attributedEvents  MarketingEvent[]
+  @@index([status, dueAt])
+  @@index([contactId, clickedAt])
+  @@index([contactId, openedAt])
+  @@index([campaignId, status])
+  @@index([flowId, status])
+}
+
+model MarketingForm {
+  id          String   @id @default(cuid())
+  name        String
+  headline    String
+  description String
+  buttonText  String   @default("Quiero estar dentro")
+  tag         String   @default("newsletter")
+  active      Boolean  @default(false)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
