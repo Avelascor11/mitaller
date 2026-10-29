@@ -3,6 +3,7 @@ import type { NextRequest } from 'next/server';
 
 const CUSTOMER_DOMAIN = 'devoluciones.speedwear.es';
 const CREW_DOMAIN = 'crew.speedwear.es';
+const MARKETING_DOMAIN = 'marketing.speedwear.es';
 
 // Routes that don't require auth
 const PUBLIC_PATHS = ['/login', '/devoluciones', '/crew'];
@@ -16,6 +17,14 @@ export function middleware(request: NextRequest) {
     if (pathname === '/crew') return NextResponse.next();
     const url = request.nextUrl.clone();
     url.pathname = '/crew';
+    return NextResponse.redirect(url);
+  }
+
+  // ── Email marketing domain: only the marketing portal and its login ──
+  if (host === MARKETING_DOMAIN && !['/marketing', '/login', '/icon.svg'].includes(pathname)) {
+    const url = request.nextUrl.clone();
+    url.pathname = '/marketing';
+    url.search = '';
     return NextResponse.redirect(url);
   }
 
@@ -50,7 +59,7 @@ export function middleware(request: NextRequest) {
     const token = request.cookies.get('admin-token')?.value;
     if (token) {
       const adminUrl = request.nextUrl.clone();
-      adminUrl.pathname = '/admin/devoluciones';
+      adminUrl.pathname = host === MARKETING_DOMAIN ? '/marketing' : '/admin/devoluciones';
       return NextResponse.redirect(adminUrl);
     }
   }

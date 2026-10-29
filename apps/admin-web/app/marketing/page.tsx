@@ -78,7 +78,10 @@ type Notify = ReturnType<typeof useToast>;
 
 export default function MarketingPage() {
   const [tab, setTab] = useState<Tab>('resumen');
+  const [standalone, setStandalone] = useState(false);
   const notify = useToast();
+  // On marketing.speedwear.es only this portal is served, so links to the rest of Mitaller would loop back here.
+  useEffect(() => { setStandalone(window.location.hostname.startsWith('marketing.')); }, []);
   useEffect(() => {
     const read = () => { const t = window.location.hash.slice(1) as Tab; if (TABS.some(([k]) => k === t)) setTab(t); };
     read(); window.addEventListener('hashchange', read); return () => window.removeEventListener('hashchange', read);
@@ -90,9 +93,11 @@ export default function MarketingPage() {
         <nav>
           <div className="navLabel">Email marketing</div>
           {TABS.map(([key, label, Icon]) => <a key={key} href={`#${key}`} className={tab === key ? 'active' : ''}><Icon size={17} /><span>{label}</span></a>)}
-          <div className="navLabel">Mitaller</div>
-          <a href="/"><ClipboardCheck size={17} /><span>Dashboard</span></a>
-          <a href="/campanas"><Megaphone size={17} /><span>Rebajas y Shopify</span></a>
+          {!standalone && <>
+            <div className="navLabel">Mitaller</div>
+            <a href="/"><ClipboardCheck size={17} /><span>Dashboard</span></a>
+            <a href="/campanas"><Megaphone size={17} /><span>Rebajas y Shopify</span></a>
+          </>}
         </nav>
       </aside>
       <section className="content mkContent">
