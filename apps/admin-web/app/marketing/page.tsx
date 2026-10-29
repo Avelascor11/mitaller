@@ -391,7 +391,7 @@ function EmailEditor({ value, onChange, notify, events }: { value: Content; onCh
           </div>
         ))}
         <div className="mkRowBtns">{(['heading', 'text', 'button', 'image', 'divider'] as const).map(t => <button key={t} onClick={() => onChange({ ...value, blocks: [...value.blocks, { type: t, text: '', url: '' }] })}><Plus size={12} /> {{ heading: 'Título', text: 'Texto', button: 'Botón', image: 'Imagen', divider: 'Separador' }[t]}</button>)}</div>
-        <div className="mkToolbar"><input className="mkSearch" placeholder="Enviar prueba a…" value={testTo} onChange={e => setTestTo(e.target.value)} /><button onClick={() => api('/test', 'POST', { ...value, email: testTo }).then(() => notify.ok(`Prueba enviada a ${testTo}`)).catch(notify.err)}><Send size={13} /> Prueba</button></div>
+        <div className="mkToolbar"><input className="mkSearch" type="email" placeholder="Enviar prueba a… (tu email)" value={testTo} onChange={e => setTestTo(e.target.value)} /><button disabled={!testTo.includes('@')} onClick={() => api('/test', 'POST', { ...value, name: value.name || 'Prueba', subject: value.subject || 'Prueba de Speedwear Mail', email: testTo.trim() }).then(() => notify.ok(`Prueba enviada a ${testTo.trim()}`)).catch(notify.err)}><Send size={13} /> Prueba</button></div>
       </div>
       <iframe className="mkPreview" sandbox="" srcDoc={html} title="Vista previa" />
     </div>

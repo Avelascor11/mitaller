@@ -5,7 +5,7 @@ import { escapeHtml as e } from './marketing.domain';
 import { MarketingAdminGuard } from './marketing.guard';
 import { MarketingService } from './marketing.service';
 
-type Body = Record<string, any>;
+type Payload = Record<string, any>;
 
 @Controller('marketing')
 @UseGuards(MarketingAdminGuard)
@@ -16,45 +16,45 @@ export class MarketingController {
 
   @Get('contacts') contacts(@Query('search') search?: string, @Query('page') page?: string, @Query('status') status?: string) { return this.marketing.contacts(search ?? '', Number(page) || 1, status ?? ''); }
   @Get('contacts/:id') contact(@Param('id') id: string) { return this.marketing.contact(id); }
-  @Post('contacts') saveContact(@Body() body: Body) { return this.marketing.saveContact(body); }
-  @Post('contacts/import') importContacts(@Body() body: Body) { return this.marketing.importContacts(body); }
+  @Post('contacts') saveContact(@Body() body: Payload) { return this.marketing.saveContact(body); }
+  @Post('contacts/import') importContacts(@Body() body: Payload) { return this.marketing.importContacts(body); }
   @Post('contacts/:id/unsubscribe') suppress(@Param('id') id: string) { return this.marketing.suppress(id); }
   @Delete('contacts/:id') deleteContact(@Param('id') id: string) { return this.marketing.deleteContact(id); }
 
   @Get('segments') segments() { return this.marketing.segments(); }
-  @Post('segments/preview') segmentPreview(@Body() body: Body) { return this.marketing.segmentPreview(body); }
-  @Post('segments') createSegment(@Body() body: Body) { return this.marketing.saveSegment(body); }
-  @Put('segments/:id') updateSegment(@Param('id') id: string, @Body() body: Body) { return this.marketing.saveSegment(body, id); }
+  @Post('segments/preview') segmentPreview(@Body() body: Payload) { return this.marketing.segmentPreview(body); }
+  @Post('segments') createSegment(@Body() body: Payload) { return this.marketing.saveSegment(body); }
+  @Put('segments/:id') updateSegment(@Param('id') id: string, @Body() body: Payload) { return this.marketing.saveSegment(body, id); }
   @Delete('segments/:id') deleteSegment(@Param('id') id: string) { return this.marketing.deleteSegment(id); }
 
   @Get('templates') templates() { return this.marketing.templates(); }
-  @Post('templates') createTemplate(@Body() body: Body) { return this.marketing.saveTemplate(body); }
-  @Put('templates/:id') updateTemplate(@Param('id') id: string, @Body() body: Body) { return this.marketing.saveTemplate(body, id); }
+  @Post('templates') createTemplate(@Body() body: Payload) { return this.marketing.saveTemplate(body); }
+  @Put('templates/:id') updateTemplate(@Param('id') id: string, @Body() body: Payload) { return this.marketing.saveTemplate(body, id); }
   @Delete('templates/:id') deleteTemplate(@Param('id') id: string) { return this.marketing.deleteTemplate(id); }
-  @Post('preview') preview(@Body() body: Body) { return this.marketing.preview(body); }
-  @Post('test') sendTest(@Body() body: Body) { return this.marketing.sendTest(body); }
+  @Post('preview') preview(@Body() body: Payload) { return this.marketing.preview(body); }
+  @Post('test') sendTest(@Body() body: Payload) { return this.marketing.sendTest(body); }
 
   @Get('audience') audience(@Query('segmentId') segmentId?: string) { return this.marketing.audienceCount(segmentId || null).then(count => ({ count })); }
   @Get('campaigns') campaigns() { return this.marketing.campaigns(); }
   @Get('campaigns/:id') campaign(@Param('id') id: string) { return this.marketing.campaign(id); }
-  @Post('campaigns') createCampaign(@Body() body: Body) { return this.marketing.saveCampaign(body); }
-  @Put('campaigns/:id') updateCampaign(@Param('id') id: string, @Body() body: Body) { return this.marketing.saveCampaign(body, id); }
-  @Post('campaigns/:id/launch') launch(@Param('id') id: string, @Body() body: Body) { return this.marketing.launch(id, body); }
+  @Post('campaigns') createCampaign(@Body() body: Payload) { return this.marketing.saveCampaign(body); }
+  @Put('campaigns/:id') updateCampaign(@Param('id') id: string, @Body() body: Payload) { return this.marketing.saveCampaign(body, id); }
+  @Post('campaigns/:id/launch') launch(@Param('id') id: string, @Body() body: Payload) { return this.marketing.launch(id, body); }
   @Post('campaigns/:id/cancel') cancel(@Param('id') id: string) { return this.marketing.cancel(id); }
   @Post('campaigns/:id/duplicate') duplicate(@Param('id') id: string) { return this.marketing.duplicateCampaign(id); }
   @Delete('campaigns/:id') deleteCampaign(@Param('id') id: string) { return this.marketing.deleteCampaign(id); }
   @Post('messages/:id/retry') retry(@Param('id') id: string) { return this.marketing.retryMessage(id); }
 
   @Get('flows') flows() { return this.marketing.flows(); }
-  @Post('flows') createFlow(@Body() body: Body) { return this.marketing.saveFlow(body); }
-  @Put('flows/:id') updateFlow(@Param('id') id: string, @Body() body: Body) { return this.marketing.saveFlow(body, id); }
-  @Post('flows/:id/status') flowStatus(@Param('id') id: string, @Body() body: Body) { return this.marketing.flowStatus(id, body.live === true); }
+  @Post('flows') createFlow(@Body() body: Payload) { return this.marketing.saveFlow(body); }
+  @Put('flows/:id') updateFlow(@Param('id') id: string, @Body() body: Payload) { return this.marketing.saveFlow(body, id); }
+  @Post('flows/:id/status') flowStatus(@Param('id') id: string, @Body() body: Payload) { return this.marketing.flowStatus(id, body.live === true); }
   @Delete('flows/:id') deleteFlow(@Param('id') id: string) { return this.marketing.deleteFlow(id); }
   @Get('events') events() { return this.marketing.events(); }
 
   @Get('forms') forms() { return this.marketing.forms(); }
-  @Post('forms') createForm(@Body() body: Body) { return this.marketing.saveForm(body); }
-  @Put('forms/:id') updateForm(@Param('id') id: string, @Body() body: Body) { return this.marketing.saveForm(body, id); }
+  @Post('forms') createForm(@Body() body: Payload) { return this.marketing.saveForm(body); }
+  @Put('forms/:id') updateForm(@Param('id') id: string, @Body() body: Payload) { return this.marketing.saveForm(body, id); }
 
   @Get('klaviyo/import') klaviyoStatus() { return this.marketing.klaviyoImportStatus(); }
   @Post('klaviyo/import') klaviyoImport() { return this.marketing.importFromKlaviyo(); }
@@ -99,7 +99,7 @@ export class MarketingPublicController {
   @Post('forms/:id/subscribe')
   @UseGuards(MarketingThrottlerGuard)
   @Throttle({ default: { ttl: 60000, limit: 20 } })
-  async subscribe(@Param('id') id: string, @Body() body: Body, @Req() req: Request, @Res() res: Response) {
+  async subscribe(@Param('id') id: string, @Body() body: Payload, @Req() req: Request, @Res() res: Response) {
     try {
       const result = await this.marketing.subscribe(id, body ?? {});
       if (wantsJson(req)) res.json(result);
@@ -148,7 +148,7 @@ export class MarketingPublicController {
   @Post('activity')
   @UseGuards(MarketingThrottlerGuard)
   @Throttle({ default: { ttl: 60000, limit: 120 } })
-  activity(@Body() body: Body) { return this.marketing.activity(body ?? {}); }
+  activity(@Body() body: Payload) { return this.marketing.activity(body ?? {}); }
 
   /** Paste in theme.liquid; on product pages define window.SWM_PRODUCT first (see docs/env.md). */
   @Get('onsite.js')
@@ -170,8 +170,8 @@ function readText(req: Request, limit = 256 * 1024) {
 @Controller('marketing/integrations')
 export class MarketingIntegrationController {
   constructor(private readonly marketing: MarketingService) {}
-  @Post('events') event(@Headers('x-marketing-secret') secret: string | undefined, @Body() body: Body) { return this.marketing.integrationEvent(secret, body ?? {}); }
-  @Post('feedback') feedback(@Headers('x-marketing-secret') secret: string | undefined, @Body() body: Body) { return this.marketing.integrationFeedback(secret, body ?? {}); }
+  @Post('events') event(@Headers('x-marketing-secret') secret: string | undefined, @Body() body: Payload) { return this.marketing.integrationEvent(secret, body ?? {}); }
+  @Post('feedback') feedback(@Headers('x-marketing-secret') secret: string | undefined, @Body() body: Payload) { return this.marketing.integrationFeedback(secret, body ?? {}); }
   /** Amazon SNS posts text/plain, which no body parser consumes, so the stream is read here. */
   @Post('ses/:secret')
   async ses(@Param('secret') secret: string, @Req() req: Request & { rawBody?: Buffer }) {
