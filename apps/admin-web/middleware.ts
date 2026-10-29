@@ -23,8 +23,8 @@ export function middleware(request: NextRequest) {
   if (host === CUSTOMER_DOMAIN) {
     // Allow /devoluciones (public portal)
     if (pathname === '/devoluciones') return NextResponse.next();
-    // Allow /admin/* and /login (auth protection handled below)
-    if (pathname.startsWith('/admin') || pathname.startsWith('/login')) {
+    // Allow /admin/*, /marketing, /campanas and /login (auth protection handled below)
+    if (['/admin', '/marketing', '/campanas', '/login'].some(p => pathname === p || pathname.startsWith(p + '/'))) {
       // fall through to auth check below
     } else {
       // Redirect everything else to /devoluciones
