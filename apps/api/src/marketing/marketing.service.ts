@@ -175,7 +175,7 @@ export class MarketingService {
     const transport = this.transport();
     try {
       await transport.sendMail({ from: this.from(), to, subject: `[Prueba] ${d.personalize(c.subject, contact, payload.event)}`.replace(/[\r\n]/g, ' '), html: rendered.html, text: rendered.text, disableFileAccess: true, disableUrlAccess: true });
-    } catch (e: any) { throw new BadRequestException(`SMTP rechazó la prueba (${e.code || e.responseCode || 'error'}).`); } finally { transport.close(); }
+    } catch (e: any) { throw new BadRequestException(`SMTP rechazó la prueba (${e.code || e.responseCode || 'error'}${e.response ? `: ${String(e.response).slice(0, 300)}` : ''}).`); } finally { transport.close(); }
     return { sent: true };
   }
 
@@ -589,7 +589,7 @@ export class MarketingService {
     } catch (e: any) {
       // A timeout/disconnect (or a DB error after SMTP accepted) is not safe to retry.
       const definite = !accepted && (e.responseCode >= 400 || ['EAUTH', 'ECONNECTION', 'EDNS'].includes(e.code));
-      await this.db.marketingMessage.updateMany({ where: { id, status: 'SENDING' }, data: { status: definite ? 'FAILED' : 'UNKNOWN', error: definite ? `SMTP rechazó el envío (${e.code || e.responseCode}).` : 'No se puede confirmar si SMTP aceptó el mensaje. Revisar antes de reenviar.' } });
+      await this.db.marketingMessage.updateMany({ where: { id, status: 'SENDING' }, data: { status: definite ? 'FAILED' : 'UNKNOWN', error: definite ? `SMTP rechazó el envío (${e.code || e.responseCode}${e.response ? `: ${String(e.response).slice(0, 300)}` : ''}).` : 'No se puede confirmar si SMTP aceptó el mensaje. Revisar antes de reenviar.' } });
     }
   }
 }

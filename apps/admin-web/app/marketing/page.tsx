@@ -366,6 +366,16 @@ function EventsDatalist() {
 function EmailEditor({ value, onChange, notify, events }: { value: Content; onChange: (c: Content) => void; notify: Notify; events?: EventInfo[] }) {
   const [html, setHtml] = useState('');
   const [testTo, setTestTo] = useState('');
+  const [testState, setTestState] = useState<{ busy: boolean; msg: string; ok: boolean } | null>(null);
+  async function sendTest() {
+    setTestState({ busy: true, msg: 'Enviando… (puede tardar hasta 20 s)', ok: true });
+    try {
+      await api('/test', 'POST', { ...value, name: value.name || 'Prueba', subject: value.subject || 'Prueba de Speedwear Mail', email: testTo.trim() });
+      setTestState({ busy: false, msg: `✓ AWS ha aceptado la prueba para ${testTo.trim()} (${new Date().toLocaleTimeString('es-ES')}). Mira bandeja de entrada y spam.`, ok: true });
+    } catch (e) {
+      setTestState({ busy: false, msg: `✗ ${e instanceof Error ? e.message : String(e)} (${new Date().toLocaleTimeString('es-ES')})`, ok: false });
+    }
+  }
   useEffect(() => {
     const t = setTimeout(() => api<{ html: string }>('/preview', 'POST', { ...value, name: value.name || 'Vista previa', subject: value.subject || 'Vista previa' }).then(r => setHtml(r.html)).catch(() => null), 450);
     return () => clearTimeout(t);
@@ -391,7 +401,8 @@ function EmailEditor({ value, onChange, notify, events }: { value: Content; onCh
           </div>
         ))}
         <div className="mkRowBtns">{(['heading', 'text', 'button', 'image', 'divider'] as const).map(t => <button key={t} onClick={() => onChange({ ...value, blocks: [...value.blocks, { type: t, text: '', url: '' }] })}><Plus size={12} /> {{ heading: 'Título', text: 'Texto', button: 'Botón', image: 'Imagen', divider: 'Separador' }[t]}</button>)}</div>
-        <div className="mkToolbar"><input className="mkSearch" type="email" placeholder="Enviar prueba a… (tu email)" value={testTo} onChange={e => setTestTo(e.target.value)} /><button disabled={!testTo.includes('@')} onClick={() => api('/test', 'POST', { ...value, name: value.name || 'Prueba', subject: value.subject || 'Prueba de Speedwear Mail', email: testTo.trim() }).then(() => notify.ok(`Prueba enviada a ${testTo.trim()}`)).catch(notify.err)}><Send size={13} /> Prueba</button></div>
+        <div className="mkToolbar"><input className="mkSearch" type="email" placeholder="Enviar prueba a… (tu email)" value={testTo} onChange={e => setTestTo(e.target.value)} /><button disabled={!testTo.includes('@') || testState?.busy} onClick={sendTest}><Send size={13} /> {testState?.busy ? 'Enviando…' : 'Prueba'}</button></div>
+        {testState && <div className={`mkNotice ${testState.ok ? '' : 'bad'}`}>{testState.msg}</div>}
       </div>
       <iframe className="mkPreview" sandbox="" srcDoc={html} title="Vista previa" />
     </div>
