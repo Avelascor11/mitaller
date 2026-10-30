@@ -34,7 +34,7 @@ export class MarketingService {
     return {
       ready: checks.every(c => c.ready), checks, fromEmail: this.env('FROM_EMAIL'), fromName: this.env('FROM_NAME') || 'Speedwear', address: this.env('POSTAL_ADDRESS'), publicApiUrl: this.env('PUBLIC_API_URL'),
       integrationConfigured: this.env('EVENT_SECRET').length >= 32, captureEvents: this.env('CAPTURE_EVENTS') === 'true', shopifyWebhooks: Boolean(this.config.get<string>('SHOPIFY_WEBHOOK_SECRET')), klaviyoImport: Boolean(this.config.get<string>('KLAVIYO_API_KEY')),
-      attributionDays: this.attributionDays(), batchSize: this.batchSize()
+      attributionDays: this.attributionDays(), batchSize: this.batchSize(), shopifySync: this.shopifySync
     };
   }
   private attributionDays() { return Math.max(1, Math.min(30, Number(this.env('ATTRIBUTION_DAYS')) || 5)); }
@@ -450,7 +450,8 @@ export class MarketingService {
       this.db.marketingSegment.findMany({ orderBy: { name: 'asc' }, select: { name: true } }),
       this.db.$queryRaw<Array<{ tag: string; count: bigint }>>`SELECT tag, COUNT(*) AS count FROM "MarketingContact", unnest(tags) AS tag WHERE tag LIKE 'lista:%' OR tag LIKE 'segmento:%' GROUP BY tag ORDER BY tag`
     ]);
-    return { templates, flows: flows.map(f => ({ ...f, steps: (f.steps as unknown[]).length })), segments: segments.map(s => s.name), tags: tagged.map(t => ({ tag: t.tag, count: Number(t.count) })), placedOrders: await this.db.marketingEvent.count({ where: { name: 'Placed Order' } }) };
+    const recentEvents = await this.db.marketingEvent.groupBy({ by: ['name'], where: { createdAt: { gte: new Date(Date.now() - 86400000) } }, _count: true });
+    return { templates, flows: flows.map(f => ({ ...f, steps: (f.steps as unknown[]).length })), segments: segments.map(s => s.name), tags: tagged.map(t => ({ tag: t.tag, count: Number(t.count) })), placedOrders: await this.db.marketingEvent.count({ where: { name: 'Placed Order' } }), shopifySync: this.shopifySync, eventsLast24h: Object.fromEntries(recentEvents.map(e => [e.name, e._count])) };
   }
   async feedback(body: Record<string, any>) {
     const ids = (Array.isArray(body.providerMessageIds) ? body.providerMessageIds : [body.providerMessageId]).map(stripId).filter(Boolean).slice(0, 5);
@@ -499,6 +500,10 @@ export class MarketingService {
     if (!secret || !rawBody || !hmac) throw new UnauthorizedException('Firma webhook Shopify ausente');
     const expected = Buffer.from(createHmac('sha256', secret).update(rawBody).digest('base64')), received = Buffer.from(hmac);
     if (expected.length !== received.length || !timingSafeEqual(expected, received)) throw new UnauthorizedException('Firma webhook Shopify no valida');
+    return this.handleShopify(topic, payload);
+  }
+  /** Shared by webhooks and the polling sync: Shopify's REST objects have the webhook payload shape. */
+  private async handleShopify(topic: string | undefined, payload: any) {
     const email = String(payload?.email ?? payload?.contact_email ?? payload?.customer?.email ?? '').trim().toLowerCase();
     if (!email || !/^[^\s<>@]+@[^\s<>@]+\.[^\s<>@]+$/.test(email)) return { received: true, ignored: true };
     const customer = topic?.startsWith('customers/') ? payload : payload?.customer ?? {};
@@ -523,6 +528,49 @@ export class MarketingService {
       default:
         return { received: true };
     }
+  }
+  private shopifyCursor = new Date(Date.now() - 15 * 60000);
+  private shopifySync: { at?: string; ok?: boolean; error?: string; orders: number; checkouts: number; customers: number } = { orders: 0, checkouts: 0, customers: 0 };
+  private syncing = false;
+  shopifySyncStatus() { return this.shopifySync; }
+  private async shopifyGet(path: string): Promise<{ body: any; next: string | null }> {
+    const domain = String(this.config.get('SHOPIFY_SHOP_DOMAIN') ?? '').replace(/^https?:\/\//, '').replace(/\/$/, '');
+    const res = await fetch(path.startsWith('https://') ? path : `https://${domain}/admin/api/${this.config.get<string>('SHOPIFY_API_VERSION') ?? '2026-04'}${path}`, { headers: { 'X-Shopify-Access-Token': String(this.config.get('SHOPIFY_ADMIN_ACCESS_TOKEN') ?? '') }, signal: AbortSignal.timeout(30000) });
+    if (!res.ok) throw new Error(`Shopify ${res.status} en ${path.split('?')[0].slice(-40)}: ${(await res.text()).slice(0, 200)}`);
+    return { body: await res.json(), next: /<([^>]+)>;\s*rel="next"/.exec(res.headers.get('link') ?? '')?.[1] ?? null };
+  }
+  /** Polls Shopify every 5 minutes so marketing works without registering webhooks; externalIds dedupe against webhooks. */
+  @Cron('15 */5 * * * *')
+  async syncShopify() {
+    if (this.syncing || this.env('SHOPIFY_SYNC') === 'false' || !this.config.get('SHOPIFY_SHOP_DOMAIN') || !this.config.get('SHOPIFY_ADMIN_ACCESS_TOKEN')) return;
+    this.syncing = true;
+    const since = new Date(this.shopifyCursor.getTime() - 60000), startedAt = new Date();
+    const counts = { orders: 0, checkouts: 0, customers: 0 }, errors: string[] = [];
+    const each = async (path: string, key: 'orders' | 'checkouts' | 'customers', handle: (item: any) => Promise<unknown>) => {
+      try {
+        let url: string | null = path;
+        while (url) {
+          const { body, next } = await this.shopifyGet(url);
+          for (const item of body[key] ?? []) { try { await handle(item); counts[key]++; } catch (e) { this.logger.warn(`Shopify ${key} ${item?.id}: ${e instanceof Error ? e.message : e}`); } }
+          url = next;
+        }
+      } catch (e) { errors.push(e instanceof Error ? e.message : String(e)); }
+    };
+    try {
+      const min = encodeURIComponent(since.toISOString());
+      await each(`/orders.json?status=any&limit=250&updated_at_min=${min}`, 'orders', async o => {
+        // Only orders created while syncing count as new purchases; older ones came from Klaviyo's history.
+        if (new Date(o.created_at) >= since) await this.handleShopify('orders/create', o);
+        if (o.fulfillment_status === 'fulfilled') await this.handleShopify('orders/fulfilled', o);
+        if (o.cancelled_at) await this.handleShopify('orders/cancelled', o);
+      });
+      await each(`/checkouts.json?limit=250&updated_at_min=${min}`, 'checkouts', c => this.handleShopify('checkouts/update', c));
+      await each(`/customers.json?limit=250&updated_at_min=${min}`, 'customers', c => this.handleShopify('customers/update', c));
+      // The cursor always advances: a resource that keeps failing (missing scope) must not stall the others.
+      this.shopifyCursor = startedAt;
+      this.shopifySync = { at: startedAt.toISOString(), ok: !errors.length, ...(errors.length ? { error: errors.join(' · ').slice(0, 500) } : {}), ...counts };
+      if (errors.length) this.logger.error(`Sincronización Shopify: ${this.shopifySync.error}`);
+    } finally { this.syncing = false; }
   }
   private async shopifyConsent(email: string, consent: any, acceptsMarketing: unknown, profile: { firstName: string; lastName: string; country: string }) {
     const state = typeof consent?.state === 'string' ? consent.state : acceptsMarketing === true ? 'subscribed' : null;

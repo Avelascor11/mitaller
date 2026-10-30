@@ -218,3 +218,20 @@ describe('Klaviyo conditionals', () => {
     expect(empty.html).toContain('>Ver</a> -');
   });
 });
+
+describe('MarketingService Shopify sync', () => {
+  it('trae pedidos nuevos, preparados y cancelados, carritos y clientes sin parar si una consulta falla', async () => {
+    const { service } = serviceWith({}, { SHOPIFY_SHOP_DOMAIN: 'speedwear.myshopify.com', SHOPIFY_ADMIN_ACCESS_TOKEN: 'token' });
+    const handle = vi.spyOn(service as any, 'handleShopify').mockResolvedValue({ received: true });
+    const now = new Date().toISOString(), old = '2025-01-01T00:00:00Z';
+    const fetch = vi.fn(async (url: string) => {
+      if (url.includes('/orders.json')) return new Response(JSON.stringify({ orders: [{ id: 1, created_at: now }, { id: 2, created_at: old, fulfillment_status: 'fulfilled' }, { id: 3, created_at: old, cancelled_at: now }] }));
+      if (url.includes('/checkouts.json')) return new Response(JSON.stringify({ checkouts: [{ token: 'abc' }] }));
+      return new Response('{"errors":"[API] This action requires merchant approval for read_customers scope."}', { status: 403 });
+    });
+    vi.stubGlobal('fetch', fetch);
+    try { await service.syncShopify(); } finally { vi.unstubAllGlobals(); }
+    expect(handle.mock.calls.map(c => [c[0], (c[1] as any).id ?? (c[1] as any).token])).toEqual([['orders/create', 1], ['orders/fulfilled', 2], ['orders/cancelled', 3], ['checkouts/update', 'abc']]);
+    expect(service.shopifySyncStatus()).toMatchObject({ ok: false, orders: 3, checkouts: 1, customers: 0, error: expect.stringContaining('403') });
+  });
+});

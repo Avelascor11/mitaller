@@ -21,7 +21,7 @@ type StepCondition = { event: string; op: 'eq' | 'gt'; value: number; since: 'fl
 type Step = { delayMinutes: number; templateId: string; onlyIf?: StepCondition };
 type Flow = { id: string; name: string; trigger: string; stopOnEvent: string | null; transactional: boolean; reentryDays: number; status: string; steps: Step[]; stats?: Stats; queued?: number };
 type Form = { id: string; name: string; headline: string; description: string; buttonText: string; tag: string; active: boolean };
-type Settings = { ready: boolean; checks: { key: string; ready: boolean }[]; fromEmail: string; fromName: string; address: string; publicApiUrl: string; integrationConfigured: boolean; captureEvents: boolean; shopifyWebhooks: boolean; klaviyoImport: boolean; attributionDays: number; batchSize: number };
+type Settings = { ready: boolean; checks: { key: string; ready: boolean }[]; fromEmail: string; fromName: string; address: string; publicApiUrl: string; integrationConfigured: boolean; captureEvents: boolean; shopifyWebhooks: boolean; klaviyoImport: boolean; attributionDays: number; batchSize: number; shopifySync?: { at?: string; ok?: boolean; error?: string; orders: number; checkouts: number; customers: number } };
 type EventInfo = { name: string; count: number; lastAt: string; keys: string[] };
 type Tab = 'resumen' | 'contactos' | 'segmentos' | 'plantillas' | 'campanas' | 'automatizaciones' | 'formularios' | 'ajustes';
 
@@ -658,7 +658,8 @@ function SettingsTab({ notify }: { notify: Notify }) {
         <section className="panel"><h2>Envío</h2><div className="mkList">{s.checks.map(c => <div key={c.key}><span>{labels[c.key] ?? c.key}</span><span className={`mkBadge ${c.ready ? 'ok' : 'bad'}`}>{c.ready ? 'OK' : 'Falta'}</span></div>)}</div>
           <p className="mkMuted">Remitente: {s.fromName} &lt;{s.fromEmail || '—'}&gt; · lote {s.batchSize} emails / 30 s · atribución {s.attributionDays} días tras clic o apertura.</p></section>
         <section className="panel"><h2>Integraciones</h2><div className="mkList">
-          <div><span>Webhooks Shopify (SHOPIFY_WEBHOOK_SECRET)</span><span className={`mkBadge ${s.shopifyWebhooks ? 'ok' : 'bad'}`}>{s.shopifyWebhooks ? 'OK' : 'Falta'}</span></div>
+          <div><span>Sincronización con Shopify (cada 5 min)</span><span className={`mkBadge ${s.shopifySync?.ok ? 'ok' : s.shopifySync?.at ? 'bad' : 'muted'}`}>{s.shopifySync?.at ? (s.shopifySync.ok ? 'OK' : 'Error') : 'Esperando'}</span>{s.shopifySync?.at && <small>{date(s.shopifySync.at)} · {s.shopifySync.orders} pedidos · {s.shopifySync.checkouts} pagos a medias · {s.shopifySync.customers} clientes{s.shopifySync.error ? ` · ${s.shopifySync.error}` : ''}</small>}</div>
+          <div><span>Webhooks Shopify (opcional, SHOPIFY_WEBHOOK_SECRET)</span><span className={`mkBadge ${s.shopifyWebhooks ? 'ok' : 'bad'}`}>{s.shopifyWebhooks ? 'OK' : 'Falta'}</span></div>
           <div><span>Eventos Mitaller (devoluciones, Crew)</span><span className={`mkBadge ${s.captureEvents ? 'ok' : 'warn'}`}>{s.captureEvents ? 'Capturando' : 'Off'}</span></div>
           <div><span>API de eventos y rebotes (EVENT_SECRET)</span><span className={`mkBadge ${s.integrationConfigured ? 'ok' : 'bad'}`}>{s.integrationConfigured ? 'OK' : 'Falta'}</span></div>
           <div><span>Importación desde Klaviyo</span><span className={`mkBadge ${s.klaviyoImport ? 'ok' : 'muted'}`}>{s.klaviyoImport ? 'Disponible' : 'Sin clave'}</span></div>
