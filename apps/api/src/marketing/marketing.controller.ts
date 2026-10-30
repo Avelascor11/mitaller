@@ -57,7 +57,8 @@ export class MarketingController {
   @Put('forms/:id') updateForm(@Param('id') id: string, @Body() body: Payload) { return this.marketing.saveForm(body, id); }
 
   @Get('klaviyo/import') klaviyoStatus() { return this.marketing.klaviyoImportStatus(); }
-  @Post('klaviyo/import') klaviyoImport() { return this.marketing.importFromKlaviyo(); }
+  @Post('klaviyo/import') klaviyoImport(@Body() body: Payload) { return this.marketing.importFromKlaviyo(body ?? {}); }
+  @Post('import/package') importPackage(@Body() body: Payload) { return this.marketing.importPackage(body ?? {}); }
 }
 
 /** Railway sits in front of the API; key public rate limits by the client address its proxy appended. */
@@ -150,11 +151,11 @@ export class MarketingPublicController {
   @Throttle({ default: { ttl: 60000, limit: 120 } })
   activity(@Body() body: Payload) { return this.marketing.activity(body ?? {}); }
 
-  /** Paste in theme.liquid; on product pages define window.SWM_PRODUCT first (see docs/env.md). */
+  /** Paste in theme.liquid; on product pages define window.SWM_PRODUCT first (see docs/env.md). Reports product views and add-to-cart. */
   @Get('onsite.js')
   onsite(@Res() res: Response) {
     const api = JSON.stringify(`${this.marketing.settings().publicApiUrl}/marketing/public/activity`);
-    res.set({ 'Content-Type': 'application/javascript; charset=utf-8', 'Cache-Control': 'public, max-age=3600' }).send(`(function(){try{var k='swm',q=new URLSearchParams(location.search).get(k);if(q&&/^[0-9a-f-]{36}$/.test(q))localStorage.setItem(k,q);var t=localStorage.getItem(k),p=window.SWM_PRODUCT;if(!t||!p||!p.id)return;fetch(${api},{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token:t,product:p}),keepalive:true}).catch(function(){})}catch(e){}})();`);
+    res.set({ 'Content-Type': 'application/javascript; charset=utf-8', 'Cache-Control': 'public, max-age=3600' }).send(`(function(){try{var k='swm',q=new URLSearchParams(location.search).get(k);if(q&&/^[0-9a-f-]{36}$/.test(q))localStorage.setItem(k,q);var t=localStorage.getItem(k);if(!t)return;function send(type,p){if(!p||!p.id)return;fetch(${api},{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token:t,type:type,product:p}),keepalive:true}).catch(function(){})}send('Viewed Product',window.SWM_PRODUCT);function added(){send('Added to Cart',window.SWM_PRODUCT)}var f=window.fetch;window.fetch=function(u){try{if(String(u&&u.url||u).indexOf('/cart/add')>-1)added()}catch(e){}return f.apply(this,arguments)};document.addEventListener('submit',function(e){var a=e.target&&e.target.getAttribute&&e.target.getAttribute('action')||'';if(a.indexOf('/cart/add')>-1)added()},true)}catch(e){}})();`);
   }
 }
 

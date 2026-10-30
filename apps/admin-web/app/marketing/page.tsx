@@ -8,7 +8,7 @@ import {
 
 const API = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001';
 
-type Block = { type: 'heading' | 'text' | 'button' | 'image' | 'divider'; text?: string; url?: string };
+type Block = { type: 'heading' | 'text' | 'button' | 'image' | 'divider' | 'html'; text?: string; url?: string };
 type Content = { name: string; subject: string; preheader: string; blocks: Block[] };
 type Condition = { field: string; operator: string; value?: string; days?: number };
 type Rules = { mode: 'all' | 'any'; conditions: Condition[] };
@@ -17,7 +17,8 @@ type Stats = { sent: number; opened: number; clicked: number; bounced: number; u
 type Segment = { id: string; name: string; rules: Rules; count: number };
 type Template = Content & { id: string; updatedAt: string };
 type Campaign = Content & { id: string; segmentId: string | null; status: string; scheduledAt: string | null; createdAt: string; stats?: Stats };
-type Step = { delayMinutes: number; templateId: string };
+type StepCondition = { event: string; op: 'eq' | 'gt'; value: number; since: 'flow' | 'all' | 'days'; days?: number };
+type Step = { delayMinutes: number; templateId: string; onlyIf?: StepCondition };
 type Flow = { id: string; name: string; trigger: string; stopOnEvent: string | null; transactional: boolean; reentryDays: number; status: string; steps: Step[]; stats?: Stats; queued?: number };
 type Form = { id: string; name: string; headline: string; description: string; buttonText: string; tag: string; active: boolean };
 type Settings = { ready: boolean; checks: { key: string; ready: boolean }[]; fromEmail: string; fromName: string; address: string; publicApiUrl: string; integrationConfigured: boolean; captureEvents: boolean; shopifyWebhooks: boolean; klaviyoImport: boolean; attributionDays: number; batchSize: number };
@@ -33,8 +34,18 @@ const STATUS: Record<string, [string, string]> = {
   DRAFT: ['Borrador', 'muted'], SCHEDULED: ['Programada', 'info'], FINISHED: ['Enviada', 'ok'], CANCELLED: ['Cancelada', 'muted'], LIVE: ['Activa', 'ok'],
   QUEUED: ['En cola', 'info'], SENDING: ['Enviando', 'info'], SENT: ['Enviado', 'ok'], DELIVERED: ['Entregado', 'ok'], FAILED: ['Fallido', 'bad'], UNKNOWN: ['Revisar', 'warn'], SKIPPED: ['Omitido', 'muted']
 };
+const CONDITIONS: [string, string, StepCondition | undefined][] = [
+  ['always', 'Siempre', undefined],
+  ['no-order', 'Solo si no ha comprado desde que empezó', { event: 'Placed Order', op: 'eq', value: 0, since: 'flow' }],
+  ['ordered', 'Solo si ya ha comprado desde que empezó', { event: 'Placed Order', op: 'gt', value: 0, since: 'flow' }],
+  ['first-order', 'Solo si es su primer pedido', { event: 'Placed Order', op: 'eq', value: 1, since: 'all' }],
+  ['repeat-order', 'Solo si ya había comprado antes', { event: 'Placed Order', op: 'gt', value: 1, since: 'all' }],
+  ['no-order-30', 'Solo si no ha comprado en 30 días', { event: 'Placed Order', op: 'eq', value: 0, since: 'days', days: 30 }]
+];
+const conditionKey = (c?: StepCondition) => CONDITIONS.find(([, , v]) => JSON.stringify(v) === JSON.stringify(c))?.[0] ?? (c ? 'custom' : 'always');
+const conditionLabel = (c?: StepCondition) => c ? CONDITIONS.find(([k]) => k === conditionKey(c))?.[1] ?? `si ${c.event} ${c.op === 'eq' ? '=' : '>'} ${c.value}` : '';
 const FIELDS: [string, string][] = [['tag', 'Etiqueta'], ['country', 'País'], ['email', 'Email'], ['event', 'Ha hecho el evento'], ['opened', 'Abrió un email'], ['clicked', 'Hizo clic'], ['created', 'Alta del contacto']];
-const KNOWN_EVENTS = ['Subscribed', 'Started Checkout', 'Placed Order', 'Fulfilled Order', 'Viewed Product', 'Return Label Created', 'Return Received', 'Return Approved', 'Return Label Failed', 'Carrier Return', 'Crew Welcome'];
+const KNOWN_EVENTS = ['Subscribed', 'Started Checkout', 'Added to Cart', 'Placed Order', 'Fulfilled Order', 'Cancelled Order', 'Viewed Product', 'Return Label Created', 'Return Received', 'Return Approved', 'Return Label Failed', 'Carrier Return', 'Crew Welcome'];
 const FLOW_PRESETS: { label: string; trigger: string; stopOnEvent: string; transactional?: boolean; reentryDays: number; delays: number[] }[] = [
   { label: 'Bienvenida', trigger: 'Subscribed', stopOnEvent: '', reentryDays: 0, delays: [0, 2 * 1440, 3 * 1440] },
   { label: 'Carrito abandonado', trigger: 'Started Checkout', stopOnEvent: 'Placed Order', reentryDays: 5, delays: [120, 22 * 60, 48 * 60] },
@@ -236,11 +247,14 @@ function Contacts({ notify }: { notify: Notify }) {
   return (
     <>
       <Header title="Contactos" subtitle={`${data?.total?.toLocaleString('es-ES') ?? '…'} contactos. Las bajas y rebotes nunca se reactivan al importar.`}>
-        <button disabled={klaviyo?.running} onClick={() => confirm('Importar todos los perfiles de Klaviyo con su consentimiento y supresiones? No envía ningún email.') && api('/klaviyo/import', 'POST').then(setKlaviyo).catch(notify.err)}><RefreshCw size={14} /> {klaviyo?.running ? `Klaviyo ${klaviyo.processed}…` : 'Importar de Klaviyo'}</button>
+        <select disabled={klaviyo?.running} value="" onChange={e => { const parts = { all: ['profiles', 'lists', 'segments', 'orders'], profiles: ['profiles'], groups: ['lists', 'segments'], orders: ['orders'] }[e.target.value]; if (parts && confirm('Importar de Klaviyo? No envía ningún email ni dispara automatizaciones.')) api('/klaviyo/import', 'POST', { parts }).then(setKlaviyo).catch(notify.err); }}>
+          <option value="">{klaviyo?.running ? `Klaviyo: ${klaviyo.stage ?? '…'}` : 'Importar de Klaviyo…'}</option>
+          <option value="all">Todo (contactos, listas, segmentos y pedidos)</option><option value="profiles">Solo contactos</option><option value="groups">Listas y segmentos (como etiquetas)</option><option value="orders">Historial de pedidos</option>
+        </select>
         <label className="mkFileBtn"><Upload size={14} /> CSV<input type="file" accept=".csv,text/csv" hidden onChange={e => e.target.files?.[0] && pickFile(e.target.files[0])} /></label>
         <button className="primary" onClick={() => setEditing({ status: 'PENDING', tagsText: '' })}><Plus size={14} /> Contacto</button>
       </Header>
-      {klaviyo && (klaviyo.startedAt) && <div className={`mkNotice ${klaviyo.error ? 'bad' : ''}`}>Importación Klaviyo: {klaviyo.imported} importados, {klaviyo.skipped} sin email de {klaviyo.processed} perfiles{klaviyo.running ? ' (en curso)' : klaviyo.finishedAt ? ` · terminó ${date(klaviyo.finishedAt)}` : ''}{klaviyo.error ? ` · Error: ${klaviyo.error}` : ''}</div>}
+      {klaviyo && (klaviyo.startedAt) && <div className={`mkNotice ${klaviyo.error ? 'bad' : ''}`}>Importación Klaviyo{klaviyo.stage ? ` · ${klaviyo.stage}` : ''}: {klaviyo.processed ? `${klaviyo.imported} contactos (${klaviyo.skipped} sin email) · ` : ''}{klaviyo.lists ?? 0} listas · {klaviyo.segments ?? 0} segmentos · {klaviyo.orders ?? 0} pedidos{klaviyo.running ? ' (en curso)' : klaviyo.finishedAt ? ` · terminó ${date(klaviyo.finishedAt)}` : ''}{klaviyo.error ? ` · Error: ${klaviyo.error}` : ''}</div>}
       {importing && (
         <section className="panel">
           <h2>Importar {importing.file}</h2>
@@ -391,16 +405,16 @@ function EmailEditor({ value, onChange, notify, events }: { value: Content; onCh
           <label>Asunto<input value={value.subject} onChange={e => onChange({ ...value, subject: e.target.value })} /></label>
           <label>Preencabezado<input value={value.preheader} onChange={e => onChange({ ...value, preheader: e.target.value })} /></label>
         </div>
-        <p className="mkMuted">Variables: <code>{'{{firstName}}'}</code> <code>{'{{lastName}}'}</code> <code>{'{{email}}'}</code>{keys.map(k => <code key={k}>{`{{event.${k}}}`}</code>)}</p>
+        <p className="mkMuted">Variables: <code>{'{{firstName|Amig@}}'}</code> <code>{'{{unsubscribeUrl}}'}</code> <code>{'{{lastName}}'}</code> <code>{'{{email}}'}</code>{keys.map(k => <code key={k}>{`{{event.${k}}}`}</code>)}</p>
         {value.blocks.map((b, i) => (
           <div className="mkBlock" key={i}>
-            <div className="mkBlockHead"><b>{{ heading: 'Título', text: 'Texto', button: 'Botón', image: 'Imagen', divider: 'Separador' }[b.type]}</b>
+            <div className="mkBlockHead"><b>{{ heading: 'Título', text: 'Texto', button: 'Botón', image: 'Imagen', divider: 'Separador', html: 'Email en HTML' }[b.type]}</b>
               <span><button disabled={!i} onClick={() => move(i, -1)}><ArrowUp size={12} /></button><button disabled={i === value.blocks.length - 1} onClick={() => move(i, 1)}><ArrowDown size={12} /></button><button disabled={value.blocks.length < 2} onClick={() => onChange({ ...value, blocks: value.blocks.filter((_, j) => j !== i) })}><Trash2 size={12} /></button></span></div>
-            {b.type !== 'divider' && (b.type === 'text' ? <textarea rows={4} value={b.text ?? ''} onChange={e => set(i, { text: e.target.value })} /> : <input placeholder={b.type === 'image' ? 'Texto alternativo' : ''} value={b.text ?? ''} onChange={e => set(i, { text: e.target.value })} />)}
+            {b.type === 'html' ? <textarea className="mkCode" rows={22} spellCheck={false} value={b.text ?? ''} onChange={e => set(i, { text: e.target.value })} /> : b.type !== 'divider' && (b.type === 'text' ? <textarea rows={4} value={b.text ?? ''} onChange={e => set(i, { text: e.target.value })} /> : <input placeholder={b.type === 'image' ? 'Texto alternativo' : ''} value={b.text ?? ''} onChange={e => set(i, { text: e.target.value })} />)}
             {['button', 'image'].includes(b.type) && <input placeholder="https://…  o  {{event.checkoutUrl}}" value={b.url ?? ''} onChange={e => set(i, { url: e.target.value })} />}
           </div>
         ))}
-        <div className="mkRowBtns">{(['heading', 'text', 'button', 'image', 'divider'] as const).map(t => <button key={t} onClick={() => onChange({ ...value, blocks: [...value.blocks, { type: t, text: '', url: '' }] })}><Plus size={12} /> {{ heading: 'Título', text: 'Texto', button: 'Botón', image: 'Imagen', divider: 'Separador' }[t]}</button>)}</div>
+        {value.blocks[0]?.type !== 'html' && <div className="mkRowBtns">{(['heading', 'text', 'button', 'image', 'divider'] as const).map(t => <button key={t} onClick={() => onChange({ ...value, blocks: [...value.blocks, { type: t, text: '', url: '' }] })}><Plus size={12} /> {{ heading: 'Título', text: 'Texto', button: 'Botón', image: 'Imagen', divider: 'Separador' }[t]}</button>)}</div>}
         <div className="mkToolbar"><input className="mkSearch" type="email" placeholder="Enviar prueba a… (tu email)" value={testTo} onChange={e => setTestTo(e.target.value)} /><button disabled={!testTo.includes('@') || testState?.busy} onClick={sendTest}><Send size={13} /> {testState?.busy ? 'Enviando…' : 'Prueba'}</button></div>
         {testState && <div className={`mkNotice ${testState.ok ? '' : 'bad'}`}>{testState.msg}</div>}
       </div>
@@ -527,6 +541,7 @@ function Flows({ notify }: { notify: Notify }) {
   const [items, reload] = useLoad(load, notify);
   const [templates, setTemplates] = useState<Template[]>([]);
   const [edit, setEdit] = useState<(Omit<Flow, 'id' | 'status' | 'stopOnEvent'> & { id?: string; stopOnEvent: string }) | null>(null);
+  const [imported, setImported] = useState<{ templates: number; flows: number; skippedTemplates: number; warnings: string[] } | null>(null);
   useEffect(() => { api<Template[]>('/templates').then(setTemplates).catch(() => null); }, []);
   const name = (id: string) => templates.find(t => t.id === id)?.name ?? 'Plantilla borrada';
   async function save() {
@@ -537,16 +552,20 @@ function Flows({ notify }: { notify: Notify }) {
   return (
     <>
       <Header title="Automatizaciones" subtitle="Secuencias que arrancan con un evento (Shopify, Mitaller o la web) y paran con otro.">
+        <label className="mkFileBtn"><Upload size={14} /> Importar paquete<input type="file" accept=".json,application/json" hidden onChange={e => { const file = e.target.files?.[0]; e.target.value = ''; if (file) file.text().then(t => api<{ templates: number; flows: number; skippedTemplates: number; warnings: string[] }>('/import/package', 'POST', JSON.parse(t))).then(r => { setImported(r); notify.ok(`${r.templates} plantillas y ${r.flows} automatizaciones importadas en borrador`); reload(); api<Template[]>('/templates').then(setTemplates).catch(() => null); }).catch(notify.err); }} /></label>
         <button className="primary" disabled={!templates.length} title={templates.length ? '' : 'Crea antes una plantilla'} onClick={() => setEdit({ name: '', trigger: '', stopOnEvent: '', transactional: false, reentryDays: 0, steps: [{ delayMinutes: 0, templateId: templates[0]?.id ?? '' }] })}><Plus size={14} /> Automatización</button>
       </Header>
       <EventsDatalist />
+      {imported && <section className="panel"><div className="mkBlockHead"><h2>Importado: {imported.templates} plantillas, {imported.flows} automatizaciones</h2><button onClick={() => setImported(null)}><X size={13} /></button></div>
+        <p className="mkMuted">Todo queda en borrador. {imported.skippedTemplates ? `${imported.skippedTemplates} plantillas ya existían y no se han tocado. ` : ''}Revisa cada plantilla y envía una prueba antes de activar.</p>
+        {imported.warnings.length > 0 && <ul className="mkSteps">{imported.warnings.slice(0, 40).map((w, i) => <li key={i}>{w}</li>)}</ul>}</section>}
       {edit && (
         <section className="panel mkForm">
           {!edit.id && <div className="mkRowBtns">{FLOW_PRESETS.map(p => <button key={p.label} onClick={() => setEdit({ ...edit, name: edit.name || p.label, trigger: p.trigger, stopOnEvent: p.stopOnEvent, transactional: !!p.transactional, reentryDays: p.reentryDays, steps: p.delays.map((delayMinutes, i) => ({ delayMinutes, templateId: edit.steps[i]?.templateId ?? templates[0]?.id ?? '' })) })}>{p.label}</button>)}</div>}
           <div className="mkFields">
             <label>Nombre<input value={edit.name} onChange={e => setEdit({ ...edit, name: e.target.value })} /></label>
             <label>Empieza con el evento<input list="mk-events" value={edit.trigger} onChange={e => setEdit({ ...edit, trigger: e.target.value })} /></label>
-            <label>Sale si ocurre<input list="mk-events" placeholder="(opcional)" value={edit.stopOnEvent} onChange={e => setEdit({ ...edit, stopOnEvent: e.target.value })} /></label>
+            <label>Sale si ocurre (separa con comas)<input list="mk-events" placeholder="Placed Order, Started Checkout" value={edit.stopOnEvent} onChange={e => setEdit({ ...edit, stopOnEvent: e.target.value })} /></label>
             <label>No repetir en (días)<input type="number" min={0} max={365} value={edit.reentryDays} onChange={e => setEdit({ ...edit, reentryDays: Number(e.target.value) })} /></label>
           </div>
           <label className="mkCheck"><input type="checkbox" checked={edit.transactional} onChange={e => setEdit({ ...edit, transactional: e.target.checked })} />Transaccional: llega también a quien no aceptó marketing (devoluciones, reembolsos). Úsalo solo para avisos de servicio, nunca para promociones.</label>
@@ -558,6 +577,7 @@ function Flows({ notify }: { notify: Notify }) {
               <select value={s.delayMinutes % 1440 === 0 && s.delayMinutes ? 1440 : s.delayMinutes % 60 === 0 && s.delayMinutes ? 60 : 1} onChange={e => { const cur = s.delayMinutes % 1440 === 0 && s.delayMinutes ? s.delayMinutes / 1440 : s.delayMinutes % 60 === 0 && s.delayMinutes ? s.delayMinutes / 60 : s.delayMinutes; setEdit({ ...edit, steps: edit.steps.map((x, j) => (j === i ? { ...x, delayMinutes: (cur || 1) * Number(e.target.value) } : x)) }); }}><option value={1}>min</option><option value={60}>horas</option><option value={1440}>días</option></select>
               <span>y enviar</span>
               <select value={s.templateId} onChange={e => setEdit({ ...edit, steps: edit.steps.map((x, j) => (j === i ? { ...x, templateId: e.target.value } : x)) })}>{templates.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}</select>
+              <select value={conditionKey(s.onlyIf)} onChange={e => { const c = CONDITIONS.find(([k]) => k === e.target.value)?.[2]; setEdit({ ...edit, steps: edit.steps.map((x, j) => (j === i ? { delayMinutes: x.delayMinutes, templateId: x.templateId, ...(c ? { onlyIf: c } : {}) } : x)) }); }}>{CONDITIONS.map(([k, l]) => <option key={k} value={k}>{l}</option>)}{conditionKey(s.onlyIf) === 'custom' && <option value="custom">{conditionLabel(s.onlyIf)}</option>}</select>
               <button disabled={edit.steps.length < 2} onClick={() => setEdit({ ...edit, steps: edit.steps.filter((_, j) => j !== i) })}><X size={13} /></button>
             </div>
           ))}
@@ -569,7 +589,7 @@ function Flows({ notify }: { notify: Notify }) {
         <article className="panel" key={f.id}>
           <div className="mkBlockHead"><h2>{f.name}</h2><Badge status={f.status} /></div>
           <p>Evento <b>{f.trigger}</b>{f.stopOnEvent ? <> · sale con <b>{f.stopOnEvent}</b></> : null}{f.transactional ? ' · transaccional' : ''}{f.reentryDays ? ` · 1 vez cada ${f.reentryDays} d` : ''}</p>
-          <ol className="mkSteps">{f.steps.map((s, i) => <li key={i}>{delayLabel(s.delayMinutes)} → {name(s.templateId)}</li>)}</ol>
+          <ol className="mkSteps">{f.steps.map((s, i) => <li key={i}>{delayLabel(s.delayMinutes)} → {name(s.templateId)}{s.onlyIf ? <small className="mkMuted"> · {conditionLabel(s.onlyIf).toLowerCase()}</small> : null}</li>)}</ol>
           <p><StatRow stats={f.stats} />{f.queued ? <> · {f.queued} en cola</> : null}</p>
           <div className="mkRowBtns">
             {f.status === 'LIVE' ? <button onClick={() => status(f, false)}><Pause size={13} /> Pausar</button> : <><button className="primary" onClick={() => status(f, true)}><Play size={13} /> Activar</button><button onClick={() => setEdit({ id: f.id, name: f.name, trigger: f.trigger, stopOnEvent: f.stopOnEvent ?? '', transactional: f.transactional, reentryDays: f.reentryDays, steps: f.steps })}>Editar</button><button onClick={() => confirm(`Borrar ${f.name}?`) && api(`/flows/${f.id}`, 'DELETE').then(reload).catch(notify.err)}><Trash2 size={13} /></button></>}

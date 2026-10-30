@@ -16,7 +16,8 @@ const money = (v: unknown) => { const n = Number(v); return Number.isFinite(n) ?
 type Tx = Prisma.TransactionClient;
 type Transport = ReturnType<typeof nodemailer.createTransport>;
 type ContactInput = { email: string; firstName?: string; lastName?: string; country?: string; tags?: string[]; status?: string; consentAt?: Date | null; consentSource?: string | null };
-type ImportJob = { running: boolean; processed: number; imported: number; skipped: number; startedAt?: string; finishedAt?: string; error?: string };
+type ImportPart = 'profiles' | 'lists' | 'segments' | 'orders';
+type ImportJob = { running: boolean; processed: number; imported: number; skipped: number; stage?: string; parts?: ImportPart[]; lists?: number; segments?: number; orders?: number; startedAt?: string; finishedAt?: string; error?: string };
 
 @Injectable()
 export class MarketingService {
@@ -276,7 +277,7 @@ export class MarketingService {
     if (await this.db.marketingTemplate.count({ where: { id: { in: [...new Set(steps.map(s => s.templateId))] } } }) !== new Set(steps.map(s => s.templateId)).size) throw new BadRequestException('Falta alguna plantilla.');
     const reentryDays = body.reentryDays == null ? 0 : Number(body.reentryDays);
     if (!Number.isInteger(reentryDays) || reentryDays < 0 || reentryDays > 365) throw new BadRequestException('Reentrada inválida: entre 0 y 365 días.');
-    const data = { name: d.string(body.name, 'Nombre'), trigger: d.string(body.trigger, 'Evento', 100), stopOnEvent: d.string(body.stopOnEvent, 'Evento de salida', 100, true) || null, steps: json(steps), transactional: body.transactional === true, reentryDays };
+    const data = { name: d.string(body.name, 'Nombre'), trigger: d.string(body.trigger, 'Evento', 100), stopOnEvent: d.stopEvents(d.string(body.stopOnEvent, 'Eventos de salida', 300, true)).join(', ') || null, steps: json(steps), transactional: body.transactional === true, reentryDays };
     if (!id) return this.db.marketingFlow.create({ data });
     const result = await this.db.marketingFlow.updateMany({ where: { id, status: 'DRAFT' }, data });
     if (!result.count) throw new ConflictException('Pausa la automatización antes de editarla.');
@@ -330,7 +331,7 @@ export class MarketingService {
             delay += step.delayMinutes;
             const t = await tx.marketingTemplate.findUnique({ where: { id: step.templateId } });
             if (!t) continue;
-            await tx.marketingMessage.create({ data: { dedupeKey: `flow:${flow.id}:${event.id}:${i}`, kind: flow.transactional ? 'TRANSACTIONAL' : 'MARKETING', contactId: contact.id, flowId: flow.id, dueAt: new Date(event.createdAt.getTime() + delay * 60000), payload: json({ subject: t.subject, preheader: t.preheader, blocks: t.blocks, event: properties, eventId: event.id, eventAt: event.createdAt.toISOString(), stopOnEvent: flow.stopOnEvent }) } });
+            await tx.marketingMessage.create({ data: { dedupeKey: `flow:${flow.id}:${event.id}:${i}`, kind: flow.transactional ? 'TRANSACTIONAL' : 'MARKETING', contactId: contact.id, flowId: flow.id, dueAt: new Date(event.createdAt.getTime() + delay * 60000), payload: json({ subject: t.subject, preheader: t.preheader, blocks: t.blocks, event: properties, eventId: event.id, eventAt: event.createdAt.toISOString(), stopOnEvent: flow.stopOnEvent, ...(step.onlyIf ? { onlyIf: step.onlyIf } : {}) }) } });
             queued++;
           }
         }
@@ -416,13 +417,14 @@ export class MarketingService {
   }
   async activity(body: Record<string, any>) {
     const token = d.string(body.token, 'Token', 64);
+    const name = body.type === 'Added to Cart' ? 'Added to Cart' : 'Viewed Product';
     const p = body.product && typeof body.product === 'object' ? body.product : null;
     if (!p) throw new BadRequestException('Producto requerido.');
     const message = await this.db.marketingMessage.findUnique({ where: { trackingToken: token }, select: { contact: { select: { id: true, email: true } } } });
     if (!message) return { ok: true };
     const productId = d.string(String(p.id ?? ''), 'Producto', 60);
     const properties = { productId, title: d.string(p.title, 'Título', 300, true), url: d.safeUrl(String(p.url ?? '')), image: d.safeUrl(String(p.image ?? '')), price: d.string(String(p.price ?? ''), 'Precio', 30, true) };
-    await this.ingestEvent({ name: 'Viewed Product', email: message.contact.email, externalId: `view:${message.contact.id}:${productId}:${new Date().toISOString().slice(0, 10)}`, properties });
+    await this.ingestEvent({ name, email: message.contact.email, externalId: `${name === 'Added to Cart' ? 'cart' : 'view'}:${message.contact.id}:${productId}:${new Date().toISOString().slice(0, 10)}`, properties });
     return { ok: true };
   }
 
@@ -495,11 +497,13 @@ export class MarketingService {
         if (payload.completed_at || !payload.token) return { received: true, ignored: true };
         return this.ingestEvent({ name: 'Started Checkout', email, externalId: `shopify:checkout:${payload.token}`, value: payload.total_price, profile, properties: { checkoutUrl: d.safeUrl(String(payload.abandoned_checkout_url ?? '')), total: String(payload.total_price ?? ''), currency: String(payload.currency ?? 'EUR'), itemsText, itemCount: items.length } });
       case 'orders/create':
-        return this.ingestEvent({ name: 'Placed Order', email, externalId: `shopify:order:${payload.id}`, value: payload.total_price, profile, properties: { orderName: String(payload.name ?? ''), total: String(payload.total_price ?? ''), currency: String(payload.currency ?? 'EUR'), itemsText, itemCount: items.length, orderStatusUrl: d.safeUrl(String(payload.order_status_url ?? '')) } });
+        return this.ingestEvent({ name: 'Placed Order', email, externalId: `shopify:order:${payload.id}`, value: payload.total_price, profile, properties: { orderName: String(payload.name ?? ''), orderNumber: String(payload.order_number ?? payload.name ?? '').replace(/^#/, ''), total: String(payload.total_price ?? ''), currency: String(payload.currency ?? 'EUR'), itemsText, itemCount: items.length, orderStatusUrl: d.safeUrl(String(payload.order_status_url ?? '')) } });
       case 'orders/fulfilled': {
         const f = Array.isArray(payload.fulfillments) ? payload.fulfillments[payload.fulfillments.length - 1] ?? {} : {};
         return this.ingestEvent({ name: 'Fulfilled Order', email, externalId: `shopify:fulfilled:${payload.id}`, profile, properties: { orderName: String(payload.name ?? ''), itemsText, trackingNumber: String(f.tracking_number ?? ''), trackingUrl: d.safeUrl(String(f.tracking_url ?? '')), orderStatusUrl: d.safeUrl(String(payload.order_status_url ?? '')) } });
       }
+      case 'orders/cancelled':
+        return this.ingestEvent({ name: 'Cancelled Order', email, externalId: `shopify:cancelled:${payload.id}`, profile, properties: { orderName: String(payload.name ?? ''), reason: String(payload.cancel_reason ?? '') } });
       default:
         return { received: true };
     }
@@ -516,33 +520,112 @@ export class MarketingService {
 
   // ── Klaviyo migration ──
   klaviyoImportStatus() { return this.klaviyoJob; }
-  importFromKlaviyo() {
+  importFromKlaviyo(body: Record<string, any> = {}) {
     const key = this.config.get<string>('KLAVIYO_API_KEY')?.trim();
     if (!key) throw new BadRequestException('Falta KLAVIYO_API_KEY.');
     if (this.klaviyoJob.running) throw new ConflictException('La importación ya está en marcha.');
-    this.klaviyoJob = { running: true, processed: 0, imported: 0, skipped: 0, startedAt: new Date().toISOString() };
-    void this.runKlaviyoImport(key)
+    const all: ImportPart[] = ['profiles', 'lists', 'segments', 'orders'];
+    const parts = Array.isArray(body.parts) ? all.filter(p => body.parts.includes(p)) : all;
+    if (!parts.length) throw new BadRequestException('Elige qué importar.');
+    this.klaviyoJob = { running: true, processed: 0, imported: 0, skipped: 0, parts, lists: 0, segments: 0, orders: 0, startedAt: new Date().toISOString() };
+    void this.runKlaviyoImport(key, parts)
       .catch(e => { this.klaviyoJob.error = e instanceof Error ? e.message : String(e); })
-      .finally(() => { this.klaviyoJob.running = false; this.klaviyoJob.finishedAt = new Date().toISOString(); });
+      .finally(() => { this.klaviyoJob.running = false; this.klaviyoJob.stage = undefined; this.klaviyoJob.finishedAt = new Date().toISOString(); });
     return this.klaviyoJob;
   }
-  private async runKlaviyoImport(key: string) {
-    let url: string | null = 'https://a.klaviyo.com/api/profiles/?additional-fields%5Bprofile%5D=subscriptions&page%5Bsize%5D=100';
+  private async klaviyoPages(key: string, url: string | null, each: (page: { data?: any[]; included?: any[] }) => Promise<void>) {
     while (url) {
       const res = await fetch(url, { headers: { Authorization: `Klaviyo-API-Key ${key}`, accept: 'application/vnd.api+json', revision: '2024-10-15' } });
       if (res.status === 429) { await new Promise(r => setTimeout(r, Math.min(60, Number(res.headers.get('retry-after')) || 5) * 1000)); continue; }
       if (!res.ok) throw new Error(`Klaviyo respondió ${res.status}: ${(await res.text()).slice(0, 300)}`);
-      const page = await res.json() as { data?: any[]; links?: { next?: string | null } };
-      for (const profile of page.data ?? []) {
-        this.klaviyoJob.processed++;
-        const input = klaviyoContact(profile);
-        if (!input) { this.klaviyoJob.skipped++; continue; }
-        // Existing subscribers are migrated silently: no "Subscribed" event, so welcome flows do not fire.
-        await this.db.$transaction(tx => this.mergeContact(tx, input, { mergeTags: true, fillOnly: true }));
-        this.klaviyoJob.imported++;
-      }
+      const page = await res.json() as { data?: any[]; included?: any[]; links?: { next?: string | null } };
+      await each(page);
       url = page.links?.next ?? null;
     }
+  }
+  private async runKlaviyoImport(key: string, parts: ImportPart[]) {
+    const api = 'https://a.klaviyo.com/api';
+    const job = this.klaviyoJob;
+    if (parts.includes('profiles')) {
+      job.stage = 'Contactos';
+      await this.klaviyoPages(key, `${api}/profiles/?additional-fields%5Bprofile%5D=subscriptions&page%5Bsize%5D=100`, async page => {
+        for (const profile of page.data ?? []) {
+          job.processed++;
+          const input = klaviyoContact(profile);
+          if (!input) { job.skipped++; continue; }
+          // Existing subscribers are migrated silently: no "Subscribed" event, so welcome flows do not fire.
+          await this.db.$transaction(tx => this.mergeContact(tx, input, { mergeTags: true, fillOnly: true }));
+          job.imported++;
+        }
+      });
+    }
+    // List and segment membership become tags (a snapshot); each Klaviyo segment also gets a segment here filtering by its tag.
+    for (const kind of ['lists', 'segments'] as const) {
+      if (!parts.includes(kind)) continue;
+      const groups: { id: string; name: string }[] = [];
+      await this.klaviyoPages(key, `${api}/${kind}/?fields%5B${kind.slice(0, -1)}%5D=name`, async page => { groups.push(...(page.data ?? []).map(g => ({ id: g.id, name: String(g.attributes?.name ?? g.id).slice(0, 50) }))); });
+      for (const group of groups) {
+        job.stage = `${kind === 'lists' ? 'Lista' : 'Segmento'} «${group.name}»`;
+        const tag = `${kind === 'lists' ? 'lista' : 'segmento'}:${group.name}`;
+        await this.klaviyoPages(key, `${api}/${kind}/${group.id}/profiles/?fields%5Bprofile%5D=email&page%5Bsize%5D=100`, async page => {
+          const emails = (page.data ?? []).map(p => String(p.attributes?.email ?? '').trim().toLowerCase()).filter(e => e.includes('@'));
+          if (emails.length) await this.db.marketingContact.updateMany({ where: { email: { in: emails }, NOT: { tags: { has: tag } } }, data: { tags: { push: tag } } });
+        });
+        if (kind === 'segments' && !await this.db.marketingSegment.count({ where: { name: `${group.name} (Klaviyo)` } })) {
+          await this.db.marketingSegment.create({ data: { name: `${group.name} (Klaviyo)`, rules: json({ mode: 'all', conditions: [{ field: 'tag', operator: 'is', value: tag }] }) } });
+        }
+        job[kind]!++;
+      }
+    }
+    // Order history makes "first order vs repeat", winback and buyer segments work from day one. Historic events never trigger flows.
+    if (parts.includes('orders')) {
+      job.stage = 'Historial de pedidos';
+      let metricId = '';
+      await this.klaviyoPages(key, `${api}/metrics/`, async page => { metricId ||= (page.data ?? []).find(m => m.attributes?.name === 'Placed Order' && m.attributes?.integration?.key === 'shopify')?.id ?? ''; });
+      if (!metricId) throw new Error('No hay métrica «Placed Order» de Shopify en Klaviyo.');
+      const filter = encodeURIComponent(`equals(metric_id,"${metricId}")`);
+      await this.klaviyoPages(key, `${api}/events/?filter=${filter}&include=profile&fields%5Bprofile%5D=email&fields%5Bevent%5D=datetime,event_properties,uuid&page%5Bsize%5D=200`, async page => {
+        const emails = new Map((page.included ?? []).filter(i => i.type === 'profile').map(i => [i.id, String(i.attributes?.email ?? '').toLowerCase()]));
+        const contacts = new Map((await this.db.marketingContact.findMany({ where: { email: { in: [...emails.values()].filter(Boolean) } }, select: { id: true, email: true } })).map(c => [c.email, c.id]));
+        const rows = (page.data ?? []).flatMap(e => {
+          const contactId = contacts.get(emails.get(e.relationships?.profile?.data?.id) ?? '');
+          const at = new Date(e.attributes?.datetime);
+          if (!contactId || !Number.isFinite(at.getTime())) return [];
+          const props = e.attributes?.event_properties ?? {};
+          const name = String(props.extra?.name ?? props.OrderId ?? '');
+          return [{ externalId: `klaviyo:${e.attributes?.uuid ?? e.id}`, contactId, name: 'Placed Order', createdAt: at, value: money(props.$value) ?? null, properties: json({ orderName: name, orderNumber: name.replace(/^#/, ''), total: String(props.$value ?? ''), source: 'klaviyo' }) }];
+        });
+        if (rows.length) job.orders! += (await this.db.marketingEvent.createMany({ data: rows, skipDuplicates: true })).count;
+      });
+    }
+  }
+  /** Templates and flows exported from Klaviyo (built from its API). Everything lands as draft; names already present are skipped. */
+  async importPackage(body: Record<string, any>) {
+    const templates = Array.isArray(body.templates) ? body.templates.slice(0, 200) : [];
+    const flows = Array.isArray(body.flows) ? body.flows.slice(0, 50) : [];
+    if (!templates.length && !flows.length) throw new BadRequestException('El archivo no contiene plantillas ni automatizaciones.');
+    const ids = new Map<string, string>(), warnings: string[] = [];
+    let createdTemplates = 0, createdFlows = 0;
+    for (const t of templates) {
+      const key = d.string(String(t.key ?? ''), 'Clave de plantilla', 100);
+      const name = d.string(t.name, 'Nombre de plantilla', 200);
+      const converted = d.fromKlaviyo(d.string(t.html, 'HTML', d.htmlBlockMax));
+      converted.warnings.forEach(w => warnings.push(`${name}: ${w}`));
+      const existing = await this.db.marketingTemplate.findFirst({ where: { name }, select: { id: true } });
+      if (existing) { ids.set(key, existing.id); continue; }
+      const created = await this.db.marketingTemplate.create({ data: { name, subject: d.fromKlaviyo(d.string(t.subject, 'Asunto', 300)).html.slice(0, 200), preheader: d.fromKlaviyo(d.string(t.preheader ?? '', 'Preencabezado', 300, true)).html.slice(0, 200), blocks: json(d.blocks([{ type: 'html', text: converted.html }])) } });
+      ids.set(key, created.id); createdTemplates++;
+    }
+    for (const f of flows) {
+      const name = d.string(f.name, 'Nombre de automatización', 200);
+      if (await this.db.marketingFlow.count({ where: { name } })) continue;
+      const steps = (Array.isArray(f.steps) ? f.steps : []).filter((s: any) => ids.has(String(s.templateKey))).map((s: any) => ({ delayMinutes: s.delayMinutes, templateId: ids.get(String(s.templateKey)), ...(s.onlyIf ? { onlyIf: s.onlyIf } : {}) }));
+      if (!steps.length) { warnings.push(`${name}: sin plantillas, no se ha creado.`); continue; }
+      await this.db.marketingFlow.create({ data: { name, trigger: d.string(f.trigger, 'Evento', 100), stopOnEvent: d.stopEvents(d.string(f.stopOnEvent ?? '', 'Eventos de salida', 300, true)).join(', ') || null, transactional: f.transactional === true, reentryDays: Number.isInteger(f.reentryDays) ? Math.min(365, Math.max(0, f.reentryDays)) : 0, steps: json(d.steps(steps)) } });
+      createdFlows++;
+      if (typeof f.notes === 'string' && f.notes) warnings.push(`${name}: ${f.notes.slice(0, 300)}`);
+    }
+    return { templates: createdTemplates, flows: createdFlows, skippedTemplates: templates.length - createdTemplates, warnings };
   }
 
   // ── Delivery queue ──
@@ -564,14 +647,25 @@ export class MarketingService {
       for (const c of campaigns) if (!await this.db.marketingMessage.count({ where: { campaignId: c.id, status: { notIn: terminal } } })) await this.db.marketingCampaign.updateMany({ where: { id: c.id, status: 'SCHEDULED' }, data: { status: 'FINISHED' } });
     } catch (e) { this.logger.error(`Cola de marketing: ${e instanceof Error ? e.message : e}`); } finally { transport?.close(); this.working = false; }
   }
+  /** "Only if Placed Order = 0 since the flow started" and similar Klaviyo conditional splits. */
+  private async stepConditionHolds(contactId: string, p: d.MessagePayload) {
+    const c = p.onlyIf!;
+    const createdAt = c.since === 'flow' && p.eventAt ? { gte: new Date(p.eventAt) } : c.since === 'days' ? { gte: new Date(Date.now() - (c.days ?? 1) * 86400000) } : undefined;
+    const count = await this.db.marketingEvent.count({ where: { contactId, name: c.event, ...(createdAt ? { createdAt } : {}), ...(c.since === 'flow' && p.eventId ? { id: { not: p.eventId } } : {}) } });
+    return c.op === 'eq' ? count === c.value : count > c.value;
+  }
   private async deliver(id: string, transport: Transport) {
     const claim = await this.db.marketingMessage.updateMany({ where: { id, status: 'QUEUED' }, data: { status: 'SENDING', claimedAt: new Date() } });
     if (!claim.count) return;
     const m = await this.db.marketingMessage.findUniqueOrThrow({ where: { id }, include: { contact: true, campaign: true, flow: true } });
     const p = m.payload as d.MessagePayload & { confirmToken?: string };
     // The triggering event itself never counts as the exit event (winback flows trigger and stop on "Placed Order").
-    const stop = m.kind !== 'CONFIRMATION' && p.stopOnEvent && p.eventAt ? await this.db.marketingEvent.count({ where: { contactId: m.contactId, name: p.stopOnEvent, createdAt: { gte: new Date(p.eventAt) }, ...(p.eventId ? { id: { not: p.eventId } } : {}) } }) : 0;
+    const exits = m.kind !== 'CONFIRMATION' ? d.stopEvents(p.stopOnEvent) : [];
+    const sinceTrigger = (name: string | { in: string[] }) => ({ contactId: m.contactId, name, createdAt: { gte: new Date(p.eventAt!) }, ...(p.eventId ? { id: { not: p.eventId } } : {}) });
+    const stop = exits.length && p.eventAt ? await this.db.marketingEvent.count({ where: sinceTrigger({ in: exits }) }) : 0;
+    const conditionFails = p.onlyIf && m.kind !== 'CONFIRMATION' ? !(await this.stepConditionHolds(m.contactId, p)) : false;
     const hardSuppressed = ['BOUNCED', 'COMPLAINED'].includes(m.contact.status);
+    if (!stop && conditionFails) { await this.db.marketingMessage.update({ where: { id }, data: { status: 'SKIPPED', error: 'No cumple la condición del paso.' } }); return; }
     const invalid = m.kind === 'MARKETING' ? m.contact.status !== 'SUBSCRIBED' || m.campaign?.status === 'CANCELLED' || (m.flow && m.flow.status !== 'LIVE') || stop
       : m.kind === 'TRANSACTIONAL' ? hardSuppressed || (m.flow && m.flow.status !== 'LIVE') || stop
       : hardSuppressed || m.contact.confirmToken !== p.confirmToken || !m.contact.confirmExpiresAt || m.contact.confirmExpiresAt < new Date();

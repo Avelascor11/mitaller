@@ -1,7 +1,7 @@
 import { createHmac } from 'node:crypto';
 import { BadRequestException, UnauthorizedException } from '@nestjs/common';
 import { describe, expect, it, vi } from 'vitest';
-import { audienceWhere, blocks, renderEmail, rules } from '../src/marketing/marketing.domain';
+import { audienceWhere, blocks, fromKlaviyo, renderEmail, rules } from '../src/marketing/marketing.domain';
 import { klaviyoContact, MarketingService } from '../src/marketing/marketing.service';
 
 const env: Record<string, string> = {
@@ -102,7 +102,7 @@ describe('MarketingService events', () => {
     const { service } = serviceWith({ marketingEvent, marketingMessage });
     const transport = { sendMail: vi.fn().mockResolvedValue({ accepted: ['ana@example.com'], messageId: '<m1@speedwear.es>', response: '250 Ok 0100018b-abc' }) };
     await (service as any).deliver('m1', transport);
-    expect(marketingEvent.count).toHaveBeenCalledWith({ where: expect.objectContaining({ name: 'Placed Order', id: { not: 'ev1' } }) });
+    expect(marketingEvent.count).toHaveBeenCalledWith({ where: expect.objectContaining({ name: { in: ['Placed Order'] }, id: { not: 'ev1' } }) });
     expect(marketingMessage.update).toHaveBeenCalledWith({ where: { id: 'm1' }, data: expect.objectContaining({ status: 'SENT', providerMessageId: '0100018b-abc' }) });
     expect(transport.sendMail.mock.calls[0][0].headers['List-Unsubscribe']).toBe('<https://api.speedwear.es/marketing/public/unsubscribe/u?m=t>');
   });
@@ -139,5 +139,61 @@ describe('MarketingService integrations', () => {
     const { service } = serviceWith({});
     const notification = { Type: 'Notification', Message: JSON.stringify({ notificationType: 'Bounce', bounce: { bounceType: 'Transient' }, mail: { messageId: 'ses-1' } }) };
     expect(await service.sesNotification('x'.repeat(32), JSON.stringify(notification))).toEqual({ ok: true, ignored: true });
+  });
+});
+
+describe('Klaviyo templates', () => {
+  const klaviyoHtml = `<html><body><p>Hola {{ first_name|default:'Ey' }},</p><a href="{{ event.extra.checkout_url }}">Volver</a> <a href="https://speedwear.es?utm_source=klaviyo&amp;utm_medium=email">Logo</a> <a href="mailto:info@speedwear.es">info</a><p>{% unsubscribe 'Darme de baja' %}</p>{% if person.x %}x{% endif %}</body></html>`;
+
+  it('convierte etiquetas de Klaviyo y avisa de lo que no puede conservar', () => {
+    const { html, warnings } = fromKlaviyo(klaviyoHtml);
+    expect(html).toContain('Hola {{firstName|Ey}}');
+    expect(html).toContain('href="{{event.checkoutUrl}}"');
+    expect(html).toContain('<a href="{{unsubscribeUrl}}" style="color:inherit">Darme de baja</a>');
+    expect(html).toContain('utm_source=speedwear_mail');
+    expect(html).not.toContain('{%');
+    expect(warnings.some(w => w.includes('if person.x'))).toBe(true);
+  });
+
+  it('envía el HTML tal cual con enlaces seguidos, baja propia y sin inyectar código', () => {
+    const payload = { subject: 's', preheader: '', blocks: [{ type: 'html' as const, text: fromKlaviyo(klaviyoHtml).html }], event: { checkoutUrl: 'https://speedwear.es/checkouts/1?a=1&b=2' } };
+    const { html, links } = renderEmail(payload, { firstName: '<b>Ana</b>' }, { unsubscribeUrl: 'https://api.speedwear.es/u/1', address: 'Calle 1', pixelUrl: 'https://api.speedwear.es/o/1', trackLink: (_u, i) => `https://api.speedwear.es/c/${i}` });
+    expect(links).toEqual(['https://speedwear.es/checkouts/1?a=1&b=2', 'https://speedwear.es/?utm_source=speedwear_mail&utm_medium=email']);
+    expect(html).toContain('Hola &lt;b&gt;Ana&lt;/b&gt;,');
+    expect(html).toContain('href="https://api.speedwear.es/c/0"');
+    expect(html).toContain('href="mailto:info@speedwear.es"');
+    expect(html).toContain('href="https://api.speedwear.es/u/1"');
+    expect(html).toContain('Calle 1');
+    expect(html).toContain('src="https://api.speedwear.es/o/1"');
+    // Click lookup renders without send options and must resolve the same links.
+    expect(renderEmail(payload, { firstName: 'Ana' }).links).toEqual(links);
+    expect(renderEmail(payload, {}).html).toContain('Hola Ey,');
+  });
+});
+
+describe('MarketingService flow conditions and package import', () => {
+  it('omite un paso cuya condición no se cumple', async () => {
+    const marketingEvent = { count: vi.fn().mockResolvedValue(1) };
+    const message = { id: 'm1', kind: 'MARKETING', contactId: 'c1', trackingToken: 't', payload: { subject: 'Gracias', preheader: '', blocks: [{ type: 'text', text: 'x' }], eventId: 'ev1', eventAt: '2026-10-01T00:00:00Z', onlyIf: { event: 'Placed Order', op: 'gt', value: 1, since: 'all' } }, contact: { id: 'c1', email: 'ana@example.com', status: 'SUBSCRIBED', unsubscribeToken: 'u' }, campaign: null, flow: { status: 'LIVE' } };
+    const marketingMessage = { updateMany: vi.fn().mockResolvedValue({ count: 1 }), findUniqueOrThrow: vi.fn().mockResolvedValue(message), update: vi.fn() };
+    const { service } = serviceWith({ marketingEvent, marketingMessage });
+    const transport = { sendMail: vi.fn() };
+    await (service as any).deliver('m1', transport);
+    expect(marketingEvent.count).toHaveBeenCalledWith({ where: { contactId: 'c1', name: 'Placed Order' } });
+    expect(transport.sendMail).not.toHaveBeenCalled();
+    expect(marketingMessage.update).toHaveBeenCalledWith({ where: { id: 'm1' }, data: { status: 'SKIPPED', error: 'No cumple la condición del paso.' } });
+  });
+
+  it('importa plantillas y automatizaciones de Klaviyo en borrador', async () => {
+    const marketingTemplate = { findFirst: vi.fn().mockResolvedValue(null), create: vi.fn().mockResolvedValue({ id: 'tpl-1' }) };
+    const marketingFlow = { count: vi.fn().mockResolvedValue(0), create: vi.fn() };
+    const { service } = serviceWith({ marketingTemplate, marketingFlow });
+    const result = await service.importPackage({
+      templates: [{ key: 'RW7ATv', name: 'Carrito 1', subject: '¿Vas a dejar al Nano así, {{ first_name|default:"crack" }}?', html: '<html><body>Hola</body></html>' }],
+      flows: [{ name: 'Carrito abandonado', trigger: 'Started Checkout', stopOnEvent: 'Placed Order', reentryDays: 5, steps: [{ delayMinutes: 45, templateKey: 'RW7ATv', onlyIf: { event: 'Placed Order', op: 'eq', value: 0, since: 'flow' } }, { delayMinutes: 60, templateKey: 'missing' }] }]
+    });
+    expect(result).toMatchObject({ templates: 1, flows: 1 });
+    expect(marketingTemplate.create.mock.calls[0][0].data).toMatchObject({ subject: '¿Vas a dejar al Nano así, {{firstName|crack}}?', blocks: [{ type: 'html', text: '<html><body>Hola</body></html>' }] });
+    expect(marketingFlow.create).toHaveBeenCalledWith({ data: expect.objectContaining({ name: 'Carrito abandonado', trigger: 'Started Checkout', stopOnEvent: 'Placed Order', reentryDays: 5, steps: [{ delayMinutes: 45, templateId: 'tpl-1', onlyIf: { event: 'Placed Order', op: 'eq', value: 0, since: 'flow' } }] }) });
   });
 });
