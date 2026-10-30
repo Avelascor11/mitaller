@@ -436,6 +436,20 @@ export class MarketingService {
   }
   async integrationEvent(secret: unknown, body: Record<string, any>) { this.assertSecret(secret); return this.ingestEvent(body); }
   async integrationFeedback(secret: unknown, body: Record<string, any>) { this.assertSecret(secret); return this.feedback(body); }
+  /** Lets an operator script run the Klaviyo migration with the integration secret; it only creates drafts and never sends. */
+  async integrationMigration(secret: unknown, action: 'package' | 'klaviyo' | 'status' | 'summary', body: Record<string, any> = {}) {
+    this.assertSecret(secret);
+    if (action === 'package') return this.importPackage(body);
+    if (action === 'klaviyo') return this.importFromKlaviyo(body);
+    if (action === 'status') return this.klaviyoImportStatus();
+    const [templates, flows, segments, tagged] = await Promise.all([
+      this.db.marketingTemplate.count(),
+      this.db.marketingFlow.findMany({ orderBy: { name: 'asc' }, select: { name: true, status: true, trigger: true, stopOnEvent: true, transactional: true, steps: true } }),
+      this.db.marketingSegment.findMany({ orderBy: { name: 'asc' }, select: { name: true } }),
+      this.db.$queryRaw<Array<{ tag: string; count: bigint }>>`SELECT tag, COUNT(*) AS count FROM "MarketingContact", unnest(tags) AS tag WHERE tag LIKE 'lista:%' OR tag LIKE 'segmento:%' GROUP BY tag ORDER BY tag`
+    ]);
+    return { templates, flows: flows.map(f => ({ ...f, steps: (f.steps as unknown[]).length })), segments: segments.map(s => s.name), tags: tagged.map(t => ({ tag: t.tag, count: Number(t.count) })), placedOrders: await this.db.marketingEvent.count({ where: { name: 'Placed Order' } }) };
+  }
   async feedback(body: Record<string, any>) {
     const ids = (Array.isArray(body.providerMessageIds) ? body.providerMessageIds : [body.providerMessageId]).map(stripId).filter(Boolean).slice(0, 5);
     const event = body.event;

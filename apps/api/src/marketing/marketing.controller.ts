@@ -173,6 +173,10 @@ export class MarketingIntegrationController {
   constructor(private readonly marketing: MarketingService) {}
   @Post('events') event(@Headers('x-marketing-secret') secret: string | undefined, @Body() body: Payload) { return this.marketing.integrationEvent(secret, body ?? {}); }
   @Post('feedback') feedback(@Headers('x-marketing-secret') secret: string | undefined, @Body() body: Payload) { return this.marketing.integrationFeedback(secret, body ?? {}); }
+  @Post('import-package') importPackage(@Headers('x-marketing-secret') secret: string | undefined, @Body() body: Payload) { return this.marketing.integrationMigration(secret, 'package', body ?? {}); }
+  @Post('klaviyo-import') klaviyoImport(@Headers('x-marketing-secret') secret: string | undefined, @Body() body: Payload) { return this.marketing.integrationMigration(secret, 'klaviyo', body ?? {}); }
+  @Get('klaviyo-import') klaviyoStatus(@Headers('x-marketing-secret') secret: string | undefined) { return this.marketing.integrationMigration(secret, 'status'); }
+  @Get('summary') summary(@Headers('x-marketing-secret') secret: string | undefined) { return this.marketing.integrationMigration(secret, 'summary'); }
   /** Amazon SNS posts text/plain, which no body parser consumes, so the stream is read here. */
   @Post('ses/:secret')
   async ses(@Param('secret') secret: string, @Req() req: Request & { rawBody?: Buffer }) {
