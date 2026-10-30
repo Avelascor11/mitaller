@@ -633,17 +633,22 @@ export class MarketingService {
       const html = typeof t.html === 'string' && t.html ? t.html : await this.klaviyoTemplateHtml(d.string(String(t.klaviyoTemplateId ?? ''), 'Plantilla de Klaviyo', 50));
       const converted = d.fromKlaviyo(d.string(html, 'HTML', d.htmlBlockMax));
       converted.warnings.forEach(w => warnings.push(`${name}: ${w}`));
+      const data = { name, subject: d.fromKlaviyo(d.string(t.subject, 'Asunto', 300)).html.slice(0, 200), preheader: d.fromKlaviyo(d.string(t.preheader ?? '', 'Preencabezado', 300, true)).html.slice(0, 200), blocks: json(d.blocks([{ type: 'html', text: converted.html }])) };
       const existing = await this.db.marketingTemplate.findFirst({ where: { name }, select: { id: true } });
-      if (existing) { ids.set(key, existing.id); continue; }
-      const created = await this.db.marketingTemplate.create({ data: { name, subject: d.fromKlaviyo(d.string(t.subject, 'Asunto', 300)).html.slice(0, 200), preheader: d.fromKlaviyo(d.string(t.preheader ?? '', 'Preencabezado', 300, true)).html.slice(0, 200), blocks: json(d.blocks([{ type: 'html', text: converted.html }])) } });
+      // replace=true re-applies the conversion to templates imported earlier (used while improving the converter).
+      if (existing) { ids.set(key, existing.id); if (body.replace === true) { await this.db.marketingTemplate.update({ where: { id: existing.id }, data }); createdTemplates++; } continue; }
+      const created = await this.db.marketingTemplate.create({ data });
       ids.set(key, created.id); createdTemplates++;
     }
     for (const f of flows) {
       const name = d.string(f.name, 'Nombre de automatización', 200);
-      if (await this.db.marketingFlow.count({ where: { name } })) continue;
+      const existingFlow = await this.db.marketingFlow.findFirst({ where: { name }, select: { id: true, status: true } });
+      if (existingFlow && (body.replace !== true || existingFlow.status !== 'DRAFT')) continue;
       const steps = (Array.isArray(f.steps) ? f.steps : []).filter((s: any) => ids.has(String(s.templateKey))).map((s: any) => ({ delayMinutes: s.delayMinutes, templateId: ids.get(String(s.templateKey)), ...(s.onlyIf ? { onlyIf: s.onlyIf } : {}) }));
       if (!steps.length) { warnings.push(`${name}: sin plantillas, no se ha creado.`); continue; }
-      await this.db.marketingFlow.create({ data: { name, trigger: d.string(f.trigger, 'Evento', 100), stopOnEvent: d.stopEvents(d.string(f.stopOnEvent ?? '', 'Eventos de salida', 300, true)).join(', ') || null, transactional: f.transactional === true, reentryDays: Number.isInteger(f.reentryDays) ? Math.min(365, Math.max(0, f.reentryDays)) : 0, steps: json(d.steps(steps)) } });
+      const flowData = { name, trigger: d.string(f.trigger, 'Evento', 100), stopOnEvent: d.stopEvents(d.string(f.stopOnEvent ?? '', 'Eventos de salida', 300, true)).join(', ') || null, transactional: f.transactional === true, reentryDays: Number.isInteger(f.reentryDays) ? Math.min(365, Math.max(0, f.reentryDays)) : 0, steps: json(d.steps(steps)) };
+      if (existingFlow) await this.db.marketingFlow.update({ where: { id: existingFlow.id }, data: flowData });
+      else await this.db.marketingFlow.create({ data: flowData });
       createdFlows++;
       if (typeof f.notes === 'string' && f.notes) warnings.push(`${name}: ${f.notes.slice(0, 300)}`);
     }

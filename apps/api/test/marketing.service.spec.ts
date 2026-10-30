@@ -152,7 +152,7 @@ describe('Klaviyo templates', () => {
     expect(html).toContain('<a href="{{unsubscribeUrl}}" style="color:inherit">Darme de baja</a>');
     expect(html).toContain('utm_source=speedwear_mail');
     expect(html).not.toContain('{%');
-    expect(warnings.some(w => w.includes('if person.x'))).toBe(true);
+    expect(warnings.some(w => w.includes('person.x'))).toBe(true);
   });
 
   it('envía el HTML tal cual con enlaces seguidos, baja propia y sin inyectar código', () => {
@@ -186,7 +186,7 @@ describe('MarketingService flow conditions and package import', () => {
 
   it('importa plantillas y automatizaciones de Klaviyo en borrador', async () => {
     const marketingTemplate = { findFirst: vi.fn().mockResolvedValue(null), create: vi.fn().mockResolvedValue({ id: 'tpl-1' }) };
-    const marketingFlow = { count: vi.fn().mockResolvedValue(0), create: vi.fn() };
+    const marketingFlow = { findFirst: vi.fn().mockResolvedValue(null), create: vi.fn() };
     const { service } = serviceWith({ marketingTemplate, marketingFlow });
     const result = await service.importPackage({
       templates: [{ key: 'RW7ATv', name: 'Carrito 1', subject: '¿Vas a dejar al Nano así, {{ first_name|default:"crack" }}?', html: '<html><body>Hola</body></html>' }],
@@ -195,5 +195,26 @@ describe('MarketingService flow conditions and package import', () => {
     expect(result).toMatchObject({ templates: 1, flows: 1 });
     expect(marketingTemplate.create.mock.calls[0][0].data).toMatchObject({ subject: '¿Vas a dejar al Nano así, {{firstName|crack}}?', blocks: [{ type: 'html', text: '<html><body>Hola</body></html>' }] });
     expect(marketingFlow.create).toHaveBeenCalledWith({ data: expect.objectContaining({ name: 'Carrito abandonado', trigger: 'Started Checkout', stopOnEvent: 'Placed Order', reentryDays: 5, steps: [{ delayMinutes: 45, templateId: 'tpl-1', onlyIf: { event: 'Placed Order', op: 'eq', value: 0, since: 'flow' } }] }) });
+  });
+});
+
+describe('Klaviyo conditionals', () => {
+  it('evalúa if/elif/else de Klaviyo al enviar y conserva los enlaces del producto', () => {
+    const source = `{% if person.first_name %}Hola {{ person.first_name }}{% else %}Hola{% endif %}. {% if event.TrackingNumber %}Seguimiento {{ event.TrackingNumber }}{% endif %}
+{% with p=event|lookup:'Price'|default:event|lookup:'Value' %}{% if p and p != 'None' %}Precio {% currency_format p %}{% endif %}{% endwith %}
+<a href="{{ event|lookup:'URL'|default:'https://speedwear.es' }}">Ver</a> {% if event|lookup:'Value' %}V{% elif event|lookup:'Price' %}P{% else %}-{% endif %}`;
+    const { html, warnings } = fromKlaviyo(source);
+    expect(warnings).toEqual([]);
+    const render = (contact: object, event: Record<string, unknown>) => renderEmail({ subject: 's', preheader: '', blocks: [{ type: 'html', text: html }], event }, contact);
+    const full = render({ firstName: 'Ana' }, { TrackingNumber: 'X1', price: '39.90', url: 'https://speedwear.es/products/a' });
+    expect(full.html).toContain('Hola Ana. Seguimiento X1');
+    expect(full.html).toContain('Precio 39.90 €');
+    expect(full.html).toContain('href="https://speedwear.es/products/a"');
+    expect(full.html).toContain('>Ver</a> V');
+    const empty = render({}, {});
+    expect(empty.html).toContain('Hola. \n');
+    expect(empty.html).not.toContain('Precio');
+    expect(empty.html).toContain('href="https://speedwear.es/"');
+    expect(empty.html).toContain('>Ver</a> -');
   });
 });

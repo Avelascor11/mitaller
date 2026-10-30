@@ -86,11 +86,36 @@ export const escapeHtml = (v: unknown) => String(v ?? '').replace(/[&<>"']/g, c 
 export function safeUrl(url: string) { try { const u = new URL(url); return u.protocol === 'https:' && !u.username && !u.password ? u.toString() : ''; } catch { return ''; } }
 type Vars = { unsubscribeUrl?: string; address?: string };
 const TOKEN = /\{\{\s*(firstName|lastName|email|unsubscribeUrl|address|event(?:\.[a-zA-Z0-9_$]+)+)\s*(?:\|([^{}]{0,200}))?\}\}/g;
+const COND = /\{\{(#if|#elif)\s*(!?)\s*([a-zA-Z0-9_$.]*)\s*\}\}|\{\{#else\}\}|\{\{\/if\}\}/g;
+/** {{#if event.x}}…{{#elif firstName}}…{{#else}}…{{/if}} (nestable); an empty condition is always true. */
+function applyConditionals(text: string, truthy: (path: string) => boolean): string {
+  let out = '', last = 0, depth = 0, blockStart = 0;
+  let branches: { test: () => boolean; start: number; end: number }[] = [];
+  const test = (neg: string, path: string) => () => !path || truthy(path) !== Boolean(neg);
+  for (const m of text.matchAll(COND)) {
+    const [tag, kind, neg, path] = m, at = m.index!;
+    if (kind === '#if') {
+      if (depth++ === 0) { out += text.slice(last, at); blockStart = at; branches = [{ test: test(neg, path), start: at + tag.length, end: -1 }]; }
+    } else if (depth === 1 && (kind === '#elif' || tag === '{{#else}}')) {
+      branches[branches.length - 1].end = at;
+      branches.push({ test: kind ? test(neg, path) : () => true, start: at + tag.length, end: -1 });
+    } else if (tag === '{{/if}}' && depth > 0 && --depth === 0) {
+      branches[branches.length - 1].end = at;
+      const hit = branches.find(b => b.test());
+      if (hit) out += applyConditionals(text.slice(hit.start, hit.end), truthy);
+      last = at + tag.length;
+    }
+  }
+  // An unclosed block keeps its content without the condition markers.
+  return out + (depth > 0 ? text.slice(blockStart).replace(COND, '') : text.slice(last));
+}
 /** Replaces {{firstName}}, {{event.a.b}}, {{unsubscribeUrl}}… A "|text" suffix is the fallback when the value is empty. */
 export function personalize(text: string, contact: { firstName?: string; lastName?: string; email?: string }, event: Record<string, unknown> = {}, vars: Vars = {}, escape = false) {
+  const lookup = (key: string): unknown => key.startsWith('event.') ? key.slice(6).split('.').reduce<unknown>((o, k) => (o && typeof o === 'object' ? (o as Record<string, unknown>)[k] : undefined), event)
+    : key === 'unsubscribeUrl' || key === 'address' ? vars[key] : contact[key as keyof typeof contact];
+  if (text.includes('{{#if')) text = applyConditionals(text, path => { const v = lookup(path); return v != null && v !== '' && v !== 'None' && v !== false && !(Array.isArray(v) && !v.length); });
   return text.replace(TOKEN, (_, key: string, fallback?: string) => {
-    const value = key.startsWith('event.') ? key.slice(6).split('.').reduce<unknown>((o, k) => (o && typeof o === 'object' ? (o as Record<string, unknown>)[k] : undefined), event)
-      : key === 'unsubscribeUrl' || key === 'address' ? vars[key] : contact[key as keyof typeof contact];
+    const value = lookup(key);
     const out = (typeof value === 'string' || typeof value === 'number' ? String(value).slice(0, 2000) : '') || (fallback ?? '').trim();
     return escape ? escapeHtml(out) : out;
   });
@@ -141,15 +166,35 @@ export function renderEmail(payload: MessagePayload, contact: { firstName?: stri
 }
 
 const klaviyoEventPaths: Record<string, string> = {
-  'extra.checkout_url': 'checkoutUrl', 'extra.responsive_checkout_url': 'checkoutUrl', 'extra.order_number': 'orderNumber', 'extra.order_status_url': 'orderStatusUrl',
-  '$value': 'total', 'extra.total_price': 'total', 'extra.subtotal_price': 'total', 'URL': 'url', 'ProductName': 'title', 'ImageURL': 'image', 'Price': 'price'
+  'extra.checkout_url': 'checkoutUrl', 'extra.responsive_checkout_url': 'checkoutUrl', 'extra.order_number': 'orderNumber', 'extra.order_status_url': 'orderStatusUrl', 'extra.line_items': 'itemsText',
+  '$value': 'total', 'extra.total_price': 'total', 'extra.subtotal_price': 'total', 'URL': 'url', 'ProductName': 'title', 'Name': 'title', 'Title': 'title', 'ImageURL': 'image', 'Price': 'price', 'Value': 'price'
+};
+const klaviyoPath = (raw: string) => {
+  const p = raw.replace(/^person\./, '');
+  if (['first_name', 'last_name', 'email'].includes(p)) return ({ first_name: 'firstName', last_name: 'lastName', email: 'email' } as Record<string, string>)[p];
+  return raw.startsWith('event.') ? `event.${klaviyoEventPaths[raw.slice(6)] ?? raw.slice(6)}` : '';
 };
 /** Converts Klaviyo's Django-style tags to Speedwear Mail tokens. Returns the warnings for constructs that could not be kept. */
 export function fromKlaviyo(source: string) {
   const warnings = new Set<string>();
   const fallback = (filters = '') => /default:\s*(['"])(.*?)\1/.exec(filters)?.[2] ?? '';
   const token = (name: string, filters = '') => `{{${name}${fallback(filters) ? `|${fallback(filters)}` : ''}}}`;
-  let out = source
+  // event|lookup:'Key' → event.Key (keys with spaces stay as they are and are dropped later).
+  let out = source.replace(/\b(event|person)\|lookup:\s*(['"])([A-Za-z0-9_$]+)\2/g, '$1.$3');
+  // {% with p=event.Price|default:… %}…{% endwith %}: inline the variable as its first path.
+  out = out.replace(/\{%\s*with\s+(\w+)\s*=\s*([a-zA-Z0-9_$.]+)[^%]*%\}([\s\S]*?)\{%\s*endwith\s*%\}/g, (_, name: string, path: string, body: string) =>
+    body.replace(/\{[{%][\s\S]*?[}%]\}/g, tag => tag.replace(new RegExp(`\\b${name}\\b`, 'g'), path)));
+  out = out
+    .replace(/\{%\s*currency_format\s+([a-zA-Z0-9_$.]+)\s*%\}/g, '{{ $1 }} €')
+    .replace(/\{%\s*(if|elif)\s+([^%]*?)%\}/g, (_, kind: string, expr: string) => {
+      const neg = /^\s*not\s/.test(expr);
+      const path = klaviyoPath(/(event\.[a-zA-Z0-9_$.]+|person\.[a-z_]+|first_name|last_name)/.exec(expr)?.[1] ?? '');
+      if (!path) warnings.add(`Condición de Klaviyo no reconocida (se muestra siempre): ${expr.trim().slice(0, 50)}`);
+      return `{{#${kind} ${neg ? '!' : ''}${path}}}`;
+    })
+    .replace(/\{%\s*else\s*%\}/g, '{{#else}}').replace(/\{%\s*endif\s*%\}/g, '{{/if}}')
+    .replace(/\{\{\s*organization\.url\s*(\|[^}]*)?\}\}/g, 'https://speedwear.es');
+  out = out
     .replace(/\{%\s*unsubscribe\s*(?:(['"])(.*?)\1)?\s*%\}/g, (_, _q, label) => `<a href="{{unsubscribeUrl}}" style="color:inherit">${escapeHtml(label || 'Cancelar suscripción')}</a>`)
     .replace(/\{%\s*(unsubscribe_url|unsubscribe_link|manage_preferences(?:_url|_link)?)\s*%\}|\{\{\s*unsubscribe_url\s*\}\}/g, '{{unsubscribeUrl}}')
     .replace(/\{%\s*(web_view|view_in_browser)(?:_url|_link)?\s*%\}/g, 'https://speedwear.es')
@@ -160,6 +205,6 @@ export function fromKlaviyo(source: string) {
     .replace(/\{\{\s*event\.([a-zA-Z0-9_$.]+)\s*((?:\|[^}]*)?)\}\}/g, (_, path: string, filters: string) => token(`event.${klaviyoEventPaths[path] ?? path}`, filters))
     .replace(/utm_source=klaviyo/g, 'utm_source=speedwear_mail');
   out = out.replace(/\{%[\s\S]*?%\}/g, tag => { warnings.add(`Etiqueta de Klaviyo eliminada: ${tag.slice(0, 60)}`); return ''; });
-  out = out.replace(/\{\{(?!\s*(firstName|lastName|email|unsubscribeUrl|address|event\.))[\s\S]*?\}\}/g, tag => { warnings.add(`Variable de Klaviyo eliminada: ${tag.slice(0, 60)}`); return ''; });
+  out = out.replace(/\{\{(?!\s*(firstName|lastName|email|unsubscribeUrl|address|event\.|#if|#elif|#else|\/if))[\s\S]*?\}\}/g, tag => { warnings.add(`Variable de Klaviyo eliminada: ${tag.slice(0, 60)}`); return ''; });
   return { html: out, warnings: [...warnings] };
 }
