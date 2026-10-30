@@ -599,6 +599,13 @@ export class MarketingService {
       });
     }
   }
+  private async klaviyoTemplateHtml(id: string) {
+    const key = this.config.get<string>('KLAVIYO_API_KEY')?.trim();
+    if (!key) throw new BadRequestException('Falta KLAVIYO_API_KEY para descargar las plantillas.');
+    const res = await fetch(`https://a.klaviyo.com/api/templates/${encodeURIComponent(id)}/?fields%5Btemplate%5D=html`, { headers: { Authorization: `Klaviyo-API-Key ${key}`, accept: 'application/vnd.api+json', revision: '2024-10-15' } });
+    if (!res.ok) throw new BadRequestException(`Klaviyo no devolvió la plantilla ${id} (${res.status}).`);
+    return String(((await res.json()) as any)?.data?.attributes?.html ?? '');
+  }
   /** Templates and flows exported from Klaviyo (built from its API). Everything lands as draft; names already present are skipped. */
   async importPackage(body: Record<string, any>) {
     const templates = Array.isArray(body.templates) ? body.templates.slice(0, 200) : [];
@@ -609,7 +616,8 @@ export class MarketingService {
     for (const t of templates) {
       const key = d.string(String(t.key ?? ''), 'Clave de plantilla', 100);
       const name = d.string(t.name, 'Nombre de plantilla', 200);
-      const converted = d.fromKlaviyo(d.string(t.html, 'HTML', d.htmlBlockMax));
+      const html = typeof t.html === 'string' && t.html ? t.html : await this.klaviyoTemplateHtml(d.string(String(t.klaviyoTemplateId ?? ''), 'Plantilla de Klaviyo', 50));
+      const converted = d.fromKlaviyo(d.string(html, 'HTML', d.htmlBlockMax));
       converted.warnings.forEach(w => warnings.push(`${name}: ${w}`));
       const existing = await this.db.marketingTemplate.findFirst({ where: { name }, select: { id: true } });
       if (existing) { ids.set(key, existing.id); continue; }
