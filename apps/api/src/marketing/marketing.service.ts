@@ -423,7 +423,9 @@ export class MarketingService {
     const message = await this.db.marketingMessage.findUnique({ where: { trackingToken: token }, select: { contact: { select: { id: true, email: true } } } });
     if (!message) return { ok: true };
     const productId = d.string(String(p.id ?? ''), 'Producto', 60);
-    const properties = { productId, title: d.string(p.title, 'Título', 300, true), url: d.safeUrl(String(p.url ?? '')), image: d.safeUrl(String(p.image ?? '')), price: d.string(String(p.price ?? ''), 'Precio', 30, true) };
+    const title = d.string(p.title, 'Título', 300, true);
+    // itemsText matches the cart summary that imported Klaviyo cart templates now show.
+    const properties = { productId, title, itemsText: title, url: d.safeUrl(String(p.url ?? '')), image: d.safeUrl(String(p.image ?? '')), price: d.string(String(p.price ?? ''), 'Precio', 30, true) };
     await this.ingestEvent({ name, email: message.contact.email, externalId: `${name === 'Added to Cart' ? 'cart' : 'view'}:${message.contact.id}:${productId}:${new Date().toISOString().slice(0, 10)}`, properties });
     return { ok: true };
   }
