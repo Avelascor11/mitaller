@@ -2,8 +2,8 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  ArrowDown, ArrowUp, BarChart3, ClipboardCheck, Code, Copy, FileText, Filter, FormInput, Mail, Megaphone, Pause, Play, Plus,
-  RefreshCw, Send, Settings, Trash2, Upload, Users, Workflow, X
+  ArrowDown, ArrowUp, BarChart3, ClipboardCheck, Code, Copy, Euro, FileText, Filter, FormInput, Mail, MailOpen, Megaphone, MousePointerClick, Pause, Play, Plus,
+  RefreshCw, Send, Settings, Trash2, Upload, Users, Workflow, X, Zap
 } from 'lucide-react';
 
 const API = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001';
@@ -78,6 +78,10 @@ function StatRow({ stats }: { stats?: Stats }) {
   if (!stats) return null;
   return <span className="mkStatRow"><b>{stats.sent}</b> env · {pct(stats.opened, stats.sent)} abre · {pct(stats.clicked, stats.sent)} clic · {eur(stats.revenue)}</span>;
 }
+function MiniStats({ stats }: { stats?: Stats }) {
+  if (!stats) return null;
+  return <div className="mkMini">{[['Enviados', stats.sent.toLocaleString('es-ES')], ['Apertura', pct(stats.opened, stats.sent)], ['Clics', pct(stats.clicked, stats.sent)], ['Ventas', eur(stats.revenue)]].map(([l, v]) => <span key={l}><b>{v}</b>{l}</span>)}</div>;
+}
 
 function useToast() {
   const [toast, setToast] = useState<{ msg: string; ok: boolean } | null>(null);
@@ -99,9 +103,9 @@ export default function MarketingPage() {
     read(); window.addEventListener('hashchange', read); return () => window.removeEventListener('hashchange', read);
   }, []);
   return (
-    <main className="shell">
+    <main className="shell mkShell">
       <aside className="sidebar">
-        <div className="brand"><span className="logo">M</span><span>Speedwear Mail</span></div>
+        <div className="brand"><span className="logo">SW</span><span>Speedwear <em>Mail</em></span></div>
         <nav>
           <div className="navLabel">Email marketing</div>
           {TABS.map(([key, label, Icon]) => <a key={key} href={`#${key}`} className={tab === key ? 'active' : ''}><Icon size={17} /><span>{label}</span></a>)}
@@ -143,23 +147,22 @@ function Overview({ notify }: { notify: Notify }) {
   const [data, reload] = useLoad<any>(load, notify);
   if (!data) return <Header title="Resumen" subtitle="Cargando…" />;
   const sent = Object.entries(data.statuses as Record<string, number>).filter(([s]) => ['SENT', 'DELIVERED', 'BOUNCED', 'COMPLAINED'].includes(s)).reduce((a, [, n]) => a + n, 0);
-  const max = Math.max(1, ...data.daily.map((d: any) => d.count));
   return (
     <>
       <Header title="Resumen" subtitle="Últimos 30 días de email marketing."><button onClick={reload}><RefreshCw size={14} /></button></Header>
       {!data.settings.ready && <div className="mkNotice warn">Envíos desactivados: faltan ajustes SMTP o <code>MARKETING_SEND_ENABLED=true</code>. Revisa <a href="#ajustes">Ajustes</a>.</div>}
       <div className="mkKpis">
-        <Kpi label="Suscritos" value={data.subscribed.toLocaleString('es-ES')} hint={`${data.contacts.toLocaleString('es-ES')} contactos`} />
-        <Kpi label="Emails enviados" value={sent.toLocaleString('es-ES')} hint={`${data.activeFlows} automatizaciones activas`} />
-        <Kpi label="Apertura" value={pct(data.opened, sent)} hint={`${data.opened} aperturas`} />
-        <Kpi label="Clics" value={pct(data.clicked, sent)} hint={`${data.clicked} clics`} />
-        <Kpi label="Ingresos atribuidos" value={eur(data.revenue.attributed)} hint={`${data.revenue.attributedOrders} pedidos · ${pct(data.revenue.attributed, data.revenue.total)} de ${eur(data.revenue.total)}`} />
+        <Kpi icon={Users} label="Suscritos" value={data.subscribed.toLocaleString('es-ES')} hint={`${data.contacts.toLocaleString('es-ES')} contactos`} />
+        <Kpi icon={Send} label="Emails enviados" value={sent.toLocaleString('es-ES')} hint={`${data.activeFlows} automatizaciones activas`} />
+        <Kpi icon={MailOpen} label="Apertura" value={pct(data.opened, sent)} hint={`${data.opened.toLocaleString('es-ES')} aperturas`} />
+        <Kpi icon={MousePointerClick} label="Clics" value={pct(data.clicked, sent)} hint={`${data.clicked.toLocaleString('es-ES')} clics`} />
+        <Kpi icon={Euro} label="Ingresos atribuidos" value={eur(data.revenue.attributed)} hint={`${data.revenue.attributedOrders} pedidos · ${pct(data.revenue.attributed, data.revenue.total)} de ${eur(data.revenue.total)}`} />
       </div>
       <Performance notify={notify} attributionDays={data.settings.attributionDays} />
       <div className="mkGrid2">
         <section className="panel">
-          <h2>Envíos por día</h2>
-          <div className="mkBars">{data.daily.length ? data.daily.map((d: any) => <div key={d.day} title={`${d.day}: ${d.count}`} style={{ height: `${(d.count / max) * 100}%` }} />) : <p className="mkMuted">Sin envíos todavía.</p>}</div>
+          <div className="mkBlockHead"><h2>Envíos por día</h2><small className="mkMuted">{sent.toLocaleString('es-ES')} emails · 30 días</small></div>
+          <DailyChart daily={data.daily} />
         </section>
         <section className="panel">
           <h2>Campañas recientes</h2>
@@ -188,10 +191,10 @@ function Performance({ notify, attributionDays }: { notify: Notify; attributionD
     <section className="panel">
       <div className="mkBlockHead"><h2>¿Qué vende más?</h2><select value={days} onChange={e => setDays(Number(e.target.value))}>{PERIODS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}</select></div>
       <p className="mkMuted">{best ? `Lo que más vende: «${best.name}» con ${eur(best.revenue)}. ` : 'Aún no hay ventas atribuidas en este periodo. '}Una venta cuenta si el cliente compra en los {attributionDays} días siguientes a abrir o hacer clic en un email.</p>
-      <div className="mkTable"><table>
+      <div className="mkTable"><table className="mkNum">
         <thead><tr><th>Nombre</th><th>Tipo</th><th>Enviados</th><th>Apertura</th><th>Clics</th><th>Bajas</th><th>Pedidos</th><th>Ventas</th><th>€ por email</th></tr></thead>
         <tbody>{rows.map(r => (
-          <tr key={r.kind + r.id}>
+          <tr key={r.kind + r.id} className={r.sent || r.orders ? '' : 'mkDim'}>
             <td>{r.name}</td><td>{r.kind === 'flow' ? 'Automatización' : 'Campaña'} <Badge status={r.status} /></td>
             <td>{r.sent.toLocaleString('es-ES')}</td><td>{pct(r.opened, r.sent)}</td><td>{pct(r.clicked, r.sent)}</td><td>{pct(r.unsubscribed, r.sent)}</td>
             <td>{r.orders}</td><td><b>{eur(r.revenue)}</b></td><td>{r.sent ? (r.revenue / r.sent).toLocaleString('es-ES', { style: 'currency', currency: 'EUR' }) : '—'}</td>
@@ -201,8 +204,26 @@ function Performance({ notify, attributionDays }: { notify: Notify; attributionD
     </section>
   );
 }
-function Kpi({ label, value, hint }: { label: string; value: string; hint: string }) {
-  return <div className="mkKpi"><span>{label}</span><strong>{value}</strong><small>{hint}</small></div>;
+function Kpi({ icon: Icon, label, value, hint }: { icon: typeof Mail; label: string; value: string; hint: string }) {
+  return <div className="mkKpi"><span><i><Icon size={14} /></i>{label}</span><strong>{value}</strong><small>{hint}</small></div>;
+}
+// The API only returns days with sends; fill the 30-day axis so one busy day does not fill the whole chart.
+function DailyChart({ daily }: { daily: { day: string; count: number }[] }) {
+  const counts = new Map(daily.map(d => [d.day, d.count]));
+  const days = Array.from({ length: 30 }, (_, i) => new Date(Date.now() - (29 - i) * 86400000).toISOString().slice(0, 10));
+  const max = Math.max(1, ...days.map(d => counts.get(d) ?? 0));
+  const label = (d: string) => new Date(`${d}T12:00:00Z`).toLocaleDateString('es-ES', { day: 'numeric', month: 'short' });
+  return (
+    <>
+      <div className="mkBars">{days.map(d => { const n = counts.get(d) ?? 0; return <div key={d} className={n ? '' : 'zero'} title={`${label(d)}: ${n.toLocaleString('es-ES')} emails`} style={{ height: n ? `${Math.max(4, (n / max) * 100)}%` : undefined }} />; })}</div>
+      <div className="mkAxis"><span>{label(days[0])}</span><span>{label(days[15])}</span><span>Hoy</span></div>
+    </>
+  );
+}
+function Thumb({ content, onOpen }: { content: Content; onOpen: () => void }) {
+  const [html, setHtml] = useState('');
+  useEffect(() => { api<{ html: string }>('/preview', 'POST', { ...content, name: content.name || 'Vista previa', subject: content.subject || 'Vista previa' }).then(r => setHtml(r.html)).catch(() => null); }, [content]);
+  return <button className="mkThumb" title="Editar" onClick={onOpen}>{html && <iframe srcDoc={html} sandbox="" tabIndex={-1} title="" />}</button>;
 }
 
 // ── Contactos ──
@@ -473,7 +494,7 @@ function Templates({ notify }: { notify: Notify }) {
     <>
       <Header title="Plantillas" subtitle="Contenido reutilizable para campañas y automatizaciones."><button className="primary" onClick={() => setEdit(blankContent())}><Plus size={14} /> Plantilla</button></Header>
       <div className="mkCards">{items?.map(t => (
-        <article className="panel" key={t.id}><h2>{t.name}</h2><p>{t.subject}</p><small className="mkMuted">Editada {date(t.updatedAt)}</small>
+        <article className="panel" key={t.id}><Thumb content={t} onOpen={() => setEdit({ id: t.id, name: t.name, subject: t.subject, preheader: t.preheader, blocks: t.blocks })} /><h2>{t.name}</h2><p>{t.subject}</p><small className="mkMuted">Editada {date(t.updatedAt)}</small>
           <div className="mkRowBtns"><button onClick={() => setEdit({ id: t.id, name: t.name, subject: t.subject, preheader: t.preheader, blocks: t.blocks })}>Editar</button><button onClick={() => setEdit({ name: `${t.name} (copia)`, subject: t.subject, preheader: t.preheader, blocks: t.blocks })}><Copy size={13} /></button><button onClick={() => confirm(`Borrar ${t.name}?`) && api(`/templates/${t.id}`, 'DELETE').then(reload).catch(notify.err)}><Trash2 size={13} /></button></div>
         </article>
       ))}{items && !items.length && <p className="mkMuted">Sin plantillas todavía.</p>}</div>
@@ -515,11 +536,11 @@ function Campaigns({ notify }: { notify: Notify }) {
         {detail.status === 'SCHEDULED' && <button onClick={() => confirm('Cancelar los envíos pendientes de esta campaña?') && api(`/campaigns/${detail.id}/cancel`, 'POST').then(r => { notify.ok(`${r.cancelled} envíos cancelados`); setDetail(null); reload(); }).catch(notify.err)}>Cancelar envío</button>}
       </Header>
       <div className="mkKpis">
-        <Kpi label="Enviados" value={String(detail.stats.sent)} hint={Object.entries(detail.statuses).map(([s, n]) => `${STATUS[s]?.[0] ?? s}: ${n}`).join(' · ')} />
-        <Kpi label="Apertura" value={pct(detail.stats.opened, detail.stats.sent)} hint={`${detail.stats.opened} aperturas`} />
-        <Kpi label="Clics" value={pct(detail.stats.clicked, detail.stats.sent)} hint={`${detail.stats.clicked} clics`} />
-        <Kpi label="Bajas" value={pct(detail.stats.unsubscribed, detail.stats.sent)} hint={`${detail.stats.bounced} rebotes/spam`} />
-        <Kpi label="Ingresos" value={eur(detail.stats.revenue)} hint={`${detail.stats.orders} pedidos`} />
+        <Kpi icon={Send} label="Enviados" value={detail.stats.sent.toLocaleString('es-ES')} hint={Object.entries(detail.statuses).map(([s, n]) => `${STATUS[s]?.[0] ?? s}: ${n}`).join(' · ')} />
+        <Kpi icon={MailOpen} label="Apertura" value={pct(detail.stats.opened, detail.stats.sent)} hint={`${detail.stats.opened} aperturas`} />
+        <Kpi icon={MousePointerClick} label="Clics" value={pct(detail.stats.clicked, detail.stats.sent)} hint={`${detail.stats.clicked} clics`} />
+        <Kpi icon={Users} label="Bajas" value={pct(detail.stats.unsubscribed, detail.stats.sent)} hint={`${detail.stats.bounced} rebotes/spam`} />
+        <Kpi icon={Euro} label="Ingresos" value={eur(detail.stats.revenue)} hint={`${detail.stats.orders} pedidos`} />
       </div>
       <section className="panel"><h2>Últimos envíos</h2><div className="mkList">{detail.messages.map((m: any) => <div key={m.id}><span>{m.contact.email}</span><Badge status={m.status} /><small>{date(m.sentAt)}{m.openedAt ? ' · abierto' : ''}{m.clickedAt ? ' · clic' : ''}{m.error ? ` · ${m.error}` : ''}</small></div>)}</div></section>
     </>
@@ -623,9 +644,9 @@ function Flows({ notify }: { notify: Notify }) {
       <div className="mkCards">{items?.map(f => (
         <article className="panel" key={f.id}>
           <div className="mkBlockHead"><h2>{f.name}</h2><Badge status={f.status} /></div>
-          <p>Evento <b>{f.trigger}</b>{f.stopOnEvent ? <> · sale con <b>{f.stopOnEvent}</b></> : null}{f.transactional ? ' · transaccional' : ''}{f.reentryDays ? ` · 1 vez cada ${f.reentryDays} d` : ''}</p>
-          <ol className="mkSteps">{f.steps.map((s, i) => <li key={i}>{delayLabel(s.delayMinutes)} → {name(s.templateId)}{s.onlyIf ? <small className="mkMuted"> · {conditionLabel(s.onlyIf).toLowerCase()}</small> : null}</li>)}</ol>
-          <p><StatRow stats={f.stats} />{f.queued ? <> · {f.queued} en cola</> : null}</p>
+          <p className="mkTrigger"><Zap size={13} /><span>Empieza con <b>{f.trigger}</b>{f.stopOnEvent ? <> · sale con <b>{f.stopOnEvent}</b></> : null}{f.transactional ? ' · transaccional' : ''}{f.reentryDays ? ` · 1 vez cada ${f.reentryDays} d` : ''}</span></p>
+          <ol className="mkTimeline">{f.steps.map((s, i) => <li key={i}><span className="mkDelay">{delayLabel(s.delayMinutes)}</span><span>{name(s.templateId)}</span>{s.onlyIf ? <small className="mkMuted">{conditionLabel(s.onlyIf).toLowerCase()}</small> : null}</li>)}</ol>
+          <MiniStats stats={f.stats} />{f.queued ? <p className="mkMuted">{f.queued} en cola</p> : null}
           <div className="mkRowBtns">
             {f.status === 'LIVE' ? <button onClick={() => status(f, false)}><Pause size={13} /> Pausar</button> : <><button className="primary" onClick={() => status(f, true)}><Play size={13} /> Activar</button><button onClick={() => setEdit({ id: f.id, name: f.name, trigger: f.trigger, stopOnEvent: f.stopOnEvent ?? '', transactional: f.transactional, reentryDays: f.reentryDays, steps: f.steps })}>Editar</button><button onClick={() => confirm(`Borrar ${f.name}?`) && api(`/flows/${f.id}`, 'DELETE').then(reload).catch(notify.err)}><Trash2 size={13} /></button></>}
             <button onClick={() => setTest(test?.id === f.id ? null : { id: f.id, email: test?.email ?? '' })}><Send size={13} /> Probar</button>
