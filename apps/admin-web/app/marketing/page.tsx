@@ -649,7 +649,7 @@ function SettingsTab({ notify }: { notify: Notify }) {
   useEffect(() => { api<EventInfo[]>('/events').then(setEvents).catch(() => null); }, []);
   const base = s?.publicApiUrl || '<MARKETING_PUBLIC_API_URL>';
   const labels: Record<string, string> = { SMTP_HOST: 'Servidor SMTP', SMTP_USER: 'Usuario SMTP', SMTP_PASSWORD: 'Contraseña SMTP', FROM_EMAIL: 'Remitente', POSTAL_ADDRESS: 'Dirección postal (pie legal)', PUBLIC_API_URL: 'URL pública de la API', PUBLIC_API_URL_HTTPS: 'La URL pública usa https', SEND_ENABLED: 'Envíos habilitados' };
-  const snippet = useMemo(() => `{% if template contains 'product' %}\n<script>window.SWM_PRODUCT={id:{{ product.id | json }},title:{{ product.title | json }},url:{{ canonical_url | json }},image:{{ product.featured_image | image_url: width: 600 | prepend: 'https:' | json }},price:{{ product.price | money_without_currency | json }}};</script>\n{% endif %}\n<script src="${base}/marketing/public/onsite.js" async></script>`, [base]);
+  const snippet = useMemo(() => `<script src="${base}/marketing/public/onsite.js" async></script>`, [base]);
   if (!s) return <Header title="Ajustes" subtitle="Cargando…" />;
   return (
     <>
@@ -669,7 +669,7 @@ function SettingsTab({ notify }: { notify: Notify }) {
         <label className="mkStack">Shopify → Notificaciones → Webhooks (JSON): checkouts creación/actualización, pedido creado, pedido preparado, cliente creado/actualizado<input readOnly value={`${base}/marketing/integrations/shopify`} /></label>
         <label className="mkStack">Amazon SES → SNS (HTTPS) para rebotes, quejas y entregas<input readOnly value={`${base}/marketing/integrations/ses/<MARKETING_EVENT_SECRET>`} /></label>
         <label className="mkStack">Eventos propios (cabecera x-marketing-secret)<input readOnly value={`POST ${base}/marketing/integrations/events  {"name","externalId","email","properties","value"}`} /></label>
-        <label className="mkStack">Shopify theme.liquid antes de &lt;/body&gt; (navegación abandonada)<textarea readOnly rows={5} value={snippet} /></label>
+        <label className="mkStack">Shopify theme.liquid antes de &lt;/body&gt; (navegación abandonada)<input readOnly value={snippet} /></label>
       </section>
       <section className="panel"><h2>Eventos recibidos</h2><div className="mkList">{events.map(e => <div key={e.name}><span>{e.name}</span><small>{e.count} · último {date(e.lastAt)}</small><small className="mkMuted">{e.keys.join(', ')}</small></div>)}{!events.length && <p className="mkMuted">Aún no ha llegado ningún evento.</p>}</div></section>
     </>
