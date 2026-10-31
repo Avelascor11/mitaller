@@ -212,6 +212,25 @@ describe('MarketingService flow conditions and package import', () => {
     expect(transport.close).toHaveBeenCalled();
   });
 
+  it('ordena automatizaciones y campañas por ventas atribuidas', async () => {
+    const groupBy = vi.fn().mockResolvedValue([
+      { flowId: 'f1', campaignId: null, _count: { _all: 200, openedAt: 90, clickedAt: 12, unsubscribedAt: 1 } },
+      { flowId: 'f2', campaignId: null, _count: { _all: 40, openedAt: 20, clickedAt: 5, unsubscribedAt: 0 } },
+      { flowId: null, campaignId: 'c1', _count: { _all: 8000, openedAt: 2400, clickedAt: 160, unsubscribedAt: 30 } }
+    ]);
+    const { service, db } = serviceWith({
+      marketingFlow: { findMany: vi.fn().mockResolvedValue([{ id: 'f1', name: 'Bienvenida', status: 'LIVE' }, { id: 'f2', name: 'Carrito', status: 'LIVE' }, { id: 'f3', name: 'Nueva', status: 'DRAFT' }]) },
+      marketingCampaign: { findMany: vi.fn().mockResolvedValue([{ id: 'c1', name: 'Black Friday', status: 'FINISHED' }]) },
+      marketingMessage: { groupBy },
+      $queryRaw: vi.fn().mockResolvedValue([{ flowId: 'f2', campaignId: null, orders: 3n, revenue: 149.7 }, { flowId: null, campaignId: 'c1', orders: 10n, revenue: 420.456 }])
+    });
+    const result = await service.performance('30');
+    expect(groupBy.mock.calls[0][0].where.sentAt.gte.getTime()).toBeGreaterThan(Date.now() - 31 * 86400000);
+    expect((db as any).marketingCampaign.findMany).toHaveBeenCalledWith({ where: { status: { not: 'DRAFT' } }, select: { id: true, name: true, status: true } });
+    expect(result.rows.map(r => [r.name, r.sent, r.orders, r.revenue])).toEqual([['Black Friday', 8000, 10, 420.46], ['Carrito', 40, 3, 149.7], ['Bienvenida', 200, 0, 0], ['Nueva', 0, 0, 0]]);
+    expect(result.rows[1]).toMatchObject({ kind: 'flow', opened: 20, clicked: 5, unsubscribed: 0 });
+  });
+
   it('importa plantillas y automatizaciones de Klaviyo en borrador', async () => {
     const marketingTemplate = { findFirst: vi.fn().mockResolvedValue(null), create: vi.fn().mockResolvedValue({ id: 'tpl-1' }) };
     const marketingFlow = { findFirst: vi.fn().mockResolvedValue(null), create: vi.fn() };

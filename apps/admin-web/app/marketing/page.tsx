@@ -155,6 +155,7 @@ function Overview({ notify }: { notify: Notify }) {
         <Kpi label="Clics" value={pct(data.clicked, sent)} hint={`${data.clicked} clics`} />
         <Kpi label="Ingresos atribuidos" value={eur(data.revenue.attributed)} hint={`${data.revenue.attributedOrders} pedidos · ${pct(data.revenue.attributed, data.revenue.total)} de ${eur(data.revenue.total)}`} />
       </div>
+      <Performance notify={notify} attributionDays={data.settings.attributionDays} />
       <div className="mkGrid2">
         <section className="panel">
           <h2>Envíos por día</h2>
@@ -173,6 +174,31 @@ function Overview({ notify }: { notify: Notify }) {
         </section>
       )}
     </>
+  );
+}
+type PerformanceRow = { kind: 'flow' | 'campaign'; id: string; name: string; status: string; sent: number; opened: number; clicked: number; unsubscribed: number; orders: number; revenue: number };
+const PERIODS: [number, string][] = [[7, '7 días'], [30, '30 días'], [90, '90 días'], [365, '1 año'], [0, 'Todo']];
+function Performance({ notify, attributionDays }: { notify: Notify; attributionDays: number }) {
+  const [days, setDays] = useState(30);
+  const load = useCallback(() => api<{ rows: PerformanceRow[] }>(`/performance?days=${days}`), [days]);
+  const [data] = useLoad(load, notify);
+  const rows = data?.rows ?? [];
+  const best = rows.find(r => r.revenue > 0);
+  return (
+    <section className="panel">
+      <div className="mkBlockHead"><h2>¿Qué vende más?</h2><select value={days} onChange={e => setDays(Number(e.target.value))}>{PERIODS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}</select></div>
+      <p className="mkMuted">{best ? `Lo que más vende: «${best.name}» con ${eur(best.revenue)}. ` : 'Aún no hay ventas atribuidas en este periodo. '}Una venta cuenta si el cliente compra en los {attributionDays} días siguientes a abrir o hacer clic en un email.</p>
+      <div className="mkTable"><table>
+        <thead><tr><th>Nombre</th><th>Tipo</th><th>Enviados</th><th>Apertura</th><th>Clics</th><th>Bajas</th><th>Pedidos</th><th>Ventas</th><th>€ por email</th></tr></thead>
+        <tbody>{rows.map(r => (
+          <tr key={r.kind + r.id}>
+            <td>{r.name}</td><td>{r.kind === 'flow' ? 'Automatización' : 'Campaña'} <Badge status={r.status} /></td>
+            <td>{r.sent.toLocaleString('es-ES')}</td><td>{pct(r.opened, r.sent)}</td><td>{pct(r.clicked, r.sent)}</td><td>{pct(r.unsubscribed, r.sent)}</td>
+            <td>{r.orders}</td><td><b>{eur(r.revenue)}</b></td><td>{r.sent ? (r.revenue / r.sent).toLocaleString('es-ES', { style: 'currency', currency: 'EUR' }) : '—'}</td>
+          </tr>
+        ))}</tbody>
+      </table>{data && !rows.length && <p className="mkMuted">Aún no hay automatizaciones ni campañas.</p>}</div>
+    </section>
   );
 }
 function Kpi({ label, value, hint }: { label: string; value: string; hint: string }) {

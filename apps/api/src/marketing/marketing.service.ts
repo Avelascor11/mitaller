@@ -68,6 +68,23 @@ export class MarketingService {
       revenue: { attributed: attributed._sum.value ?? 0, attributedOrders: attributed._count, total: orders._sum.value ?? 0, orders: orders._count }
     };
   }
+  /** Which flows and campaigns sell: emails sent in the period and the Placed Order revenue attributed to their messages. days = 0 means all time. */
+  async performance(days: unknown) {
+    const n = Math.max(0, Math.min(3650, Math.round(Number(days)) || 0));
+    const since = n ? new Date(Date.now() - n * 86400000) : new Date(0);
+    const [flows, campaigns, sends, sales] = await Promise.all([
+      this.db.marketingFlow.findMany({ select: { id: true, name: true, status: true } }),
+      this.db.marketingCampaign.findMany({ where: { status: { not: 'DRAFT' } }, select: { id: true, name: true, status: true } }),
+      this.db.marketingMessage.groupBy({ by: ['flowId', 'campaignId'], where: { sentAt: { gte: since } }, _count: { _all: true, openedAt: true, clickedAt: true, unsubscribedAt: true } }),
+      this.db.$queryRaw<Array<{ flowId: string | null; campaignId: string | null; orders: bigint; revenue: number | null }>>`SELECT m."flowId", m."campaignId", COUNT(*) AS orders, SUM(e.value) AS revenue FROM "MarketingEvent" e JOIN "MarketingMessage" m ON m.id = e."messageId" WHERE e.name = 'Placed Order' AND e."createdAt" >= ${since} GROUP BY m."flowId", m."campaignId"`
+    ]);
+    const row = (kind: 'flow' | 'campaign', item: { id: string; name: string; status: string }) => {
+      const key = kind === 'flow' ? 'flowId' : 'campaignId';
+      const s = sends.find(x => x[key] === item.id), v = sales.find(x => x[key] === item.id);
+      return { kind, id: item.id, name: item.name, status: item.status, sent: s?._count._all ?? 0, opened: s?._count.openedAt ?? 0, clicked: s?._count.clickedAt ?? 0, unsubscribed: s?._count.unsubscribedAt ?? 0, orders: Number(v?.orders ?? 0), revenue: Math.round(Number(v?.revenue ?? 0) * 100) / 100 };
+    };
+    return { days: n, rows: [...flows.map(f => row('flow', f)), ...campaigns.map(c => row('campaign', c))].sort((a, b) => b.revenue - a.revenue || b.sent - a.sent) };
+  }
 
   // ── Contacts ──
   async contacts(search = '', page = 1, status = '') {

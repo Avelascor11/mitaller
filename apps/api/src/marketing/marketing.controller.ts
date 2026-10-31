@@ -12,6 +12,7 @@ type Payload = Record<string, any>;
 export class MarketingController {
   constructor(private readonly marketing: MarketingService) {}
   @Get('overview') overview() { return this.marketing.overview(); }
+  @Get('performance') performance(@Query('days') days?: string) { return this.marketing.performance(days); }
   @Get('settings') settings() { return this.marketing.settings(); }
 
   @Get('contacts') contacts(@Query('search') search?: string, @Query('page') page?: string, @Query('status') status?: string) { return this.marketing.contacts(search ?? '', Number(page) || 1, status ?? ''); }
