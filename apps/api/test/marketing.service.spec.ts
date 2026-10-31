@@ -184,6 +184,34 @@ describe('MarketingService flow conditions and package import', () => {
     expect(marketingMessage.update).toHaveBeenCalledWith({ where: { id: 'm1' }, data: { status: 'SKIPPED', error: 'No cumple la condición del paso.' } });
   });
 
+  it('prueba una automatización enviando todos sus pasos con el último evento real', async () => {
+    const steps = [{ delayMinutes: 0, templateId: 't1' }, { delayMinutes: 1440, templateId: 'gone' }, { delayMinutes: 2880, templateId: 't2' }];
+    const templates: Record<string, any> = {
+      t1: { subject: 'Pedido {{event.orderNumber}}', preheader: '', blocks: [{ type: 'text', text: 'Hola {{firstName}}: {{event.itemsText}}' }] },
+      t2: { subject: 'Vuelve', preheader: '', blocks: [{ type: 'text', text: 'x' }] }
+    };
+    const marketingEvent = { findFirst: vi.fn().mockResolvedValueOnce({ properties: { orderNumber: '2045', itemsText: '2 × Sudadera' }, createdAt: new Date('2026-10-31T10:00:00Z') }) };
+    const { service } = serviceWith({
+      marketingFlow: { findUnique: vi.fn().mockResolvedValue({ id: 'f1', trigger: 'Placed Order', steps }) },
+      marketingEvent,
+      marketingTemplate: { findUnique: vi.fn(({ where }) => Promise.resolve(templates[where.id] ?? null)) },
+      marketingContact: { findUnique: vi.fn().mockResolvedValue({ email: 'angel@speedwear.es', firstName: 'Ángel', lastName: null }) }
+    });
+    const transport = { sendMail: vi.fn().mockResolvedValueOnce({}).mockRejectedValueOnce(Object.assign(new Error('x'), { responseCode: 554, response: '554 not verified' })), close: vi.fn() };
+    vi.spyOn(service as any, 'transport').mockReturnValue(transport);
+    const result = await service.testFlow('f1', { email: 'angel@speedwear.es' });
+    expect(marketingEvent.findFirst.mock.calls[0][0].where).toEqual({ name: 'Placed Order', NOT: { externalId: { startsWith: 'klaviyo:' } } });
+    expect(transport.sendMail.mock.calls[0][0].subject).toBe('[Prueba 1/3] Pedido 2045');
+    expect(transport.sendMail.mock.calls[0][0].html).toContain('Hola Ángel: 2 × Sudadera');
+    expect(transport.sendMail.mock.calls[1][0].subject).toBe('[Prueba 3/3] Vuelve');
+    expect(result).toEqual({ sample: 'real', sampleAt: new Date('2026-10-31T10:00:00Z'), steps: [
+      { subject: 'Pedido {{event.orderNumber}}', sent: true },
+      { subject: '', sent: false, error: 'Plantilla borrada.' },
+      { subject: 'Vuelve', sent: false, error: 'SMTP rechazó la prueba (554: 554 not verified).' }
+    ] });
+    expect(transport.close).toHaveBeenCalled();
+  });
+
   it('importa plantillas y automatizaciones de Klaviyo en borrador', async () => {
     const marketingTemplate = { findFirst: vi.fn().mockResolvedValue(null), create: vi.fn().mockResolvedValue({ id: 'tpl-1' }) };
     const marketingFlow = { findFirst: vi.fn().mockResolvedValue(null), create: vi.fn() };

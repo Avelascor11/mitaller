@@ -49,6 +49,7 @@ export class MarketingController {
   @Post('flows') createFlow(@Body() body: Payload) { return this.marketing.saveFlow(body); }
   @Put('flows/:id') updateFlow(@Param('id') id: string, @Body() body: Payload) { return this.marketing.saveFlow(body, id); }
   @Post('flows/:id/status') flowStatus(@Param('id') id: string, @Body() body: Payload) { return this.marketing.flowStatus(id, body.live === true); }
+  @Post('flows/:id/test') testFlow(@Param('id') id: string, @Body() body: Payload) { return this.marketing.testFlow(id, body); }
   @Delete('flows/:id') deleteFlow(@Param('id') id: string) { return this.marketing.deleteFlow(id); }
   @Get('events') events() { return this.marketing.events(); }
 

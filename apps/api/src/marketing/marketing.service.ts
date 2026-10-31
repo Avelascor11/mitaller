@@ -18,6 +18,8 @@ type Transport = ReturnType<typeof nodemailer.createTransport>;
 type ContactInput = { email: string; firstName?: string; lastName?: string; country?: string; tags?: string[]; status?: string; consentAt?: Date | null; consentSource?: string | null };
 type ImportPart = 'profiles' | 'lists' | 'segments' | 'orders';
 type ImportJob = { running: boolean; processed: number; imported: number; skipped: number; stage?: string; parts?: ImportPart[]; lists?: number; segments?: number; orders?: number; startedAt?: string; finishedAt?: string; error?: string };
+/** Flow tests use this when the trigger has never fired; keys match what Shopify and the onsite script send. */
+const sampleEvent = { orderNumber: '1001', total: '49,90', itemsText: '1 × Camiseta Speedwear (M)', checkoutUrl: 'https://speedwear.es/cart', title: 'Camiseta Speedwear', url: 'https://speedwear.es', price: '24,95' };
 
 @Injectable()
 export class MarketingService {
@@ -172,12 +174,41 @@ export class MarketingService {
     const c = this.content({ ...body, name: body.name || 'Prueba' });
     const contact = await this.db.marketingContact.findUnique({ where: { email: to } }) ?? { firstName: 'Ángel', lastName: 'García', email: to };
     const payload: d.MessagePayload = { ...c, blocks: c.blocks as d.Block[], event: body.event && typeof body.event === 'object' ? body.event : undefined };
-    const rendered = d.renderEmail(payload, contact, { address: this.env('POSTAL_ADDRESS') || undefined });
+    const transport = this.transport();
+    try { await this.sendPreview(transport, to, '[Prueba]', payload, contact); } finally { transport.close(); }
+    return { sent: true };
+  }
+  /** Sends every step of a flow right now as "[Prueba n/N]", filled with the latest real trigger event (or a sample), so the whole sequence can be checked without waiting for delays. */
+  async testFlow(id: string, body: Record<string, any>) {
+    const to = d.email(body.email);
+    const flow = await this.db.marketingFlow.findUnique({ where: { id } });
+    if (!flow) throw new NotFoundException('Automatización no encontrada.');
+    // Imported Klaviyo history keeps Klaviyo's property names, so live events are preferred.
+    const real = await this.db.marketingEvent.findFirst({ where: { name: flow.trigger, NOT: { externalId: { startsWith: 'klaviyo:' } } }, orderBy: { createdAt: 'desc' }, select: { properties: true, createdAt: true } })
+      ?? await this.db.marketingEvent.findFirst({ where: { name: flow.trigger }, orderBy: { createdAt: 'desc' }, select: { properties: true, createdAt: true } });
+    const event = real?.properties && typeof real.properties === 'object' && !Array.isArray(real.properties) ? real.properties as Record<string, unknown> : sampleEvent;
+    const contact = await this.db.marketingContact.findUnique({ where: { email: to } }) ?? { firstName: 'Ángel', lastName: 'García', email: to };
+    const steps = d.steps(flow.steps);
+    const results: { subject: string; sent: boolean; error?: string }[] = [];
     const transport = this.transport();
     try {
-      await transport.sendMail({ from: this.from(), to, subject: `[Prueba] ${d.personalize(c.subject, contact, payload.event)}`.replace(/[\r\n]/g, ' '), html: rendered.html, text: rendered.text, disableFileAccess: true, disableUrlAccess: true });
-    } catch (e: any) { throw new BadRequestException(`SMTP rechazó la prueba (${e.code || e.responseCode || 'error'}${e.response ? `: ${String(e.response).slice(0, 300)}` : ''}).`); } finally { transport.close(); }
-    return { sent: true };
+      for (const [i, step] of steps.entries()) {
+        const t = await this.db.marketingTemplate.findUnique({ where: { id: step.templateId } });
+        if (!t) { results.push({ subject: '', sent: false, error: 'Plantilla borrada.' }); continue; }
+        try {
+          await this.sendPreview(transport, to, `[Prueba ${i + 1}/${steps.length}]`, { subject: t.subject, preheader: t.preheader, blocks: t.blocks as d.Block[], event }, contact);
+          results.push({ subject: t.subject, sent: true });
+        } catch (e) { results.push({ subject: t.subject, sent: false, error: e instanceof Error ? e.message : String(e) }); }
+      }
+    } finally { transport.close(); }
+    return { sample: real ? 'real' : 'ejemplo', sampleAt: real?.createdAt ?? null, steps: results };
+  }
+  private async sendPreview(transport: Transport, to: string, prefix: string, payload: d.MessagePayload, contact: { firstName?: string | null; lastName?: string | null; email?: string }) {
+    const person = { firstName: contact.firstName ?? undefined, lastName: contact.lastName ?? undefined, email: contact.email };
+    const rendered = d.renderEmail(payload, person, { address: this.env('POSTAL_ADDRESS') || undefined });
+    try {
+      await transport.sendMail({ from: this.from(), to, subject: `${prefix} ${d.personalize(payload.subject, person, payload.event)}`.replace(/[\r\n]/g, ' '), html: rendered.html, text: rendered.text, disableFileAccess: true, disableUrlAccess: true });
+    } catch (e: any) { throw new BadRequestException(`SMTP rechazó la prueba (${e.code || e.responseCode || 'error'}${e.response ? `: ${String(e.response).slice(0, 300)}` : ''}).`); }
   }
 
   // ── Campaigns ──

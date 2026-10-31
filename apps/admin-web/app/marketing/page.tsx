@@ -20,6 +20,7 @@ type Campaign = Content & { id: string; segmentId: string | null; status: string
 type StepCondition = { event: string; op: 'eq' | 'gt'; value: number; since: 'flow' | 'all' | 'days'; days?: number };
 type Step = { delayMinutes: number; templateId: string; onlyIf?: StepCondition };
 type Flow = { id: string; name: string; trigger: string; stopOnEvent: string | null; transactional: boolean; reentryDays: number; status: string; steps: Step[]; stats?: Stats; queued?: number };
+type FlowTest = { sample: 'real' | 'ejemplo'; sampleAt: string | null; steps: { subject: string; sent: boolean; error?: string }[] };
 type Form = { id: string; name: string; headline: string; description: string; buttonText: string; tag: string; active: boolean };
 type Settings = { ready: boolean; checks: { key: string; ready: boolean }[]; fromEmail: string; fromName: string; address: string; publicApiUrl: string; integrationConfigured: boolean; captureEvents: boolean; shopifyWebhooks: boolean; klaviyoImport: boolean; attributionDays: number; batchSize: number; shopifySync?: { at?: string; ok?: boolean; error?: string; orders: number; checkouts: number; customers: number } };
 type EventInfo = { name: string; count: number; lastAt: string; keys: string[] };
@@ -549,6 +550,12 @@ function Flows({ notify }: { notify: Notify }) {
     try { await api(edit.id ? `/flows/${edit.id}` : '/flows', edit.id ? 'PUT' : 'POST', edit); notify.ok('Automatización guardada'); setEdit(null); reload(); } catch (e) { notify.err(e); }
   }
   const status = (f: Flow, live: boolean) => (!live || confirm(`Activar «${f.name}»? Empezará a enviar con cada evento «${f.trigger}» nuevo.`)) && api(`/flows/${f.id}/status`, 'POST', { live }).then(() => { notify.ok(live ? 'Activada' : 'Pausada; envíos en cola cancelados'); reload(); }).catch(notify.err);
+  const [test, setTest] = useState<{ id: string; email: string; busy?: boolean; result?: FlowTest; error?: string } | null>(null);
+  async function runTest(f: Flow, email: string) {
+    setTest({ id: f.id, email, busy: true });
+    try { setTest({ id: f.id, email, result: await api<FlowTest>(`/flows/${f.id}/test`, 'POST', { email }) }); }
+    catch (e) { setTest({ id: f.id, email, error: e instanceof Error ? e.message : String(e) }); }
+  }
   return (
     <>
       <Header title="Automatizaciones" subtitle="Secuencias que arrancan con un evento (Shopify, Mitaller o la web) y paran con otro.">
@@ -593,7 +600,17 @@ function Flows({ notify }: { notify: Notify }) {
           <p><StatRow stats={f.stats} />{f.queued ? <> · {f.queued} en cola</> : null}</p>
           <div className="mkRowBtns">
             {f.status === 'LIVE' ? <button onClick={() => status(f, false)}><Pause size={13} /> Pausar</button> : <><button className="primary" onClick={() => status(f, true)}><Play size={13} /> Activar</button><button onClick={() => setEdit({ id: f.id, name: f.name, trigger: f.trigger, stopOnEvent: f.stopOnEvent ?? '', transactional: f.transactional, reentryDays: f.reentryDays, steps: f.steps })}>Editar</button><button onClick={() => confirm(`Borrar ${f.name}?`) && api(`/flows/${f.id}`, 'DELETE').then(reload).catch(notify.err)}><Trash2 size={13} /></button></>}
+            <button onClick={() => setTest(test?.id === f.id ? null : { id: f.id, email: test?.email ?? '' })}><Send size={13} /> Probar</button>
           </div>
+          {test?.id === f.id && <>
+            <p className="mkMuted">Te llegan ahora todos los emails seguidos, sin esperas, con los datos del último «{f.trigger}» real.</p>
+            <div className="mkToolbar"><input className="mkSearch" type="email" placeholder="Tu email (@speedwear.es)" value={test.email} onChange={e => setTest({ id: f.id, email: e.target.value })} /><button className="primary" disabled={!test.email.includes('@') || test.busy} onClick={() => runTest(f, test.email.trim())}><Send size={13} /> {test.busy ? 'Enviando…' : `Enviar ${f.steps.length} ${f.steps.length === 1 ? 'email' : 'emails'}`}</button></div>
+            {test.result && <>
+              <p className="mkMuted">{test.result.sample === 'real' ? `Datos del último «${f.trigger}» (${date(test.result.sampleAt)}).` : `Aún no ha llegado ningún «${f.trigger}»: datos de ejemplo.`} Mira bandeja de entrada y spam.</p>
+              <ol className="mkSteps">{test.result.steps.map((s, i) => <li key={i}>{s.sent ? '✓' : '✗'} {delayLabel(f.steps[i]?.delayMinutes ?? 0)} → {name(f.steps[i]?.templateId ?? '')}{f.steps[i]?.onlyIf ? <small className="mkMuted"> · en real: {conditionLabel(f.steps[i].onlyIf).toLowerCase()}</small> : null}{s.error ? <small className="mkMuted"> · {s.error}</small> : null}</li>)}</ol>
+            </>}
+            {test.error && <p className="mkMuted">✗ {test.error}</p>}
+          </>}
         </article>
       ))}{items && !items.length && <p className="mkMuted">Crea primero las plantillas y luego usa un modelo: bienvenida, carrito abandonado, navegación, post-compra, recuperación o devoluciones.</p>}</div>
     </>
