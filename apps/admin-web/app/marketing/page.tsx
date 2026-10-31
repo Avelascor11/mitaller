@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  ArrowDown, ArrowUp, BarChart3, ClipboardCheck, Copy, FileText, Filter, FormInput, Mail, Megaphone, Pause, Play, Plus,
+  ArrowDown, ArrowUp, BarChart3, ClipboardCheck, Code, Copy, FileText, Filter, FormInput, Mail, Megaphone, Pause, Play, Plus,
   RefreshCw, Send, Settings, Trash2, Upload, Users, Workflow, X
 } from 'lucide-react';
 
@@ -423,6 +423,8 @@ function EmailEditor({ value, onChange, notify, events }: { value: Content; onCh
   }, [value]);
   const set = (i: number, b: Partial<Block>) => onChange({ ...value, blocks: value.blocks.map((x, j) => (j === i ? { ...x, ...b } : x)) });
   const move = (i: number, d: number) => { const blocks = [...value.blocks]; const [b] = blocks.splice(i, 1); blocks.splice(i + d, 0, b); onChange({ ...value, blocks }); };
+  // An HTML email must be the only block, so switching replaces the blocks; ask only if they were edited.
+  const toHtml = () => (JSON.stringify(value.blocks) === JSON.stringify(blankContent().blocks) || confirm('Se quitarán los bloques actuales para pegar tu HTML. ¿Seguir?')) && onChange({ ...value, blocks: [{ type: 'html', text: '' }] });
   const keys = [...new Set((events ?? []).flatMap(e => e.keys))].slice(0, 30);
   return (
     <div className="mkEditor">
@@ -437,11 +439,11 @@ function EmailEditor({ value, onChange, notify, events }: { value: Content; onCh
           <div className="mkBlock" key={i}>
             <div className="mkBlockHead"><b>{{ heading: 'Título', text: 'Texto', button: 'Botón', image: 'Imagen', divider: 'Separador', html: 'Email en HTML' }[b.type]}</b>
               <span><button disabled={!i} onClick={() => move(i, -1)}><ArrowUp size={12} /></button><button disabled={i === value.blocks.length - 1} onClick={() => move(i, 1)}><ArrowDown size={12} /></button><button disabled={value.blocks.length < 2} onClick={() => onChange({ ...value, blocks: value.blocks.filter((_, j) => j !== i) })}><Trash2 size={12} /></button></span></div>
-            {b.type === 'html' ? <textarea className="mkCode" rows={22} spellCheck={false} value={b.text ?? ''} onChange={e => set(i, { text: e.target.value })} /> : b.type !== 'divider' && (b.type === 'text' ? <textarea rows={4} value={b.text ?? ''} onChange={e => set(i, { text: e.target.value })} /> : <input placeholder={b.type === 'image' ? 'Texto alternativo' : ''} value={b.text ?? ''} onChange={e => set(i, { text: e.target.value })} />)}
+            {b.type === 'html' ? <textarea className="mkCode" rows={22} spellCheck={false} placeholder="Pega aquí el HTML completo del email" value={b.text ?? ''} onChange={e => set(i, { text: e.target.value })} /> : b.type !== 'divider' && (b.type === 'text' ? <textarea rows={4} value={b.text ?? ''} onChange={e => set(i, { text: e.target.value })} /> : <input placeholder={b.type === 'image' ? 'Texto alternativo' : ''} value={b.text ?? ''} onChange={e => set(i, { text: e.target.value })} />)}
             {['button', 'image'].includes(b.type) && <input placeholder="https://…  o  {{event.checkoutUrl}}" value={b.url ?? ''} onChange={e => set(i, { url: e.target.value })} />}
           </div>
         ))}
-        {value.blocks[0]?.type !== 'html' && <div className="mkRowBtns">{(['heading', 'text', 'button', 'image', 'divider'] as const).map(t => <button key={t} onClick={() => onChange({ ...value, blocks: [...value.blocks, { type: t, text: '', url: '' }] })}><Plus size={12} /> {{ heading: 'Título', text: 'Texto', button: 'Botón', image: 'Imagen', divider: 'Separador' }[t]}</button>)}</div>}
+        {value.blocks[0]?.type !== 'html' && <div className="mkRowBtns">{(['heading', 'text', 'button', 'image', 'divider'] as const).map(t => <button key={t} onClick={() => onChange({ ...value, blocks: [...value.blocks, { type: t, text: '', url: '' }] })}><Plus size={12} /> {{ heading: 'Título', text: 'Texto', button: 'Botón', image: 'Imagen', divider: 'Separador' }[t]}</button>)}<button onClick={toHtml}><Code size={12} /> Email en HTML</button></div>}
         <div className="mkToolbar"><input className="mkSearch" type="email" placeholder="Enviar prueba a… (tu email)" value={testTo} onChange={e => setTestTo(e.target.value)} /><button disabled={!testTo.includes('@') || testState?.busy} onClick={sendTest}><Send size={13} /> {testState?.busy ? 'Enviando…' : 'Prueba'}</button></div>
         {testState && <div className={`mkNotice ${testState.ok ? '' : 'bad'}`}>{testState.msg}</div>}
       </div>
