@@ -18,8 +18,16 @@ type Transport = ReturnType<typeof nodemailer.createTransport>;
 type ContactInput = { email: string; firstName?: string; lastName?: string; country?: string; tags?: string[]; status?: string; consentAt?: Date | null; consentSource?: string | null };
 type ImportPart = 'profiles' | 'lists' | 'segments' | 'orders';
 type ImportJob = { running: boolean; processed: number; imported: number; skipped: number; stage?: string; parts?: ImportPart[]; lists?: number; segments?: number; orders?: number; startedAt?: string; finishedAt?: string; error?: string };
-/** Flow tests use this when the trigger has never fired; keys match what Shopify and the onsite script send. */
+/** Flow tests use these when the trigger has never fired; keys match what Shopify, the onsite script and Mitaller (KlaviyoService) send. */
 const sampleEvent = { orderNumber: '1001', total: '49,90', itemsText: '1 × Camiseta Speedwear (M)', checkoutUrl: 'https://speedwear.es/cart', title: 'Camiseta Speedwear', url: 'https://speedwear.es', price: '24,95' };
+const sampleReturn = { CustomerName: 'Ángel García', OrderNumber: '#1001' };
+const sampleEvents: Record<string, Record<string, unknown>> = {
+  'Return Label Created': { ...sampleReturn, TrackingNumber: 'ES1234567890', Carrier: 'Correos', LabelUrl: 'https://speedwear.es', LabelDownloadUrl: 'https://speedwear.es', LabelPdfUrl: 'https://speedwear.es', LabelFileName: 'etiqueta-devolucion-1001.pdf' },
+  'Return Received': { ...sampleReturn, ReceivedAt: '3 de noviembre de 2026' },
+  'Return Approved': { ...sampleReturn, RefundAmount: '49.90', PaymentMethod: 'Tarjeta original', ApprovedAt: '3 de noviembre de 2026' },
+  'Carrier Return': { ...sampleReturn, Fee: '4.95', PayUrl: 'https://speedwear.es' },
+  'Crew Welcome': { Name: 'Ángel', InstagramHandle: '@speedwear', Tier: 'Crew', Products: 'Camiseta Speedwear (M)', OrderNumber: '#1001', UploadUrl: 'https://speedwear.es' }
+};
 /** Amazon SES list price is 0.10 USD per 1,000 emails; kept in EUR so it can be set against attributed sales. */
 const emailCostPer1000 = 0.09;
 const emailCost = (sent: number) => Math.round(sent * emailCostPer1000 * 10) / 10000;
@@ -210,7 +218,7 @@ export class MarketingService {
     // Imported Klaviyo history keeps Klaviyo's property names, so live events are preferred.
     const real = await this.db.marketingEvent.findFirst({ where: { name: flow.trigger, NOT: { externalId: { startsWith: 'klaviyo:' } } }, orderBy: { createdAt: 'desc' }, select: { properties: true, createdAt: true } })
       ?? await this.db.marketingEvent.findFirst({ where: { name: flow.trigger }, orderBy: { createdAt: 'desc' }, select: { properties: true, createdAt: true } });
-    const event = real?.properties && typeof real.properties === 'object' && !Array.isArray(real.properties) ? real.properties as Record<string, unknown> : sampleEvent;
+    const event = real?.properties && typeof real.properties === 'object' && !Array.isArray(real.properties) ? real.properties as Record<string, unknown> : sampleEvents[flow.trigger] ?? sampleEvent;
     const contact = await this.db.marketingContact.findUnique({ where: { email: to } }) ?? { firstName: 'Ángel', lastName: 'García', email: to };
     const steps = d.steps(flow.steps);
     const results: { subject: string; sent: boolean; error?: string }[] = [];

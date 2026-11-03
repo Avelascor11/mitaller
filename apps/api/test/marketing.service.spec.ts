@@ -212,6 +212,21 @@ describe('MarketingService flow conditions and package import', () => {
     expect(transport.close).toHaveBeenCalled();
   });
 
+  it('prueba una automatización de devoluciones con datos de ejemplo de devolución', async () => {
+    const { service } = serviceWith({
+      marketingFlow: { findUnique: vi.fn().mockResolvedValue({ id: 'f1', trigger: 'Return Approved', steps: [{ delayMinutes: 0, templateId: 't1' }] }) },
+      marketingEvent: { findFirst: vi.fn().mockResolvedValue(null) },
+      marketingTemplate: { findUnique: vi.fn().mockResolvedValue({ subject: 'Tu reembolso de {{event.RefundAmount}}€', preheader: '', blocks: [{ type: 'text', text: '{{event.CustomerName}} · pedido {{event.OrderNumber}}' }] }) },
+      marketingContact: { findUnique: vi.fn().mockResolvedValue(null) }
+    });
+    const transport = { sendMail: vi.fn().mockResolvedValue({}), close: vi.fn() };
+    vi.spyOn(service as any, 'transport').mockReturnValue(transport);
+    const result = await service.testFlow('f1', { email: 'angel@speedwear.es' });
+    expect(result.sample).toBe('ejemplo');
+    expect(transport.sendMail.mock.calls[0][0].subject).toBe('[Prueba 1/1] Tu reembolso de 49.90€');
+    expect(transport.sendMail.mock.calls[0][0].html).toContain('Ángel García · pedido #1001');
+  });
+
   it('ordena automatizaciones y campañas por ventas atribuidas', async () => {
     const groupBy = vi.fn().mockResolvedValue([
       { flowId: 'f1', campaignId: null, _count: { _all: 200, openedAt: 90, clickedAt: 12, unsubscribedAt: 1 } },
