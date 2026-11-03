@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ArrowDown, ArrowUp, BarChart3, ClipboardCheck, Code, Copy, Euro, FileText, Filter, FormInput, Mail, MailOpen, Megaphone, MousePointerClick, Pause, Play, Plus,
-  RefreshCw, Send, Settings, Trash2, Upload, Users, Workflow, X, Zap
+  RefreshCw, Send, Settings, Trash2, Upload, Users, Wallet, Workflow, X, Zap
 } from 'lucide-react';
 
 const API = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001';
@@ -67,6 +67,7 @@ async function api<T = any>(path: string, method = 'GET', body?: unknown): Promi
 }
 const pct = (a: number, b: number) => (b ? `${Math.round((a / b) * 1000) / 10}%` : '—');
 const eur = (v: number) => v.toLocaleString('es-ES', { style: 'currency', currency: 'EUR', maximumFractionDigits: 0 });
+const cents = (v: number) => v.toLocaleString('es-ES', { style: 'currency', currency: 'EUR' });
 const date = (v?: string | null) => (v ? new Date(v).toLocaleString('es-ES', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }) : '—');
 const delayLabel = (m: number) => (m === 0 ? 'Inmediato' : m % 1440 === 0 ? `${m / 1440} d` : m % 60 === 0 ? `${m / 60} h` : `${m} min`);
 
@@ -156,9 +157,10 @@ function Overview({ notify }: { notify: Notify }) {
         <Kpi icon={Send} label="Emails enviados" value={sent.toLocaleString('es-ES')} hint={`${data.activeFlows} automatizaciones activas`} />
         <Kpi icon={MailOpen} label="Apertura" value={pct(data.opened, sent)} hint={`${data.opened.toLocaleString('es-ES')} aperturas`} />
         <Kpi icon={MousePointerClick} label="Clics" value={pct(data.clicked, sent)} hint={`${data.clicked.toLocaleString('es-ES')} clics`} />
+        <Kpi icon={Wallet} label="Gasto este mes" value={cents(data.cost.month)} hint={`${data.cost.monthSent.toLocaleString('es-ES')} emails · total ${cents(data.cost.total)}`} />
         <Kpi icon={Euro} label="Ingresos atribuidos" value={eur(data.revenue.attributed)} hint={`${data.revenue.attributedOrders} pedidos · ${pct(data.revenue.attributed, data.revenue.total)} de ${eur(data.revenue.total)}`} />
       </div>
-      <Performance notify={notify} attributionDays={data.settings.attributionDays} />
+      <Performance notify={notify} attributionDays={data.settings.attributionDays} per1000={data.cost.per1000} />
       <div className="mkGrid2">
         <section className="panel">
           <div className="mkBlockHead"><h2>Envíos por día</h2><small className="mkMuted">{sent.toLocaleString('es-ES')} emails · 30 días</small></div>
@@ -179,25 +181,27 @@ function Overview({ notify }: { notify: Notify }) {
     </>
   );
 }
-type PerformanceRow = { kind: 'flow' | 'campaign'; id: string; name: string; status: string; sent: number; opened: number; clicked: number; unsubscribed: number; orders: number; revenue: number };
+type PerformanceRow = { kind: 'flow' | 'campaign'; id: string; name: string; status: string; sent: number; cost: number; opened: number; clicked: number; unsubscribed: number; orders: number; revenue: number };
 const PERIODS: [number, string][] = [[7, '7 días'], [30, '30 días'], [90, '90 días'], [365, '1 año'], [0, 'Todo']];
-function Performance({ notify, attributionDays }: { notify: Notify; attributionDays: number }) {
+function Performance({ notify, attributionDays, per1000 }: { notify: Notify; attributionDays: number; per1000: number }) {
   const [days, setDays] = useState(30);
   const load = useCallback(() => api<{ rows: PerformanceRow[] }>(`/performance?days=${days}`), [days]);
   const [data] = useLoad(load, notify);
   const rows = data?.rows ?? [];
   const best = rows.find(r => r.revenue > 0);
+  const cost = rows.reduce((a, r) => a + r.cost, 0), revenue = rows.reduce((a, r) => a + r.revenue, 0);
   return (
     <section className="panel">
       <div className="mkBlockHead"><h2>¿Qué vende más?</h2><select value={days} onChange={e => setDays(Number(e.target.value))}>{PERIODS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}</select></div>
       <p className="mkMuted">{best ? `Lo que más vende: «${best.name}» con ${eur(best.revenue)}. ` : 'Aún no hay ventas atribuidas en este periodo. '}Una venta cuenta si el cliente compra en los {attributionDays} días siguientes a abrir o hacer clic en un email.</p>
+      <p className="mkMuted">Gasto en envíos del periodo: <b>{cents(cost)}</b>{cost > 0 && revenue > 0 ? <> · por cada 1 € gastado has vendido <b>{eur(revenue / cost)}</b></> : null}. Amazon cobra {cents(per1000)} por cada 1.000 emails; el servidor (Railway) va aparte.</p>
       <div className="mkTable"><table className="mkNum">
-        <thead><tr><th>Nombre</th><th>Tipo</th><th>Enviados</th><th>Apertura</th><th>Clics</th><th>Bajas</th><th>Pedidos</th><th>Ventas</th><th>€ por email</th></tr></thead>
+        <thead><tr><th>Nombre</th><th>Tipo</th><th>Enviados</th><th>Apertura</th><th>Clics</th><th>Bajas</th><th>Pedidos</th><th>Ventas</th><th>Coste</th><th>€ por email</th></tr></thead>
         <tbody>{rows.map(r => (
           <tr key={r.kind + r.id} className={r.sent || r.orders ? '' : 'mkDim'}>
             <td>{r.name}</td><td>{r.kind === 'flow' ? 'Automatización' : 'Campaña'} <Badge status={r.status} /></td>
             <td>{r.sent.toLocaleString('es-ES')}</td><td>{pct(r.opened, r.sent)}</td><td>{pct(r.clicked, r.sent)}</td><td>{pct(r.unsubscribed, r.sent)}</td>
-            <td>{r.orders}</td><td><b>{eur(r.revenue)}</b></td><td>{r.sent ? (r.revenue / r.sent).toLocaleString('es-ES', { style: 'currency', currency: 'EUR' }) : '—'}</td>
+            <td>{r.orders}</td><td><b>{eur(r.revenue)}</b></td><td>{r.sent ? cents(r.cost) : '—'}</td><td>{r.sent ? cents(r.revenue / r.sent) : '—'}</td>
           </tr>
         ))}</tbody>
       </table>{data && !rows.length && <p className="mkMuted">Aún no hay automatizaciones ni campañas.</p>}</div>

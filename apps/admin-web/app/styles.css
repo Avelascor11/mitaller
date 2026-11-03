@@ -723,6 +723,7 @@ tbody tr:last-child td { border-bottom: 0; }
 .mkShell button.primary:hover, .mkShell a.primary:hover { background: #000; border-color: #000; }
 .mkShell .mkContent :is(input, select, textarea):focus { outline: none; border-color: #202320; box-shadow: 0 0 0 3px rgba(188, 234, 101, .5); }
 
+.mkShell .mkKpis { grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); }
 .mkShell .mkKpi span { display: flex; align-items: center; gap: 8px; }
 .mkKpi i { width: 24px; height: 24px; border-radius: 7px; display: grid; place-items: center; background: var(--accent-soft); color: var(--lime-ink); font-style: normal; }
 .mkShell .mkKpi strong { font-size: 28px; font-variant-numeric: tabular-nums; }
