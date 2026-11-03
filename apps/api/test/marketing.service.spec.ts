@@ -229,6 +229,24 @@ describe('MarketingService flow conditions and package import', () => {
     expect((db as any).marketingCampaign.findMany).toHaveBeenCalledWith({ where: { status: { not: 'DRAFT' } }, select: { id: true, name: true, status: true } });
     expect(result.rows.map(r => [r.name, r.sent, r.orders, r.revenue])).toEqual([['Black Friday', 8000, 10, 420.46], ['Carrito', 40, 3, 149.7], ['Bienvenida', 200, 0, 0], ['Nueva', 0, 0, 0]]);
     expect(result.rows[1]).toMatchObject({ kind: 'flow', opened: 20, clicked: 5, unsubscribed: 0 });
+    expect(result.rows.map(r => r.cost)).toEqual([0.72, 0.0036, 0.018, 0]);
+  });
+
+  it('calcula el gasto de Amazon del mes y desde el inicio', async () => {
+    const count = vi.fn(({ where }) => Promise.resolve(where.openedAt || where.clickedAt ? 5 : where.sentAt?.gte ? 6938 : 10000));
+    const { service } = serviceWith({
+      marketingContact: { count: vi.fn().mockResolvedValue(0) },
+      marketingMessage: { count, groupBy: vi.fn().mockResolvedValue([]), findMany: vi.fn().mockResolvedValue([]) },
+      marketingCampaign: { findMany: vi.fn().mockResolvedValue([]) },
+      marketingFlow: { count: vi.fn().mockResolvedValue(0) },
+      marketingEvent: { aggregate: vi.fn().mockResolvedValue({ _sum: { value: null }, _count: 0 }) },
+      $queryRaw: vi.fn().mockResolvedValue([])
+    });
+    const result = await service.overview();
+    const now = new Date();
+    expect(count).toHaveBeenCalledWith({ where: { sentAt: { gte: new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1)) } } });
+    expect(count).toHaveBeenCalledWith({ where: { sentAt: { not: null } } });
+    expect(result.cost).toEqual({ month: 0.6244, monthSent: 6938, total: 0.9, totalSent: 10000, per1000: 0.09 });
   });
 
   it('importa plantillas y automatizaciones de Klaviyo en borrador', async () => {

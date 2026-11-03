@@ -20,6 +20,9 @@ type ImportPart = 'profiles' | 'lists' | 'segments' | 'orders';
 type ImportJob = { running: boolean; processed: number; imported: number; skipped: number; stage?: string; parts?: ImportPart[]; lists?: number; segments?: number; orders?: number; startedAt?: string; finishedAt?: string; error?: string };
 /** Flow tests use this when the trigger has never fired; keys match what Shopify and the onsite script send. */
 const sampleEvent = { orderNumber: '1001', total: '49,90', itemsText: '1 × Camiseta Speedwear (M)', checkoutUrl: 'https://speedwear.es/cart', title: 'Camiseta Speedwear', url: 'https://speedwear.es', price: '24,95' };
+/** Amazon SES list price is 0.10 USD per 1,000 emails; kept in EUR so it can be set against attributed sales. */
+const emailCostPer1000 = 0.09;
+const emailCost = (sent: number) => Math.round(sent * emailCostPer1000 * 10) / 10000;
 
 @Injectable()
 export class MarketingService {
@@ -51,7 +54,8 @@ export class MarketingService {
   // ── Dashboard ──
   async overview() {
     const since = new Date(Date.now() - 30 * 86400000);
-    const [contacts, subscribed, statuses, opened, clicked, recentCampaigns, activeFlows, daily, failures, attributed, orders] = await Promise.all([
+    const now = new Date(), monthStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1)); // AWS bills by UTC calendar month
+    const [contacts, subscribed, statuses, opened, clicked, recentCampaigns, activeFlows, daily, failures, attributed, orders, monthSent, totalSent] = await Promise.all([
       this.db.marketingContact.count(), this.db.marketingContact.count({ where: { status: 'SUBSCRIBED' } }),
       this.db.marketingMessage.groupBy({ by: ['status'], where: { createdAt: { gte: since }, kind: 'MARKETING' }, _count: true }),
       this.db.marketingMessage.count({ where: { sentAt: { gte: since }, openedAt: { not: null }, kind: 'MARKETING' } }),
@@ -61,11 +65,14 @@ export class MarketingService {
       this.db.$queryRaw<Array<{ day: string; count: bigint }>>`SELECT TO_CHAR("sentAt" AT TIME ZONE 'UTC', 'YYYY-MM-DD') AS day, COUNT(*) AS count FROM "MarketingMessage" WHERE "sentAt" >= ${since} AND kind = 'MARKETING' GROUP BY day ORDER BY day`,
       this.db.marketingMessage.findMany({ where: { status: { in: ['FAILED', 'UNKNOWN'] } }, take: 10, orderBy: { updatedAt: 'desc' }, select: { id: true, status: true, error: true, updatedAt: true, contact: { select: { email: true } } } }),
       this.db.marketingEvent.aggregate({ where: { name: 'Placed Order', createdAt: { gte: since }, messageId: { not: null } }, _sum: { value: true }, _count: true }),
-      this.db.marketingEvent.aggregate({ where: { name: 'Placed Order', createdAt: { gte: since } }, _sum: { value: true }, _count: true })
+      this.db.marketingEvent.aggregate({ where: { name: 'Placed Order', createdAt: { gte: since } }, _sum: { value: true }, _count: true }),
+      this.db.marketingMessage.count({ where: { sentAt: { gte: monthStart } } }),
+      this.db.marketingMessage.count({ where: { sentAt: { not: null } } })
     ]);
     return {
       contacts, subscribed, statuses: Object.fromEntries(statuses.map(s => [s.status, s._count])), opened, clicked, recentCampaigns, activeFlows, daily: daily.map(r => ({ day: r.day, count: Number(r.count) })), failures, settings: this.settings(),
-      revenue: { attributed: attributed._sum.value ?? 0, attributedOrders: attributed._count, total: orders._sum.value ?? 0, orders: orders._count }
+      revenue: { attributed: attributed._sum.value ?? 0, attributedOrders: attributed._count, total: orders._sum.value ?? 0, orders: orders._count },
+      cost: { month: emailCost(monthSent), monthSent, total: emailCost(totalSent), totalSent, per1000: emailCostPer1000 }
     };
   }
   /** Which flows and campaigns sell: emails sent in the period and the Placed Order revenue attributed to their messages. days = 0 means all time. */
@@ -81,7 +88,7 @@ export class MarketingService {
     const row = (kind: 'flow' | 'campaign', item: { id: string; name: string; status: string }) => {
       const key = kind === 'flow' ? 'flowId' : 'campaignId';
       const s = sends.find(x => x[key] === item.id), v = sales.find(x => x[key] === item.id);
-      return { kind, id: item.id, name: item.name, status: item.status, sent: s?._count._all ?? 0, opened: s?._count.openedAt ?? 0, clicked: s?._count.clickedAt ?? 0, unsubscribed: s?._count.unsubscribedAt ?? 0, orders: Number(v?.orders ?? 0), revenue: Math.round(Number(v?.revenue ?? 0) * 100) / 100 };
+      return { kind, id: item.id, name: item.name, status: item.status, sent: s?._count._all ?? 0, cost: emailCost(s?._count._all ?? 0), opened: s?._count.openedAt ?? 0, clicked: s?._count.clickedAt ?? 0, unsubscribed: s?._count.unsubscribedAt ?? 0, orders: Number(v?.orders ?? 0), revenue: Math.round(Number(v?.revenue ?? 0) * 100) / 100 };
     };
     return { days: n, rows: [...flows.map(f => row('flow', f)), ...campaigns.map(c => row('campaign', c))].sort((a, b) => b.revenue - a.revenue || b.sent - a.sent) };
   }
